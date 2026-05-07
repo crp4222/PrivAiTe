@@ -1,0 +1,105 @@
+server:
+  host: "0.0.0.0"
+  port: 8400
+  workers: 1
+  log_level: "info"
+
+auth:
+  enabled: true
+
+providers:
+  - model_name: "ministral"
+    litellm_params:
+      model: "ollama/ministral-fast:latest"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ministral-3"
+    litellm_params:
+      model: "ollama/ministral-3:8b"
+      api_base: "http://localhost:11434"
+
+  - model_name: "gpt-4o"
+    litellm_params:
+      model: "openai/gpt-4o"
+      api_key: "${OPENAI_API_KEY}"
+
+  - model_name: "gpt-4o-mini"
+    litellm_params:
+      model: "openai/gpt-4o-mini"
+      api_key: "${OPENAI_API_KEY}"
+
+  - model_name: "kimi-k2"
+    litellm_params:
+      model: "ollama/kimi-k2.6:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "glm-4"
+    litellm_params:
+      model: "ollama/glm-4.6:cloud"
+      api_base: "http://localhost:11434"
+
+pii:
+  enabled: true
+  preset: "light"
+
+  detectors:
+    presidio:
+      enabled: true
+      languages: ["fr", "en"]
+      score_threshold: 0.4
+      entities:
+        - PERSON
+        - EMAIL_ADDRESS
+        - PHONE_NUMBER
+        - CREDIT_CARD
+        - IBAN_CODE
+        - IP_ADDRESS
+        - LOCATION
+        - DATE_TIME
+        - US_SSN
+        - UK_NHS
+        - URL
+
+    bert_ner:
+      enabled: false
+      model_name: "dslim/bert-base-NER"
+      device: "auto"
+      score_threshold: 0.5
+
+    mlmodel:
+      enabled: false
+      model_name: "openai/privacy-filter"
+      device: "auto"
+      torch_dtype: "float16"
+      score_threshold: 0.5
+
+  merge_strategy: "union"
+  overlap_resolution: "highest_score"
+  on_error: "block"
+
+  anonymization:
+    method: "fake_replacement"
+    faker_locale: ["fr_FR", "en_US"]
+    entity_overrides:
+      CREDIT_CARD:
+        method: "mask"
+        masking_char: "*"
+      SECRET:
+        method: "redact"
+
+  deanonymization:
+    enabled: true
+    fuzzy_matching: true
+    fuzzy_threshold: 0.85
+
+  passthrough:
+    system_messages: false
+    tool_calls: false
+
+logging:
+  format: "json"
+  level: "info"
+  redact_fields:
+    - "messages"
+    - "content"
+    - "prompt"
