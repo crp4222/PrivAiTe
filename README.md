@@ -85,13 +85,24 @@ On cloud providers (OpenAI, Anthropic) where latency is 1-5s, the overhead is ne
 
 The `onnx` preset catches passwords/secrets and account numbers that `light` misses. The `light` preset has better French date detection via custom regex.
 
+## Privacy model
+
+PrivAiTe performs **local pseudonymization**, not guaranteed anonymization. The re-identification mapping exists in memory for the duration of each request to enable de-anonymization of responses. The mapping is never persisted to disk and is destroyed after the response is returned.
+
+This means:
+- PII is never sent to the LLM provider in cleartext.
+- The proxy operator (you) can still re-identify data during a request's lifetime.
+- Once the request completes, the mapping is gone — but the original data still exists in the calling application (OpenWebUI, etc.).
+
+For compliance purposes (GDPR, HIPAA), treat this as **pseudonymization + transfer control**, not full anonymization. If your threat model requires that no one — including the proxy operator — can re-identify data, you should use `method: "redact"` (which destroys the original values) instead of `method: "placeholder"`.
+
 ## Known limitations
 
 - **Lowercase names** are detected via contextual patterns ("je m'appelle X", "my name is X", "appelez-moi X", "mon nom est X", "je suis X"). Without such intro patterns, lowercase names may be missed.
 - **French dates** ("15 mars 1987") are detected by a custom regex recognizer. Informal references ("il y a deux ans") are not.
 - **MISC entity mapping:** spaCy sometimes labels proper nouns as MISC. PrivAiTe maps MISC→PERSON for French, which can occasionally anonymize place names as persons. This does not leak PII.
-- **ONNX model language:** The openai/privacy-filter model is primarily English-trained. For French PII, Presidio's spaCy FR model is more reliable.
-- **Using all detectors together** is possible (set each to `enabled: true`) but adds latency without proportional coverage gain. The recommended presets are `light` (fast, good coverage) or `onnx` (slower, catches secrets/passwords).
+- **No policy gate:** all requests are forwarded after pseudonymization. There is no content classification or approval step before sending to the provider.
+- **No audit trail:** detected PII types and counts are not logged by default. Enable debug logging for development, but never log PII values in production.
 
 ## Quick start
 
