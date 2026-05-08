@@ -164,6 +164,14 @@ class PresidioDetector(PIIDetector):
         word_set = set(words)
         if word_set.issubset(FRENCH_COMMON_WORDS | TECHNICAL_WORDS):
             return True
-        if len(words) == 1 and len(words[0]) <= 2:
+        if len(words) == 1 and len(words[0]) <= 3:
+            return True
+        if _has_code_chars(text):
             return True
         return False
+
+
+def _has_code_chars(text: str) -> bool:
+    return bool(
+        set(text) & {"+", "#", "=", "{", "}", "[", "]", ";", "/", "\\", "@", "~"}
+    )

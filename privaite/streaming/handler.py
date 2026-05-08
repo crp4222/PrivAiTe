@@ -41,10 +41,15 @@ class StreamingHandler:
                 content = delta.get("content")
                 finish_reason = choice.get("finish_reason")
 
+                has_reasoning = (
+                    delta.get("reasoning_content") is not None
+                    or delta.get("reasoning") is not None
+                )
+
                 if content and deanon:
                     deanonymized = deanon.feed(content)
-                    if deanonymized:
-                        delta["content"] = deanonymized
+                    if deanonymized or has_reasoning:
+                        delta["content"] = deanonymized or ""
                         yield format_sse_event(json.dumps(chunk_dict))
                 elif content:
                     yield format_sse_event(json.dumps(chunk_dict))
