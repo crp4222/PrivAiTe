@@ -14,11 +14,13 @@ PrivAiTe sits between your client (OpenWebUI, custom app, etc.) and your LLM pro
 Client (OpenWebUI) → PrivAiTe Proxy → Anonymize PII → LLM Provider → De-anonymize → Client
 ```
 
-**Example:**
-- You type: *"Je m'appelle Jean Dupont, mon email est jean@acme.com"*
-- LLM receives: *"Je m'appelle \<PERSON_1\>, mon email est \<EMAIL_ADDRESS_1\>"*
-- LLM responds: *"Bonjour \<PERSON_1\> ! Votre email \<EMAIL_ADDRESS_1\> est noté."*
-- You see: *"Bonjour Jean Dupont ! Votre email jean@acme.com est noté."*
+**What the user sees** — real data, normal conversation:
+
+![User view](docs/opwui.png)
+
+**What the LLM provider receives** — only placeholders, no PII:
+
+![Provider logs](docs/openailogs.png)
 
 ## PII detection coverage
 
