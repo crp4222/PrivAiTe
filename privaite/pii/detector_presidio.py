@@ -164,6 +164,6 @@ class PresidioDetector(PIIDetector):
         word_set = set(words)
         if word_set.issubset(FRENCH_COMMON_WORDS | TECHNICAL_WORDS):
             return True
-        if len(words) == 1 and len(words[0]) <= 3:
+        if len(words) == 1 and len(words[0]) <= 2:
             return True
         return False
