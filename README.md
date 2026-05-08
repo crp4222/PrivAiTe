@@ -27,7 +27,7 @@ Multiple detection engines can run in parallel. Results are merged with configur
 | Type | Presidio (light) | ONNX (openai/privacy-filter) | Notes |
 |------|:---:|:---:|-------|
 | Person names (capitalized) | yes | yes | spaCy NER + ONNX NER |
-| Person names (lowercase) | partial | no | Only via contextual patterns ("je m'appelle X") |
+| Person names (lowercase) | yes | no | Via contextual patterns ("je m'appelle X", "my name is X", etc.) |
 | Email addresses | yes | yes | Regex |
 | Phone numbers | yes | yes | Regex + ML |
 | Credit cards | yes | yes | Regex + Luhn |
@@ -85,7 +85,7 @@ The `onnx` preset catches passwords/secrets and account numbers that `light` mis
 
 ## Known limitations
 
-- **Lowercase names** are only detected via contextual patterns ("je m'appelle X", "my name is X", "appelez-moi X"). Without these patterns, neither spaCy nor the ONNX model reliably detects them.
+- **Lowercase names** are detected via contextual patterns ("je m'appelle X", "my name is X", "appelez-moi X", "mon nom est X", "je suis X"). Without such intro patterns, lowercase names may be missed.
 - **French dates** ("15 mars 1987") are detected by a custom regex recognizer. Informal references ("il y a deux ans") are not.
 - **MISC entity mapping:** spaCy sometimes labels proper nouns as MISC. PrivAiTe maps MISC→PERSON for French, which can occasionally anonymize place names as persons. This does not leak PII.
 - **ONNX model language:** The openai/privacy-filter model is primarily English-trained. For French PII, Presidio's spaCy FR model is more reliable.
