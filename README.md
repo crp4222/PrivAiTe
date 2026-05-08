@@ -12,9 +12,9 @@ Client (OpenWebUI) → PrivAiTe Proxy → Anonymize PII → LLM Provider → De-
 
 **Example:**
 - You type: *"Je m'appelle Jean Dupont, mon email est jean@acme.com"*
-- LLM receives: *"Je m'appelle Samuel Lewis, mon email est tford@example.com"*
-- LLM responds: *"Bonjour Samuel ! Votre email tford@example.com est noté."*
-- You see: *"Bonjour Jean ! Votre email jean@acme.com est noté."*
+- LLM receives: *"Je m'appelle \<PERSON_1\>, mon email est \<EMAIL_ADDRESS_1\>"*
+- LLM responds: *"Bonjour \<PERSON_1\> ! Votre email \<EMAIL_ADDRESS_1\> est noté."*
+- You see: *"Bonjour Jean Dupont ! Votre email jean@acme.com est noté."*
 
 ## PII types detected
 
@@ -67,7 +67,7 @@ On cloud providers (OpenAI, Anthropic) where latency is 1-5s, the overhead is ne
 - Dates in French ("15 mars 1987") are detected, but informal date references ("il y a deux ans") are not.
 - The MISC→PERSON mapping in spaCy can occasionally flag proper nouns that are not people (e.g., country names detected as PERSON instead of LOCATION). This does not leak PII but may cause unnecessary anonymization of place names.
 - Passwords and secrets are not detected unless the `full` preset is used (OpenAI privacy-filter model supports `secret` entity type).
-- De-anonymization in streaming mode relies on exact string matching in a token buffer. If the LLM heavily paraphrases or abbreviates a fake name, the original may not be restored.
+- In `fake_replacement` mode, de-anonymization relies on exact string matching. If the LLM paraphrases or abbreviates a fake name, the original may not be restored. The `placeholder` mode (default) avoids this by using distinctive tokens like `<PERSON_1>` that LLMs reproduce exactly.
 
 ## Quick start
 
@@ -163,7 +163,7 @@ OpenAI-compatible endpoints:
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest tests/ -v   # 92 tests
+python -m pytest tests/ -v
 ```
 
 ## Architecture
@@ -177,7 +177,7 @@ privaite/
 │   ├── detector_presidio.py    spaCy NER + regex (FR/EN)
 │   ├── recognizer_context.py   "je m'appelle X" pattern matching
 │   ├── recognizer_fr_date.py   French date detection
-│   ├── anonymizer.py           Deterministic Faker-based replacements
+│   ├── anonymizer.py           Numbered placeholders or Faker-based replacements
 │   └── deanonymizer.py         Reverse mapping (exact + fuzzy)
 ├── providers/    LiteLLM-based multi-provider routing
 ├── streaming/    SSE streaming with token-level de-anonymization (trie buffer)

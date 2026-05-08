@@ -111,16 +111,15 @@ def test_multiple_entities_different_types():
     assert mapping.count == 2
 
 
-def test_person_subparts_in_mapping():
-    config = AnonymizationConfig(faker_locale=["en_US"])
+def test_placeholder_mode():
+    config = AnonymizationConfig(faker_locale=["en_US"], method="placeholder")
     anon = Anonymizer(config)
     mapping = PIIMapping()
 
     text = "Hello Jean Michel!"
     entities = [_entity("PERSON", "Jean Michel", 6, 17)]
-    anon.anonymize(text, entities, mapping)
+    result = anon.anonymize(text, entities, mapping)
 
-    fake = mapping.get_fake("Jean Michel")
-    fake_parts = fake.split()
-    assert len(fake_parts) >= 2
-    assert mapping.get_original(fake_parts[0]) == "Jean"
+    assert "<PERSON_1>" in result
+    assert "Jean Michel" not in result
+    assert mapping.get_original("<PERSON_1>") == "Jean Michel"

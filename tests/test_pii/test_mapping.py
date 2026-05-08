@@ -47,35 +47,21 @@ def test_same_original_same_fake():
     assert m.count == 1
 
 
-def test_person_subparts_two_words():
+def test_placeholder_mapping():
     m = PIIMapping()
-    m.add("jean michel", "Samuel Lewis", "PERSON")
+    m.add("jean michel", "<PERSON_1>", "PERSON")
+    m.add("jean@test.com", "<EMAIL_ADDRESS_1>", "EMAIL_ADDRESS")
 
-    assert m.get_original("Samuel") == "jean"
-    assert m.get_original("Lewis") == "michel"
-    assert m.get_original("Samuel Lewis") == "jean michel"
+    assert m.get_original("<PERSON_1>") == "jean michel"
+    assert m.get_original("<EMAIL_ADDRESS_1>") == "jean@test.com"
+    assert m.get_fake("jean michel") == "<PERSON_1>"
 
 
-def test_person_subparts_three_words():
+def test_multiple_persons():
     m = PIIMapping()
-    m.add("jean michel trognieux", "Samuel Lewis", "PERSON")
+    m.add("alice", "<PERSON_1>", "PERSON")
+    m.add("bob", "<PERSON_2>", "PERSON")
 
-    assert m.get_original("Samuel") == "jean"
-    assert m.get_original("Lewis") == "michel trognieux"
-
-
-def test_non_person_no_subparts():
-    m = PIIMapping()
-    m.add("Paris France", "London UK", "LOCATION")
-
-    assert m.get_original("London UK") == "Paris France"
-    assert m.get_original("London") is None
-
-
-def test_subparts_dont_overwrite():
-    m = PIIMapping()
-    m.add("Jean Dupont", "Alice Martin", "PERSON")
-    m.add("Jean Lefebvre", "Bob Martin", "PERSON")
-
-    assert m.get_original("Alice") == "Jean"
-    assert m.get_original("Martin") == "Dupont"
+    assert m.get_original("<PERSON_1>") == "alice"
+    assert m.get_original("<PERSON_2>") == "bob"
+    assert m.count == 2

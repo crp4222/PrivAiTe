@@ -14,29 +14,10 @@ class PIIMapping:
         self._original_to_fake[original] = fake
         self._fake_to_original[fake] = original
         self._entity_types[original] = entity_type
+        self._type_counters[entity_type] = self._type_counters.get(entity_type, 0) + 1
 
-        count = self._type_counters.get(entity_type, 0) + 1
-        self._type_counters[entity_type] = count
-
-        if entity_type == "PERSON":
-            self._add_name_parts(original, fake)
-
-    def _add_name_parts(self, original: str, fake: str) -> None:
-        orig_parts = original.split()
-        fake_parts = fake.split()
-        if len(fake_parts) < 2 and len(orig_parts) < 2:
-            return
-        if len(fake_parts) >= 1 and len(orig_parts) >= 1:
-            if fake_parts[0] not in self._fake_to_original:
-                self._fake_to_original[fake_parts[0]] = orig_parts[0]
-        if len(fake_parts) >= 2 and len(orig_parts) >= 2:
-            fake_rest = " ".join(fake_parts[1:])
-            orig_rest = " ".join(orig_parts[1:])
-            if fake_rest not in self._fake_to_original:
-                self._fake_to_original[fake_rest] = orig_rest
-            for fp, op in zip(fake_parts[1:], orig_parts[1:]):
-                if fp not in self._fake_to_original:
-                    self._fake_to_original[fp] = op
+    def next_index(self, entity_type: str) -> int:
+        return self._type_counters.get(entity_type, 0) + 1
 
     def get_fake(self, original: str) -> str | None:
         return self._original_to_fake.get(original)

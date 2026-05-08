@@ -78,7 +78,7 @@ pii:
   on_error: "block"
 
   anonymization:
-    method: "fake_replacement"
+    method: "placeholder"
     faker_locale: ["fr_FR", "en_US"]
     entity_overrides:
       CREDIT_CARD:

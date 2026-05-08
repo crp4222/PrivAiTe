@@ -12,6 +12,7 @@ class FakerReplacementGenerator:
     def __init__(self, config: AnonymizationConfig) -> None:
         self.config = config
         self.faker = Faker(config.faker_locale)
+        self._counters: dict[str, int] = {}
 
     def generate(self, entity_type: str, original: str) -> str:
         override = self.config.entity_overrides.get(entity_type)
@@ -24,12 +25,19 @@ class FakerReplacementGenerator:
         if method == "mask":
             return "*" * len(original)
         if method == "placeholder":
-            return f"<{entity_type}>"
+            return self._next_placeholder(entity_type)
 
         return self._generate_fake(entity_type, original)
 
     def generate_variant(self, entity_type: str, original: str, variant: int) -> str:
+        if self.config.method == "placeholder":
+            return self._next_placeholder(entity_type)
         return self._generate_fake(entity_type, original, salt=variant)
+
+    def _next_placeholder(self, entity_type: str) -> str:
+        n = self._counters.get(entity_type, 0) + 1
+        self._counters[entity_type] = n
+        return f"<{entity_type}_{n}>"
 
     def _seeded_faker(self, original: str, salt: int = 0) -> Faker:
         raw = original.lower().strip() + str(salt)

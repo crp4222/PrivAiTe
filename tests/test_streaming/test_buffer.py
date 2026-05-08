@@ -81,32 +81,36 @@ def test_interleaved_text_and_fakes():
     assert output == "Hello Jean Eude, how are you?"
 
 
-def test_subpart_first_name_only():
-    deanon = _make_deanon(("jean michel", "Samuel Lewis", "PERSON"))
+def test_placeholder_in_one_token():
+    deanon = _make_deanon(("jean michel", "<PERSON_1>", "PERSON"))
 
-    output = deanon.feed("Bonjour Samuel !")
+    output = deanon.feed("Bonjour <PERSON_1> !")
     output += deanon.flush()
-    assert "jean" in output
-    assert "Samuel" not in output
+    assert "jean michel" in output
+    assert "<PERSON_1>" not in output
 
 
-def test_subpart_last_name_only():
-    deanon = _make_deanon(("jean michel", "Samuel Lewis", "PERSON"))
-
-    output = deanon.feed("M. Lewis est là")
-    output += deanon.flush()
-    assert "michel" in output
-    assert "Lewis" not in output
-
-
-def test_subpart_streaming_split():
-    deanon = _make_deanon(("jean michel", "Samuel Lewis", "PERSON"))
+def test_placeholder_split_across_tokens():
+    deanon = _make_deanon(("jean michel", "<PERSON_1>", "PERSON"))
 
     out = ""
-    out += deanon.feed("Bonjour ")
-    out += deanon.feed("Sam")
-    out += deanon.feed("uel")
-    out += deanon.feed(" !")
+    out += deanon.feed("Bonjour <PER")
+    out += deanon.feed("SON_1")
+    out += deanon.feed("> !")
+    out += deanon.flush()
+    assert "jean michel" in out
+    assert "<PERSON_1>" not in out
+
+
+def test_multiple_placeholders():
+    deanon = _make_deanon(
+        ("jean", "<PERSON_1>", "PERSON"),
+        ("06123", "<PHONE_NUMBER_1>", "PHONE_NUMBER"),
+    )
+
+    out = deanon.feed("<PERSON_1> a le numero <PHONE_NUMBER_1>.")
     out += deanon.flush()
     assert "jean" in out
-    assert "Samuel" not in out
+    assert "06123" in out
+    assert "<PERSON_1>" not in out
+    assert "<PHONE_NUMBER_1>" not in out

@@ -23,19 +23,46 @@ class Anonymizer:
         sorted_entities = sorted(entities, key=lambda e: e.start, reverse=True)
 
         for entity in sorted_entities:
-            original = text[entity.start:entity.end]
+            original = text[entity.start : entity.end]
 
             existing_fake = mapping.get_fake(original)
             if existing_fake:
                 fake = existing_fake
             else:
-                fake = self.generator.generate(entity.entity_type, original)
-                retries = 0
-                while (fake == original or mapping.get_original(fake) is not None) and retries < 10:
-                    fake = self.generator.generate_variant(entity.entity_type, original, retries)
-                    retries += 1
+                fake = self._make_placeholder(entity.entity_type, original, mapping)
                 mapping.add(original, fake, entity.entity_type)
 
-            text = text[:entity.start] + fake + text[entity.end:]
+            text = text[: entity.start] + fake + text[entity.end :]
 
         return text
+
+    def _make_placeholder(
+        self, entity_type: str, original: str, mapping: PIIMapping
+    ) -> str:
+        override = self.config.entity_overrides.get(entity_type)
+        if override:
+            if override.method == "mask":
+                return override.masking_char * len(original)
+            if override.method == "redact":
+                return "[REDACTED]"
+
+        method = self.config.method
+        if method == "fake_replacement":
+            fake = self.generator.generate(entity_type, original)
+            retries = 0
+            while (
+                fake == original or mapping.get_original(fake) is not None
+            ) and retries < 10:
+                fake = self.generator.generate_variant(
+                    entity_type, original, retries
+                )
+                retries += 1
+            return fake
+
+        if method == "mask":
+            return "*" * len(original)
+        if method == "redact":
+            return f"[{entity_type}]"
+
+        idx = mapping.next_index(entity_type)
+        return f"<{entity_type}_{idx}>"
