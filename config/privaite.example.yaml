@@ -73,6 +73,14 @@ pii:
       torch_dtype: "float16"
       score_threshold: 0.5
 
+    onnx:
+      enabled: false
+      model_name: "openai/privacy-filter"
+      onnx_variant: "q4f16"        # q4f16 (~810MB), fp16, q4, quantized
+      device: "auto"               # auto, cpu, cuda, coreml
+      score_threshold: 0.5
+      max_length: 128000
+
   merge_strategy: "union"
   overlap_resolution: "highest_score"
   on_error: "block"

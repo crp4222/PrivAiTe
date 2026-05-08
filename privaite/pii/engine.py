@@ -51,6 +51,14 @@ class PIIEngine:
             self.detectors.append(detector)
             logger.info("ML model detector initialized")
 
+        if self.config.detectors.onnx.enabled:
+            from privaite.pii.detector_onnx import OnnxPrivacyFilterDetector
+
+            detector = OnnxPrivacyFilterDetector(self.config.detectors.onnx)
+            await detector.initialize()
+            self.detectors.append(detector)
+            logger.info("ONNX privacy-filter detector initialized")
+
         self._ready = True
         logger.info("PII engine ready with %d detector(s)", len(self.detectors))
 

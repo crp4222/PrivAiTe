@@ -53,6 +53,26 @@ class MLModelDetectorConfig(BaseModel):
     })
 
 
+class OnnxDetectorConfig(BaseModel):
+    enabled: bool = False
+    model_name: str = "openai/privacy-filter"
+    onnx_variant: str = "q4f16"
+    device: str = "auto"
+    score_threshold: float = 0.5
+    max_length: int = 128000
+    cache_dir: str | None = None
+    label_mapping: dict[str, str] = Field(default_factory=lambda: {
+        "private_person": "PERSON",
+        "private_email": "EMAIL_ADDRESS",
+        "private_phone": "PHONE_NUMBER",
+        "private_address": "LOCATION",
+        "private_date": "DATE_TIME",
+        "private_url": "URL",
+        "account_number": "FINANCIAL",
+        "secret": "SECRET",
+    })
+
+
 class BertNERDetectorConfig(BaseModel):
     enabled: bool = False
     model_name: str = "dslim/bert-base-NER"
@@ -68,6 +88,7 @@ class BertNERDetectorConfig(BaseModel):
 class DetectorsConfig(BaseModel):
     presidio: PresidioDetectorConfig = Field(default_factory=PresidioDetectorConfig)
     mlmodel: MLModelDetectorConfig = Field(default_factory=MLModelDetectorConfig)
+    onnx: OnnxDetectorConfig = Field(default_factory=OnnxDetectorConfig)
     bert_ner: BertNERDetectorConfig = Field(default_factory=BertNERDetectorConfig)
 
 
@@ -112,18 +133,26 @@ class PIIConfig(BaseModel):
             self.detectors.presidio.enabled = True
             self.detectors.bert_ner.enabled = False
             self.detectors.mlmodel.enabled = False
+            self.detectors.onnx.enabled = False
         elif self.preset == "standard":
             self.detectors.presidio.enabled = True
             self.detectors.bert_ner.enabled = True
             self.detectors.mlmodel.enabled = False
+            self.detectors.onnx.enabled = False
         elif self.preset == "full":
             self.detectors.presidio.enabled = True
             self.detectors.bert_ner.enabled = True
             self.detectors.mlmodel.enabled = True
+            self.detectors.onnx.enabled = False
+        elif self.preset == "onnx":
+            self.detectors.presidio.enabled = True
+            self.detectors.bert_ner.enabled = False
+            self.detectors.mlmodel.enabled = False
+            self.detectors.onnx.enabled = True
         else:
             raise ValueError(
                 f"Unknown PII preset '{self.preset}'. "
-                "Valid presets: light, standard, full"
+                "Valid presets: light, standard, full, onnx"
             )
 
 
