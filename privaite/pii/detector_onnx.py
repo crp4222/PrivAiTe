@@ -120,7 +120,8 @@ def download_onnx_model(
         if fn.endswith(".onnx"):
             local_path = Path(p)
 
-    assert local_path is not None
+    if local_path is None:
+        raise FileNotFoundError(f"ONNX model file not found for variant '{variant}'")
     logger.info("ONNX model ready at %s", local_path)
     return local_path
 
