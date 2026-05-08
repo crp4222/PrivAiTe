@@ -16,58 +16,76 @@ Client (OpenWebUI) → PrivAiTe Proxy → Anonymize PII → LLM Provider → De-
 - LLM responds: *"Bonjour \<PERSON_1\> ! Votre email \<EMAIL_ADDRESS_1\> est noté."*
 - You see: *"Bonjour Jean Dupont ! Votre email jean@acme.com est noté."*
 
-## PII types detected
+## PII detection coverage
 
-| Type | Method | Example |
-|------|--------|---------|
-| Person names | spaCy NER + contextual patterns | Jean-Pierre Dupont |
-| Email addresses | Regex | jean@acme.com |
-| Phone numbers | Regex | +33 6 12 34 56 78 |
-| Credit cards | Regex + Luhn | 4111 1111 1111 1111 |
-| IBAN | Regex | FR76 3000 6000 ... |
-| IP addresses | Regex | 192.168.1.42 |
-| SSN | Regex | 2 87 03 69 123 456 78 |
-| Locations | spaCy NER | Paris, Lyon |
-| French dates | Custom regex | 15 mars 1987 |
-| Lowercase names | Context patterns | "je m'appelle dénis navarros" |
+Multiple detection engines can run in parallel. Results are merged with configurable overlap resolution.
+
+| Type | Presidio (light) | ONNX (openai/privacy-filter) | Notes |
+|------|:---:|:---:|-------|
+| Person names (capitalized) | yes | yes | spaCy NER + ONNX NER |
+| Person names (lowercase) | partial | no | Only via contextual patterns ("je m'appelle X") |
+| Email addresses | yes | yes | Regex |
+| Phone numbers | yes | yes | Regex + ML |
+| Credit cards | yes | yes | Regex + Luhn |
+| IBAN | yes | no | Regex |
+| IP addresses | yes | yes | Regex (Presidio) / ML as URL (ONNX) |
+| US SSN | yes | no | Regex |
+| Locations | yes | yes | spaCy NER + ONNX NER |
+| French dates | yes | yes | Custom regex + ONNX NER |
+| URLs | yes | yes | Regex + ML |
+| Passwords / secrets | no | yes | Only ONNX detects `secret` type |
+| Account numbers | no | yes | Only ONNX detects `account_number` type |
+
+**Language support:** Presidio uses spaCy models (FR + EN). The ONNX model (openai/privacy-filter) was trained primarily on English and performs best on English text. Detection quality degrades on non-English text. For French, Presidio's spaCy FR model + contextual patterns provide better coverage than ONNX alone.
 
 ## Performance
 
-Benchmarked on Apple M1 Pro, preset `light` (Presidio only), 20 runs per input size.
+Benchmarked on Apple M1 Pro (16GB), 20 runs per input. Cached models (not first download).
 
-### PII processing latency
+### Boot time
 
-| Input | Chars | PII entities | Avg | P50 | P95 |
-|-------|------:|-------------:|----:|----:|----:|
-| Short (name + email) | 55 | 2 | 17ms | 10ms | 11ms |
-| Medium (8 mixed types) | 250 | 8 | 38ms | 37ms | 39ms |
-| Long (repeated, 40 PII) | 1250 | 8 | 116ms | 116ms | 118ms |
+| Preset | Detectors | Boot | Extra deps |
+|--------|-----------|------|------------|
+| `light` | Presidio (spaCy + regex + context patterns) | ~2s | spacy |
+| `standard` | + BERT NER (dslim/bert-base-NER, 110M) | ~10s | spacy, torch |
+| `onnx` | Presidio + OpenAI privacy-filter (Q4F16, 809MB) | ~7s | spacy, onnxruntime |
+| `full` | Presidio + BERT + privacy-filter (transformers) | 30s+ | spacy, torch |
 
-### Proxy overhead (vs direct Ollama)
+### PII processing latency per request
+
+| Preset | Short text (50 chars, 2 PII) | Medium text (250 chars, 8 PII) | Notes |
+|--------|---:|---:|-------|
+| `light` | ~15ms | ~40ms | Fastest. Good for local LLMs. |
+| `onnx` | ~210ms | ~350ms | Adds ~250ms for ML inference. |
+
+### Proxy overhead (vs direct Ollama, ministral 8.9B local)
 
 | Path | Avg latency |
 |------|------------|
 | Ollama direct | ~400ms |
-| Proxy + PII anonymization | ~900ms |
-| **Overhead** | **~500ms** |
+| Proxy + PII (light) | ~900ms |
+| Proxy + PII (onnx) | ~1150ms |
 
 On cloud providers (OpenAI, Anthropic) where latency is 1-5s, the overhead is negligible.
 
-### Boot time
+### Detection coverage comparison (tested)
 
-| Preset | Detectors | Boot time |
-|--------|-----------|-----------|
-| `light` | Presidio (spaCy + regex) | ~1.5s |
-| `standard` | + BERT NER (110M params) | ~10s |
-| `full` | + OpenAI privacy-filter (1.5B params) | 30s+ |
+| Test case | light | onnx |
+|-----------|:-----:|:----:|
+| FR: 8 mixed PII types (name, email, phone, card, IBAN, IP, date, location) | 8/8 | 8/8 |
+| EN: name, email, phone, SSN, card, location, password | 5/7 | 7/7 |
+| FR lowercase: "je m'appelle dénis navarros" | 2/2 | 2/2 |
+| Mixed FR/EN: names, emails, phones | 4/5 | 5/5 |
 
-### Known limitations
+The `onnx` preset catches passwords/secrets and account numbers that `light` misses. The `light` preset has better French date detection via custom regex.
 
-- Names written entirely in lowercase are only detected via contextual patterns ("je m'appelle X", "my name is X"). Without such patterns, spaCy NER misses them.
-- Dates in French ("15 mars 1987") are detected, but informal date references ("il y a deux ans") are not.
-- The MISC→PERSON mapping in spaCy can occasionally flag proper nouns that are not people (e.g., country names detected as PERSON instead of LOCATION). This does not leak PII but may cause unnecessary anonymization of place names.
-- Passwords and secrets are not detected unless the `full` preset is used (OpenAI privacy-filter model supports `secret` entity type).
-- In `fake_replacement` mode, de-anonymization relies on exact string matching. If the LLM paraphrases or abbreviates a fake name, the original may not be restored. The `placeholder` mode (default) avoids this by using distinctive tokens like `<PERSON_1>` that LLMs reproduce exactly.
+## Known limitations
+
+- **Lowercase names** are only detected via contextual patterns ("je m'appelle X", "my name is X", "appelez-moi X"). Without these patterns, neither spaCy nor the ONNX model reliably detects them.
+- **French dates** ("15 mars 1987") are detected by a custom regex recognizer. Informal references ("il y a deux ans") are not.
+- **MISC entity mapping:** spaCy sometimes labels proper nouns as MISC. PrivAiTe maps MISC→PERSON for French, which can occasionally anonymize place names as persons. This does not leak PII.
+- **ONNX model language:** The openai/privacy-filter model is primarily English-trained. For French PII, Presidio's spaCy FR model is more reliable.
+- **Using all detectors together** is possible (set each to `enabled: true`) but adds latency without proportional coverage gain. The recommended presets are `light` (fast, good coverage) or `onnx` (slower, catches secrets/passwords).
 
 ## Quick start
 
@@ -79,7 +97,12 @@ python -m spacy download en_core_web_lg
 python -m spacy download fr_core_news_md
 ```
 
-For ML-based detectors (standard/full presets):
+For the ONNX detector:
+```bash
+pip install onnxruntime
+```
+
+For the BERT/transformers detectors (standard/full presets):
 ```bash
 pip install -e ".[ml]"
 ```
@@ -91,7 +114,7 @@ cp .env.example .env
 cp config/privaite.example.yaml config/privaite.yaml
 ```
 
-Edit `.env` with your API keys and `config/privaite.yaml` with your providers.
+Edit `.env` with your API keys and `config/privaite.yaml` with your providers and PII preset.
 
 ### 3. Run
 
@@ -120,11 +143,29 @@ docker compose up -d
 
 ### PII presets
 
-| Preset | Detectors | Use case |
+```yaml
+pii:
+  preset: "light"    # Recommended for most users
+  # preset: "onnx"   # Adds password/secret detection
+```
+
+| Preset | Detectors | Best for |
 |--------|-----------|----------|
-| `light` | Presidio (spaCy NER + regex) | Fast, works everywhere |
+| `light` | Presidio (spaCy NER + regex + context patterns) | Fast, low resource, good coverage |
 | `standard` | + BERT NER (dslim/bert-base-NER) | Better name detection |
-| `full` | + OpenAI privacy-filter (1.5B) | Best coverage, needs GPU |
+| `onnx` | Presidio + OpenAI privacy-filter (ONNX Q4F16) | Secret/password detection, no PyTorch |
+| `full` | Presidio + BERT + privacy-filter (transformers) | Maximum coverage, heavy |
+
+### Anonymization modes
+
+```yaml
+pii:
+  anonymization:
+    method: "placeholder"        # <PERSON_1>, <EMAIL_ADDRESS_1> (recommended)
+    # method: "fake_replacement" # Realistic fakes via Faker
+    # method: "redact"           # [PERSON], [EMAIL_ADDRESS]
+    # method: "mask"             # ********
+```
 
 ### Provider examples
 
@@ -175,6 +216,7 @@ privaite/
 ├── middleware/    Auth (Bearer token, constant-time comparison)
 ├── pii/          PII detection, anonymization, de-anonymization
 │   ├── detector_presidio.py    spaCy NER + regex (FR/EN)
+│   ├── detector_onnx.py        OpenAI privacy-filter via ONNX Runtime
 │   ├── recognizer_context.py   "je m'appelle X" pattern matching
 │   ├── recognizer_fr_date.py   French date detection
 │   ├── anonymizer.py           Numbered placeholders or Faker-based replacements
