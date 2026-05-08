@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 import yaml
+from dotenv import load_dotenv
 
 from privaite.config.schema import PrivAiTeConfig
 
@@ -32,6 +33,8 @@ def _interpolate_env_vars(obj: object) -> object:
 
 
 def load_config(path: str | Path | None = None) -> PrivAiTeConfig:
+    load_dotenv(override=True)
+
     if path is None:
         path = os.environ.get("PRIVAITE_CONFIG_PATH", "config/privaite.yaml")
 
