@@ -1,5 +1,9 @@
 # PrivAiTe
 
+[![CI](https://github.com/crp4222/PrivAiTe/actions/workflows/ci.yml/badge.svg)](https://github.com/crp4222/PrivAiTe/actions)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-BSD--3--Clause-green.svg)](LICENSE)
+
 Privacy-first LLM proxy with transparent PII anonymization. Drop-in replacement for any OpenAI-compatible API.
 
 PrivAiTe sits between your client (OpenWebUI, custom app, etc.) and your LLM providers (OpenAI, Anthropic, Ollama...). It automatically detects and anonymizes personal data before it reaches the LLM, then de-anonymizes the response before returning it to you. All processing is 100% local.
