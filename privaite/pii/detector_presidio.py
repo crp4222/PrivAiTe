@@ -14,27 +14,6 @@ REGEX_ENTITY_TYPES = {
     "IP_ADDRESS", "URL", "US_SSN", "UK_NHS", "CRYPTO",
 }
 
-NER_REMAP = {
-    "MISC": "PERSON",
-}
-
-FRENCH_COMMON_WORDS = {
-    "le", "la", "les", "de", "du", "des", "un", "une", "mon", "ma", "mes",
-    "ton", "ta", "tes", "son", "sa", "ses", "ce", "cette", "ces",
-    "est", "et", "ou", "je", "tu", "il", "elle", "nous", "vous", "ils",
-    "elles", "on", "ne", "pas", "que", "qui", "en", "au", "aux",
-    "bonjour", "merci", "oui", "non", "monsieur", "madame",
-}
-
-TECHNICAL_WORDS = {
-    "iban", "carte", "email", "numéro", "sécurité", "sociale", "adresse",
-    "téléphone", "résumer", "tableau", "ip", "url", "http", "https", "www",
-    "mot", "passe", "wifi", "code", "postal", "bancaire", "fiscal",
-    "python", "java", "javascript", "typescript", "react", "rust", "golang",
-    "linux", "macos", "docker", "kubernetes", "api", "sql", "html", "css",
-    "json", "xml", "github", "gitlab", "npm", "pip",
-}
-
 
 class PresidioDetector(PIIDetector):
     def __init__(self, config: PresidioDetectorConfig, custom_patterns=None) -> None:
@@ -81,29 +60,16 @@ class PresidioDetector(PIIDetector):
             supported_languages=self.config.languages,
         )
 
-        from presidio_analyzer.predefined_recognizers import SpacyRecognizer
-
-        existing_fr = [
-            r for r in self._analyzer.registry.recognizers
-            if isinstance(r, SpacyRecognizer) and r.supported_language == "fr"
-        ]
-        for r in existing_fr:
-            self._analyzer.registry.remove_recognizer(r)
-
-        custom_fr = SpacyRecognizer(
-            supported_language="fr",
-            supported_entities=[
-                "PERSON", "LOCATION", "DATE_TIME", "NRP", "ORGANIZATION", "MISC",
-            ],
-        )
-        self._analyzer.registry.add_recognizer(custom_fr)
-
         from privaite.pii.recognizer_context import ContextualNameRecognizer
         from privaite.pii.recognizer_fr_date import FrenchDateRecognizer
 
         for lang in self.config.languages:
-            self._analyzer.registry.add_recognizer(ContextualNameRecognizer(supported_language=lang))
-            self._analyzer.registry.add_recognizer(FrenchDateRecognizer(supported_language=lang))
+            self._analyzer.registry.add_recognizer(
+                ContextualNameRecognizer(supported_language=lang)
+            )
+            self._analyzer.registry.add_recognizer(
+                FrenchDateRecognizer(supported_language=lang)
+            )
 
         if self._custom_patterns:
             from privaite.pii.recognizer_custom import CustomPatternRecognizer
@@ -129,41 +95,35 @@ class PresidioDetector(PIIDetector):
         primary_lang = self.config.languages[0] if self.config.languages else "fr"
 
         allowed = set(self.config.entities) if self.config.entities else None
-        fetch_entities = list(allowed | set(NER_REMAP.keys())) if allowed else None
 
         for lang in self.config.languages:
             results = await asyncio.to_thread(
                 self._analyzer.analyze,
                 text=text,
                 language=lang,
-                entities=fetch_entities,
+                entities=list(allowed) if allowed else None,
                 score_threshold=self.config.score_threshold,
             )
             for result in results:
-                if lang != primary_lang and result.entity_type not in REGEX_ENTITY_TYPES:
+                if allowed and result.entity_type not in allowed:
                     continue
 
-                entity_type = result.entity_type
-                if entity_type in NER_REMAP:
-                    entity_type = NER_REMAP[entity_type]
-
-                if allowed and entity_type not in allowed:
+                is_spacy_ner = result.recognition_metadata.get(
+                    "recognizer_name", ""
+                ) == "SpacyRecognizer"
+                if is_spacy_ner and lang != primary_lang:
                     continue
 
-                span_text = text[result.start : result.end].strip().lower()
-                if entity_type in ("PERSON", "LOCATION") and self._is_noise(span_text):
-                    continue
-
-                span_key = (result.start, result.end, entity_type)
+                span_key = (result.start, result.end, result.entity_type)
                 if span_key not in seen_spans:
                     seen_spans.add(span_key)
-                    all_results.append((result, entity_type))
+                    all_results.append(result)
 
         pii_entities = []
-        for result, entity_type in all_results:
+        for result in all_results:
             pii_entities.append(
                 PIIEntity(
-                    entity_type=entity_type,
+                    entity_type=result.entity_type,
                     text=text[result.start : result.end],
                     start=result.start,
                     end=result.end,
@@ -173,20 +133,3 @@ class PresidioDetector(PIIDetector):
             )
 
         return pii_entities
-
-    def _is_noise(self, text: str) -> bool:
-        words = text.lower().split()
-        word_set = set(words)
-        if word_set.issubset(FRENCH_COMMON_WORDS | TECHNICAL_WORDS):
-            return True
-        if len(words) == 1 and len(words[0]) <= 3:
-            return True
-        if _has_code_chars(text):
-            return True
-        return False
-
-
-def _has_code_chars(text: str) -> bool:
-    return bool(
-        set(text) & {"+", "#", "=", "{", "}", "[", "]", ";", "/", "\\", "@", "~"}
-    )
