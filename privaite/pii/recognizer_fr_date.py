@@ -10,11 +10,18 @@ MONTHS_FR = (
     "juillet|août|aout|septembre|octobre|novembre|décembre|decembre"
 )
 
+MONTHS_DE = (
+    "Januar|Februar|März|Maerz|April|Mai|Juni|"
+    "Juli|August|September|Oktober|November|Dezember"
+)
+
+MONTHS_ALL = f"{MONTHS_FR}|{MONTHS_DE}"
+
 PATTERNS = [
-    rf"(?P<date>\d{{1,2}}\s+(?:{MONTHS_FR})\s+\d{{4}})",
-    rf"(?P<date>(?:{MONTHS_FR})\s+\d{{4}})",
-    rf"(?P<date>\d{{1,2}}\s+(?:{MONTHS_FR}))",
-    r"(?P<date>(?:née?|born)\s+(?:le\s+)?\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4})",
+    rf"(?P<date>\d{{1,2}}\.?\s+(?:{MONTHS_ALL})\s+\d{{4}})",
+    rf"(?P<date>(?:{MONTHS_ALL})\s+\d{{4}})",
+    rf"(?P<date>\d{{1,2}}\.?\s+(?:{MONTHS_ALL}))",
+    r"(?P<date>(?:née?|born|geboren)\s+(?:le\s+|am\s+)?\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4})",
 ]
 
 COMPILED = [re.compile(p, re.IGNORECASE | re.UNICODE) for p in PATTERNS]

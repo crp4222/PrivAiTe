@@ -10,8 +10,9 @@ _NAME_GROUP = r"(?P<name>[A-ZÀ-Ÿa-zà-ÿ][\w'-]*(?:\s+[A-ZÀ-Ÿa-zà-ÿ][\w'-]
 _INTRO = (
     r"je\s+m['']appelle|my\s+name\s+is|i['']m|je\s+suis"
     r"|mon\s+nom\s+est|je\s+me\s+nomme|je\s+me\s+pr[ée]nomme"
+    r"|ich\s+hei[ßs]e|ich\s+bin|mein\s+Name\s+ist"
 )
-_ALIAS = r"appelez[- ]moi|call\s+me|on\s+m['']appelle"
+_ALIAS = r"appelez[- ]moi|call\s+me|on\s+m['']appelle|nennt?\s+mich"
 
 PATTERNS = [
     rf"(?:{_INTRO})\s+{_NAME_GROUP}",
@@ -24,6 +25,8 @@ STOP_WORDS = {
     "sa", "ses", "ce", "cette", "ces", "au", "aux", "en", "dans",
     "sur", "pour", "par", "avec", "sans", "sous", "vers", "chez",
     "and", "or", "but", "the", "a", "an", "my", "his", "her", "your",
+    "und", "oder", "aber", "ich", "mein", "meine", "der", "die", "das",
+    "ein", "eine", "ist", "bin", "wir", "sie", "er", "es",
 }
 
 COMPILED = [re.compile(p, re.IGNORECASE | re.UNICODE) for p in PATTERNS]

@@ -37,8 +37,9 @@ TECHNICAL_WORDS = {
 
 
 class PresidioDetector(PIIDetector):
-    def __init__(self, config: PresidioDetectorConfig) -> None:
+    def __init__(self, config: PresidioDetectorConfig, custom_patterns=None) -> None:
         self.config = config
+        self._custom_patterns = custom_patterns or []
         self._analyzer = None
 
     @property
@@ -52,6 +53,11 @@ class PresidioDetector(PIIDetector):
         lang_model_map = {
             "en": "en_core_web_lg",
             "fr": "fr_core_news_md",
+            "de": "de_core_news_md",
+            "es": "es_core_news_md",
+            "it": "it_core_news_md",
+            "pt": "pt_core_news_md",
+            "nl": "nl_core_news_md",
         }
 
         nlp_config = {
@@ -98,6 +104,15 @@ class PresidioDetector(PIIDetector):
         for lang in self.config.languages:
             self._analyzer.registry.add_recognizer(ContextualNameRecognizer(supported_language=lang))
             self._analyzer.registry.add_recognizer(FrenchDateRecognizer(supported_language=lang))
+
+        if self._custom_patterns:
+            from privaite.pii.recognizer_custom import CustomPatternRecognizer
+
+            for lang in self.config.languages:
+                self._analyzer.registry.add_recognizer(
+                    CustomPatternRecognizer(self._custom_patterns, supported_language=lang)
+                )
+            logger.info("Registered %d custom patterns", len(self._custom_patterns))
 
         logger.info(
             "Presidio analyzer initialized with languages: %s",

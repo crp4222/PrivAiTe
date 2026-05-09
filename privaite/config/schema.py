@@ -110,6 +110,12 @@ class DeanonymizationConfig(BaseModel):
     fuzzy_threshold: float = 0.85
 
 
+class CustomPatternConfig(BaseModel):
+    pattern: str
+    entity_type: str
+    score: float = 0.9
+
+
 class PassthroughConfig(BaseModel):
     system_messages: bool = False
     tool_calls: bool = False
@@ -119,6 +125,7 @@ class PIIConfig(BaseModel):
     enabled: bool = True
     preset: str | None = None
     detectors: DetectorsConfig = Field(default_factory=DetectorsConfig)
+    custom_patterns: list[CustomPatternConfig] = Field(default_factory=list)
     merge_strategy: str = "union"
     overlap_resolution: str = "highest_score"
     on_error: str = "block"

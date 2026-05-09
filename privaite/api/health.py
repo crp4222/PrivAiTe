@@ -27,3 +27,22 @@ async def ready(request: Request) -> dict:
 
     all_ready = all(checks.values())
     return {"ready": all_ready, "checks": checks}
+
+
+@router.get("/stats")
+async def stats(request: Request) -> dict:
+    tracker = getattr(request.app.state, "pii_tracker", None)
+    if tracker is None:
+        return {"enabled": False}
+
+    sessions = {}
+    with tracker._lock:
+        for sid, s in tracker._sessions.items():
+            label = sid[:16] + "..." if len(sid) > 16 else sid
+            sessions[label] = {
+                "requests": s.request_count,
+                "total_pii": s.total_pii,
+                "by_type": dict(s.pii_count),
+            }
+
+    return {"enabled": True, "sessions": sessions}

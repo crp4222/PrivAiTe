@@ -39,6 +39,18 @@ async def chat_completions(
     if config.pii.enabled and pii_engine is not None:
         try:
             messages, mapping = await pii_engine.process_request(messages)
+            tracker = getattr(request.app.state, "pii_tracker", None)
+            if tracker and mapping and not mapping.is_empty:
+                session_id = request.headers.get(
+                    "x-session-id",
+                    request.headers.get("authorization", "anonymous"),
+                )
+                counts = {}
+                for orig in mapping._original_to_fake:
+                    t = mapping.get_entity_type(orig)
+                    if t:
+                        counts[t] = counts.get(t, 0) + 1
+                tracker.record(session_id, counts)
         except Exception:
             logger.exception("PII processing failed")
             if config.pii.on_error == "block":

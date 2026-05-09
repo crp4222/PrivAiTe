@@ -26,13 +26,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     if config.pii.enabled:
         from privaite.pii.engine import PIIEngine
+        from privaite.pii.tracker import PIITracker
 
         engine = PIIEngine(config.pii)
         await engine.initialize()
         app.state.pii_engine = engine
+        app.state.pii_tracker = PIITracker()
         logger.info("PII engine initialized")
     else:
         app.state.pii_engine = None
+        app.state.pii_tracker = None
         logger.info("PII processing disabled")
 
     yield

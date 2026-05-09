@@ -30,7 +30,10 @@ class PIIEngine:
         if self.config.detectors.presidio.enabled:
             from privaite.pii.detector_presidio import PresidioDetector
 
-            detector = PresidioDetector(self.config.detectors.presidio)
+            detector = PresidioDetector(
+                self.config.detectors.presidio,
+                custom_patterns=self.config.custom_patterns,
+            )
             await detector.initialize()
             self.detectors.append(detector)
             logger.info("Presidio detector initialized")
