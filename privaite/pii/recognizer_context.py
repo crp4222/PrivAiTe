@@ -21,9 +21,16 @@ _ALIAS = (
     r"|ll[áa]mame|chiamami|me\s+chame|noem\s+mij"
 )
 
+_FORM_FIELD = (
+    r"(?:Nom|Name|Prénom|Vorname|Nombre|Nome|Naam"
+    r"|Patient|Bénéficiaire|Beneficiary|Contact|Manager"
+    r"|Destinataire|Emittente)\s*:\s*"
+)
+
 PATTERNS = [
     rf"(?:{_INTRO})\s+{_NAME_GROUP}",
     rf"(?:{_ALIAS})\s+{_NAME_GROUP}",
+    rf"{_FORM_FIELD}{_NAME_GROUP}",
 ]
 
 STOP_WORDS = {
