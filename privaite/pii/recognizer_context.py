@@ -11,8 +11,15 @@ _INTRO = (
     r"je\s+m['']appelle|my\s+name\s+is|i['']m|je\s+suis"
     r"|mon\s+nom\s+est|je\s+me\s+nomme|je\s+me\s+pr[ée]nomme"
     r"|ich\s+hei[ßs]e|ich\s+bin|mein\s+Name\s+ist"
+    r"|me\s+llamo|mi\s+nombre\s+es|soy"
+    r"|mi\s+chiamo|il\s+mio\s+nome\s+[èe]|sono"
+    r"|meu\s+nome\s+[ée]|eu\s+sou|me\s+chamo"
+    r"|ik\s+ben|mijn\s+naam\s+is|ik\s+heet"
 )
-_ALIAS = r"appelez[- ]moi|call\s+me|on\s+m['']appelle|nennt?\s+mich"
+_ALIAS = (
+    r"appelez[- ]moi|call\s+me|on\s+m['']appelle|nennt?\s+mich"
+    r"|ll[áa]mame|chiamami|me\s+chame|noem\s+mij"
+)
 
 PATTERNS = [
     rf"(?:{_INTRO})\s+{_NAME_GROUP}",
@@ -27,6 +34,10 @@ STOP_WORDS = {
     "and", "or", "but", "the", "a", "an", "my", "his", "her", "your",
     "und", "oder", "aber", "ich", "mein", "meine", "der", "die", "das",
     "ein", "eine", "ist", "bin", "wir", "sie", "er", "es",
+    "y", "o", "pero", "mi", "su", "el", "los", "las", "con",
+    "e", "ma", "il", "lo", "la", "gli", "le", "con", "per",
+    "eu", "meu", "minha", "os", "as", "com", "em", "para",
+    "ik", "mijn", "het", "een", "van", "met", "op", "voor",
 }
 
 COMPILED = [re.compile(p, re.IGNORECASE | re.UNICODE) for p in PATTERNS]

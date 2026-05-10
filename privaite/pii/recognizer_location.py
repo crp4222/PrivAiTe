@@ -8,9 +8,13 @@ from presidio_analyzer.nlp_engine import NlpArtifacts
 _LOC_GROUP = r"(?P<loc>[A-ZÀ-Ÿ][A-ZÀ-Ÿa-zà-ÿ\-]+(?:\s+[A-ZÀ-Ÿ][A-ZÀ-Ÿa-zà-ÿ\-]+){0,2})"
 
 _CONTEXT = (
-    r"(?:à|au|en|de|du|from|in|at|near|via)\s+" + _LOC_GROUP,
-    r"(?:j['']habite|j['']vis|je\s+vis|I\s+live|lives?\s+in|wohne?\s+in"
-    r"|born\s+in|née?\s+à|geboren\s+in)\s+" + _LOC_GROUP,
+    r"(?:[àÀ]|[aA]u|[eE]n|[dD][eua]|[dD]a|[eE]m|[fF]rom|[iI]n|[aA]t|[nN]ear|[vV]ia)\s+"
+    + _LOC_GROUP,
+    r"(?:[jJ][''](?:habite|vis)|[jJ]e\s+vis|I\s+live|[lL]ives?\s+in|[wW]ohne?\s+in"
+    r"|[bB]orn\s+in|[nN][ée]e?\s+[àa]|[gG]eboren\s+in"
+    r"|[vV]ivo?\s+en|[aA]bito\s+a|[mM]oro\s+em"
+    r"|[nN]ascido\s+em|[nN]acido\s+en|[wW]oon\s+in"
+    r")\s+" + _LOC_GROUP,
 )
 
 COMPILED = [re.compile(p, re.UNICODE) for p in _CONTEXT]
