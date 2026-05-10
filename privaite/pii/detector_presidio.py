@@ -14,6 +14,10 @@ REGEX_ENTITY_TYPES = {
     "IP_ADDRESS", "URL", "US_SSN", "UK_NHS", "CRYPTO",
 }
 
+NER_ENTITY_TYPES = {
+    "PERSON", "LOCATION", "ORGANIZATION", "DATE_TIME", "NRP",
+}
+
 
 class PresidioDetector(PIIDetector):
     def __init__(self, config: PresidioDetectorConfig, custom_patterns=None) -> None:
@@ -62,6 +66,7 @@ class PresidioDetector(PIIDetector):
 
         from privaite.pii.recognizer_context import ContextualNameRecognizer
         from privaite.pii.recognizer_fr_date import FrenchDateRecognizer
+        from privaite.pii.recognizer_location import ContextualLocationRecognizer
 
         for lang in self.config.languages:
             self._analyzer.registry.add_recognizer(
@@ -69,6 +74,9 @@ class PresidioDetector(PIIDetector):
             )
             self._analyzer.registry.add_recognizer(
                 FrenchDateRecognizer(supported_language=lang)
+            )
+            self._analyzer.registry.add_recognizer(
+                ContextualLocationRecognizer(supported_language=lang)
             )
 
         if self._custom_patterns:
@@ -89,12 +97,11 @@ class PresidioDetector(PIIDetector):
         if self._analyzer is None:
             raise RuntimeError("PresidioDetector not initialized")
 
-        all_results = []
-        seen_spans: set[tuple[int, int, str]] = set()
-
         primary_lang = self.config.languages[0] if self.config.languages else "fr"
-
         allowed = set(self.config.entities) if self.config.entities else None
+
+        span_sources: dict[tuple[int, int, str], set[str]] = {}
+        span_results: dict[tuple[int, int, str], object] = {}
 
         for lang in self.config.languages:
             results = await asyncio.to_thread(
@@ -108,22 +115,33 @@ class PresidioDetector(PIIDetector):
                 if allowed and result.entity_type not in allowed:
                     continue
 
-                is_spacy_ner = result.recognition_metadata.get(
+                recognizer = result.recognition_metadata.get(
                     "recognizer_name", ""
-                ) == "SpacyRecognizer"
-                if is_spacy_ner and lang != primary_lang:
+                )
+                if recognizer == "SpacyRecognizer" and lang != primary_lang:
                     continue
 
                 span_key = (result.start, result.end, result.entity_type)
-                if span_key not in seen_spans:
-                    seen_spans.add(span_key)
-                    all_results.append(result)
+                if span_key not in span_sources:
+                    span_sources[span_key] = set()
+                    span_results[span_key] = result
+                span_sources[span_key].add(recognizer)
+
+                if result.score > span_results[span_key].score:
+                    span_results[span_key] = result
 
         pii_entities = []
-        for result in all_results:
+        for span_key, sources in span_sources.items():
+            result = span_results[span_key]
+            entity_type = result.entity_type
+
+            has_only_spacy = sources == {"SpacyRecognizer"}
+            if has_only_spacy and entity_type == "LOCATION":
+                continue
+
             pii_entities.append(
                 PIIEntity(
-                    entity_type=result.entity_type,
+                    entity_type=entity_type,
                     text=text[result.start : result.end],
                     start=result.start,
                     end=result.end,
@@ -133,3 +151,23 @@ class PresidioDetector(PIIDetector):
             )
 
         return pii_entities
+
+    def _has_overlapping_confirmation(
+        self,
+        target: tuple[int, int, str],
+        all_spans: dict[tuple[int, int, str], set[str]],
+    ) -> bool:
+        t_start, t_end, t_type = target
+        target_sources = all_spans[target]
+
+        for (s_start, s_end, s_type), sources in all_spans.items():
+            if (s_start, s_end, s_type) == target:
+                continue
+            if s_type != t_type:
+                continue
+            if s_start < t_end and t_start < s_end:
+                combined = target_sources | sources
+                if len(combined) >= 2:
+                    return True
+
+        return False
