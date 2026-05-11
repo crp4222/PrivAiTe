@@ -11,12 +11,12 @@ providers:
   - model_name: "ministral"
     litellm_params:
       model: "ollama/ministral-fast:latest"
-      api_base: "http://localhost:11434"
+      api_base: "http://host.docker.internal:11434"
 
   - model_name: "ministral-3"
     litellm_params:
       model: "ollama/ministral-3:8b"
-      api_base: "http://localhost:11434"
+      api_base: "http://host.docker.internal:11434"
 
   - model_name: "gpt-5.4-mini"
     litellm_params:
@@ -31,12 +31,12 @@ providers:
   - model_name: "kimi-k2"
     litellm_params:
       model: "ollama/kimi-k2.6:cloud"
-      api_base: "http://localhost:11434"
+      api_base: "http://host.docker.internal:11434"
 
   - model_name: "glm-4"
     litellm_params:
       model: "ollama/glm-4.6:cloud"
-      api_base: "http://localhost:11434"
+      api_base: "http://host.docker.internal:11434"
 
 pii:
   enabled: true
@@ -54,7 +54,6 @@ pii:
         - CREDIT_CARD
         - IBAN_CODE
         - IP_ADDRESS
-        - LOCATION
         - DATE_TIME
         - US_SSN
         - UK_NHS
@@ -72,14 +71,6 @@ pii:
       device: "auto"
       torch_dtype: "float16"
       score_threshold: 0.5
-
-    onnx:
-      enabled: false
-      model_name: "openai/privacy-filter"
-      onnx_variant: "q4f16"        # q4f16 (~810MB), fp16, q4, quantized
-      device: "auto"               # auto, cpu, cuda, coreml
-      score_threshold: 0.5
-      max_length: 128000
 
   merge_strategy: "union"
   overlap_resolution: "highest_score"

@@ -9,15 +9,6 @@ from privaite.pii.entity import PIIEntity
 
 logger = logging.getLogger("privaite.pii.detector_presidio")
 
-REGEX_ENTITY_TYPES = {
-    "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", "IBAN_CODE",
-    "IP_ADDRESS", "URL", "US_SSN", "UK_NHS", "CRYPTO",
-}
-
-NER_ENTITY_TYPES = {
-    "PERSON", "LOCATION", "ORGANIZATION", "DATE_TIME", "NRP",
-}
-
 
 class PresidioDetector(PIIDetector):
     def __init__(self, config: PresidioDetectorConfig, custom_patterns=None) -> None:
@@ -100,8 +91,8 @@ class PresidioDetector(PIIDetector):
         primary_lang = self.config.languages[0] if self.config.languages else "fr"
         allowed = set(self.config.entities) if self.config.entities else None
 
-        span_sources: dict[tuple[int, int, str], set[str]] = {}
-        span_results: dict[tuple[int, int, str], object] = {}
+        all_results = []
+        seen_spans: set[tuple[int, int, str]] = set()
 
         for lang in self.config.languages:
             results = await asyncio.to_thread(
@@ -122,27 +113,26 @@ class PresidioDetector(PIIDetector):
                     continue
 
                 span_key = (result.start, result.end, result.entity_type)
-                if span_key not in span_sources:
-                    span_sources[span_key] = set()
-                    span_results[span_key] = result
-                span_sources[span_key].add(recognizer)
-
-                if result.score > span_results[span_key].score:
-                    span_results[span_key] = result
+                if span_key not in seen_spans:
+                    seen_spans.add(span_key)
+                    all_results.append(result)
 
         pii_entities = []
-        for span_key, sources in span_sources.items():
-            result = span_results[span_key]
-            entity_type = result.entity_type
+        for result in all_results:
+            span = text[result.start : result.end]
 
-            has_only_spacy = sources == {"SpacyRecognizer"}
-            if has_only_spacy and entity_type == "LOCATION":
+            recognizer = result.recognition_metadata.get("recognizer_name", "")
+            if (
+                result.entity_type == "PERSON"
+                and recognizer == "SpacyRecognizer"
+                and not _looks_like_name(span)
+            ):
                 continue
 
             pii_entities.append(
                 PIIEntity(
-                    entity_type=entity_type,
-                    text=text[result.start : result.end],
+                    entity_type=result.entity_type,
+                    text=span,
                     start=result.start,
                     end=result.end,
                     score=result.score,
@@ -152,22 +142,16 @@ class PresidioDetector(PIIDetector):
 
         return pii_entities
 
-    def _has_overlapping_confirmation(
-        self,
-        target: tuple[int, int, str],
-        all_spans: dict[tuple[int, int, str], set[str]],
-    ) -> bool:
-        t_start, t_end, t_type = target
-        target_sources = all_spans[target]
 
-        for (s_start, s_end, s_type), sources in all_spans.items():
-            if (s_start, s_end, s_type) == target:
-                continue
-            if s_type != t_type:
-                continue
-            if s_start < t_end and t_start < s_end:
-                combined = target_sources | sources
-                if len(combined) >= 2:
-                    return True
-
+def _looks_like_name(text: str) -> bool:
+    words = text.split()
+    if len(words) > 4:
         return False
+    if len(words) == 1:
+        return False
+    if any(c in text for c in "+={}[]<>;/\\@~#"):
+        return False
+    particles = {"de", "da", "di", "du", "von", "van", "del", "der", "le", "la"}
+    if not all(w[0].isupper() or w in particles for w in words):
+        return False
+    return True

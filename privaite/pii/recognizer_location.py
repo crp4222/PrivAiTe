@@ -5,19 +5,27 @@ import re
 from presidio_analyzer import EntityRecognizer, RecognizerResult
 from presidio_analyzer.nlp_engine import NlpArtifacts
 
-_LOC_GROUP = r"(?P<loc>[A-ZÀ-Ÿ][A-ZÀ-Ÿa-zà-ÿ\-]+(?:\s+[A-ZÀ-Ÿ][A-ZÀ-Ÿa-zà-ÿ\-]+){0,2})"
+_LOC_GROUP = r"(?P<loc>[A-ZÀ-Ÿ][A-ZÀ-Ÿa-zà-ÿ\-]+(?:[\s\-]+[A-ZÀ-Ÿa-zà-ÿ\-]+){0,3})"
 
-_CONTEXT = (
-    r"(?:[àÀ]|[aA]u|[eE]n|[dD][eua]|[dD]a|[eE]m|[fF]rom|[iI]n|[aA]t|[nN]ear|[vV]ia)\s+"
-    + _LOC_GROUP,
-    r"(?:[jJ][''](?:habite|vis)|[jJ]e\s+vis|I\s+live|[lL]ives?\s+in|[wW]ohne?\s+in"
-    r"|[bB]orn\s+in|[nN][ée]e?\s+[àa]|[gG]eboren\s+in"
-    r"|[vV]ivo?\s+en|[aA]bito\s+a|[mM]oro\s+em"
-    r"|[nN]ascido\s+em|[nN]acido\s+en|[wW]oon\s+in"
-    r")\s+" + _LOC_GROUP,
+_RESIDENCE = (
+    r"(?:[jJ]['']?habite|[jJ]e\s+vis|[jJ]['']?vis"
+    r"|I\s+live|[lL]ives?\s+in|[rR]esident\s+(?:of|in|at)"
+    r"|[wW]ohne?\s+in|[lL]ebt?\s+in"
+    r"|[vV]ivo?\s+en|[aA]bito\s+a|[mM]oro\s+em|[wW]oon\s+in"
+    r"|[bB]orn\s+in|[nN][ée]e?\s+[àa]|[gG]eboren\s+in|[nN]ascido\s+em|[nN]acido\s+en"
+    r"|domicili[ée]\s+[àa]|[dD]emeurant\s+[àa]|[dD]omiciliado\s+en"
+    r"|[sS]itu[ée]\s+[àa]|[bB]ased\s+in|[lL]ocated\s+in|[hH]eadquartered\s+in"
+    r")\s+" + _LOC_GROUP
 )
 
-COMPILED = [re.compile(p, re.UNICODE) for p in _CONTEXT]
+_STRONG_PREP = (
+    r"(?:[àÀ]|[nN]ear|[vV]ia)\s+" + _LOC_GROUP
+)
+
+COMPILED = [
+    re.compile(_RESIDENCE, re.UNICODE),
+    re.compile(_STRONG_PREP, re.UNICODE),
+]
 
 
 class ContextualLocationRecognizer(EntityRecognizer):
