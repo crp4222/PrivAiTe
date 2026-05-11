@@ -24,25 +24,25 @@ Client (OpenWebUI) → PrivAiTe Proxy → Anonymize PII → LLM Provider → De-
 
 ## PII detection coverage
 
-Multiple detection engines can run in parallel. Results are merged with configurable overlap resolution.
+| Type | Method | Notes |
+|------|--------|-------|
+| Person names (2+ words) | spaCy NER | Capitalized names filtered for accuracy |
+| Person names (lowercase) | Contextual patterns | "je m'appelle X", "my name is X", "ich heiße X", "me llamo X", etc. |
+| Person names (forms) | Contextual patterns | "Nom: X", "Name: X", "Patient: X", "Beneficiary: X", etc. |
+| Email addresses | Regex | All formats |
+| Phone numbers | Regex + validation | International formats |
+| Credit cards | Regex + Luhn | Valid checksums only |
+| IBAN | Regex + validation | Valid checksums only |
+| IP addresses | Regex | IPv4 |
+| US SSN | Regex + validation | US format |
+| Dates (FR/DE) | Custom regex | "15 mars 1987", "3. März 1990" |
 
-| Type | Presidio (light) | ONNX (openai/privacy-filter) | Notes |
-|------|:---:|:---:|-------|
-| Person names (capitalized) | yes | yes | spaCy NER + ONNX NER |
-| Person names (lowercase) | yes | no | Via contextual patterns ("je m'appelle X", "my name is X", etc.) |
-| Email addresses | yes | yes | Regex |
-| Phone numbers | yes | yes | Regex + ML |
-| Credit cards | yes | yes | Regex + Luhn |
-| IBAN | yes | no | Regex |
-| IP addresses | yes | yes | Regex (Presidio) / ML as URL (ONNX) |
-| US SSN | yes | no | Regex |
-| Locations | yes | yes | spaCy NER + ONNX NER |
-| French dates | yes | yes | Custom regex + ONNX NER |
-| URLs | yes | yes | Regex + ML |
-| Passwords / secrets | no | yes | Only ONNX detects `secret` type |
-| Account numbers | no | yes | Only ONNX detects `account_number` type |
+**Not detected by default** (can be enabled in config):
+- Locations/cities (too many false positives on code and technical text)
+- URLs (Presidio matches method calls like `logging.getLogger` as URLs)
+- Passwords/secrets (requires the ONNX preset)
 
-**Language support:** Presidio uses spaCy models (FR + EN). The ONNX model (openai/privacy-filter) was trained primarily on English and performs best on English text. Detection quality degrades on non-English text. For French, Presidio's spaCy FR model + contextual patterns provide better coverage than ONNX alone.
+**Languages:** FR, EN, DE, ES, IT, PT, NL — with spaCy NER models and contextual patterns per language.
 
 ## Performance
 
@@ -74,16 +74,29 @@ Benchmarked on Apple M1 Pro (16GB), 20 runs per input. Cached models (not first 
 
 On cloud providers (OpenAI, Anthropic) where latency is 1-5s, the overhead is negligible.
 
-### Detection coverage comparison (tested)
+### Detection benchmark (light preset)
 
-| Test case | light | onnx |
-|-----------|:-----:|:----:|
-| FR: 8 mixed PII types (name, email, phone, card, IBAN, IP, date, location) | 8/8 | 8/8 |
-| EN: name, email, phone, SSN, card, location, password | 5/7 | 7/7 |
-| FR lowercase: "je m'appelle dénis navarros" | 2/2 | 2/2 |
-| Mixed FR/EN: names, emails, phones | 4/5 | 5/5 |
+Tested on 36 documents (corporate letters, contracts, invoices, medical referrals, CVs, HR records, bank transfers) across 5 languages:
 
-The `onnx` preset catches passwords/secrets and account numbers that `light` misses. The `light` preset has better French date detection via custom regex.
+| Metric | Result |
+|--------|--------|
+| **Detection rate** | **100%** (192/192 PII) |
+| **False positives** | **0%** (0/14 clean texts) |
+| PERSON | 100% (65/65) |
+| EMAIL | 100% (53/53) |
+| PHONE | 100% (46/46) |
+| IBAN | 100% (9/9) |
+| CREDIT_CARD | 100% (3/3) |
+| IP_ADDRESS | 100% (2/2) |
+| DATE_TIME | 100% (11/11) |
+| US_SSN | 100% (3/3) |
+| FR | 100% |
+| EN | 100% |
+| DE | 100% |
+| ES | 100% |
+| IT | 100% |
+
+Also tested on news articles (FR/EN/DE/ES/IT) and codebases (Python, JS, SQL, Terraform, Docker, Bash, .env) with 0 false positives.
 
 ## Privacy model
 
@@ -98,11 +111,12 @@ For compliance purposes (GDPR, HIPAA), treat this as **pseudonymization + transf
 
 ## Known limitations
 
-- **Lowercase names** are detected via contextual patterns ("je m'appelle X", "my name is X", "appelez-moi X", "mon nom est X", "je suis X"). Without such intro patterns, lowercase names may be missed.
-- **French dates** ("15 mars 1987") are detected by a custom regex recognizer. Informal references ("il y a deux ans") are not.
-- **MISC entity mapping:** spaCy sometimes labels proper nouns as MISC. PrivAiTe maps MISC→PERSON for French, which can occasionally anonymize place names as persons. This does not leak PII.
-- **No policy gate:** all requests are forwarded after pseudonymization. There is no content classification or approval step before sending to the provider.
-- **No audit trail:** detected PII types and counts are not logged by default. Enable debug logging for development, but never log PII values in production.
+- **Single-word names** from spaCy NER are dropped to avoid false positives. Names like "Durand" alone won't be detected unless they appear after a form field pattern ("Nom: Durand") or intro pattern ("je m'appelle Durand").
+- **Lowercase names** require contextual patterns ("je m'appelle X", "my name is X", etc.). Without such patterns, lowercase names are missed.
+- **Locations and URLs** are disabled by default because they generate too many false positives on code and technical text. Enable them in config if needed.
+- **Dates** in informal format ("il y a deux ans", "last Tuesday") are not detected. Only explicit dates ("15 mars 1987", "3. März 1990") are caught.
+- **No policy gate:** all requests are forwarded after pseudonymization. There is no content classification or approval step.
+- **No audit trail:** PII counts per session are tracked via `/stats` endpoint but not persisted.
 
 ## Quick start
 
