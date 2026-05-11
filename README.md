@@ -8,6 +8,16 @@ Privacy-first LLM proxy with transparent PII anonymization. Drop-in replacement 
 
 PrivAiTe sits between your client (OpenWebUI, custom app, etc.) and your LLM providers (OpenAI, Anthropic, Ollama...). It automatically detects and anonymizes personal data before it reaches the LLM, then de-anonymizes the response before returning it to you. All processing is 100% local.
 
+## False-positive driven
+
+PII detection quality depends heavily on the underlying NLP models — spaCy NER, Presidio recognizers, and their interaction with real-world text. Raw detection engines produce false positives that break user experience: tech terms flagged as persons, method calls matched as URLs, business acronyms anonymized as locations.
+
+PrivAiTe is built around a simple principle: **every false positive reported is a bug to fix, not a tradeoff to accept.** The project continuously adapts its detection pipeline — filtering strategies, contextual recognizers, entity validation rules — based on real failures observed on real documents (corporate reports, codebases, news articles, multi-language conversations).
+
+The goal is that a user behind PrivAiTe should never notice the proxy is there. No broken text, no mangled code, no missing context. Privacy protection should be invisible to the end user while ensuring no personal data reaches the LLM provider in cleartext.
+
+If you hit a false positive, [open an issue](https://github.com/crp4222/PrivAiTe/issues) — it directly improves the project for everyone.
+
 ## How it works
 
 ```
