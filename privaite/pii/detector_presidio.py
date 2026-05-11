@@ -144,10 +144,10 @@ class PresidioDetector(PIIDetector):
 
 
 def _looks_like_name(text: str) -> bool:
-    words = text.split()
-    if len(words) > 4:
+    if "\n" in text:
         return False
-    if len(words) == 1:
+    words = text.split()
+    if len(words) > 4 or len(words) < 2:
         return False
     if any(c in text for c in "+={}[]<>;/\\@~#"):
         return False
