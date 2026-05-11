@@ -98,6 +98,8 @@ Tested on 36 documents (corporate letters, contracts, invoices, medical referral
 
 Also tested on news articles (FR/EN/DE/ES/IT) and codebases (Python, JS, SQL, Terraform, Docker, Bash, .env) with 0 false positives.
 
+Full benchmark suite with all datasets and reproduction steps: [privaite-bench](https://github.com/crp4222/privaite-bench)
+
 ## Privacy model
 
 PrivAiTe performs **local pseudonymization**, not guaranteed anonymization. The re-identification mapping exists in memory for the duration of each request to enable de-anonymization of responses. The mapping is never persisted to disk and is destroyed after the response is returned.
