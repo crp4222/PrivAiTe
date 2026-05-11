@@ -57,7 +57,6 @@ pii:
         - DATE_TIME
         - US_SSN
         - UK_NHS
-        - URL
 
     bert_ner:
       enabled: false
