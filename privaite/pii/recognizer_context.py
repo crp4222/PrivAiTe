@@ -24,7 +24,8 @@ _ALIAS = (
 _FORM_FIELD = (
     r"(?:Nom|Name|Prénom|Vorname|Nombre|Nome|Naam"
     r"|Patient|Bénéficiaire|Beneficiary|Contact|Manager"
-    r"|Destinataire|Emittente)\s*:\s*"
+    r"|Destinataire|Emittente|Landlord|Tenant|Applicant"
+    r"|Vermieter|Mieter|Denunciante|Testigo|Trabajador)\s*:\s*"
 )
 
 PATTERNS = [
