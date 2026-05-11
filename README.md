@@ -86,29 +86,28 @@ On cloud providers (OpenAI, Anthropic) where latency is 1-5s, the overhead is ne
 
 ### Detection benchmark (light preset)
 
-Tested on 36 documents (corporate letters, contracts, invoices, medical referrals, CVs, HR records, bank transfers) across 5 languages:
+Tested on a self-built benchmark suite of 46 synthetic documents (corporate letters, contracts, invoices, medical referrals, CVs, HR records, bank transfers, RSE report extracts) across 5 languages. These are not real documents — they are realistic templates with valid PII formats (Luhn-valid credit cards, valid IBANs, etc.).
 
-| Metric | Result |
-|--------|--------|
-| **Detection rate** | **100%** (192/192 PII) |
-| **False positives** | **0%** (0/14 clean texts) |
-| PERSON | 100% (65/65) |
-| EMAIL | 100% (53/53) |
-| PHONE | 100% (46/46) |
-| IBAN | 100% (9/9) |
-| CREDIT_CARD | 100% (3/3) |
-| IP_ADDRESS | 100% (2/2) |
-| DATE_TIME | 100% (11/11) |
-| US_SSN | 100% (3/3) |
-| FR | 100% |
-| EN | 100% |
-| DE | 100% |
-| ES | 100% |
-| IT | 100% |
+| Metric | Result | Honest caveat |
+|--------|--------|---------------|
+| **Detection rate** | 97% (203/210 PII) | On our own test data. Real-world documents will have edge cases we haven't seen yet. |
+| **False positives** | ~0% (1/14 clean texts) | "Kubernetes" still flagged as LOCATION by spaCy EN. |
+| EMAIL | 100% | Regex-based, very reliable. |
+| PHONE | 100% | Regex-based, requires valid international formats. |
+| IBAN | 100% | Regex + checksum validation. |
+| CREDIT_CARD | 100% | Regex + Luhn validation. |
+| PERSON | 91% | Weakest point. Single-word names, long Spanish names, and names without contextual patterns are missed. |
+| DATE_TIME | 100% | FR/DE month names covered, informal dates are not. |
 
-Also tested on news articles (FR/EN/DE/ES/IT) and codebases (Python, JS, SQL, Terraform, Docker, Bash, .env) with 0 false positives.
+**What works well:** Regex-based entities (email, phone, IBAN, credit card, IP, SSN) are near-perfect. Names with 2+ capitalized words are reliably caught. Contextual patterns ("je m'appelle X", "Name: X") catch lowercase and form-field names.
 
-Full benchmark suite with all datasets and reproduction steps: [privaite-bench](https://github.com/crp4222/privaite-bench)
+**What doesn't:** Single-word names from spaCy without context. Very long multi-part names in Spanish. Names that spaCy doesn't recognize at all (unusual names, non-Western names). Any entity type we disabled by default (LOCATION, URL) because the false positive rate was too high.
+
+**On real documents:** Tested on extracts from a 105-page Enedis RSE report — 0 false positives on business text (financial figures, acronyms, technical terms all preserved). Also tested on codebases (Python, JS, SQL, Terraform, Docker, Bash, .env) with 0 false positives.
+
+This benchmark is a starting point, not a guarantee. See the [false-positive driven](#false-positive-driven) philosophy above.
+
+Full benchmark suite with all test data and reproduction steps: [privaite-bench](https://github.com/crp4222/privaite-bench)
 
 ## Privacy model
 
