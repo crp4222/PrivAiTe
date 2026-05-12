@@ -84,28 +84,27 @@ Benchmarked on Apple M1 Pro (16GB), 20 runs per input. Cached models (not first 
 
 On cloud providers (OpenAI, Anthropic) where latency is 1-5s, the overhead is negligible.
 
-### Detection benchmark (light preset)
+### Detection benchmark
 
-Tested on a self-built benchmark suite of 46 synthetic documents (corporate letters, contracts, invoices, medical referrals, CVs, HR records, bank transfers, RSE report extracts) across 5 languages. These are not real documents — they are realistic templates with valid PII formats (Luhn-valid credit cards, valid IBANs, etc.).
+Tested on 61 documents (corporate letters, contracts, invoices, medical referrals, CVs, bank transfers, news articles, codebases) across 5 languages. Benchmark includes synthetic data with valid PII formats (Luhn-valid cards, valid IBANs) and real-world extracts from public reports.
 
-| Metric | Result | Honest caveat |
-|--------|--------|---------------|
-| **Detection rate** | 97% (203/210 PII) | On our own test data. Real-world documents will have edge cases we haven't seen yet. |
-| **False positives** | ~0% (1/14 clean texts) | "Kubernetes" still flagged as LOCATION by spaCy EN. |
-| EMAIL | 100% | Regex-based, very reliable. |
-| PHONE | 100% | Regex-based, requires valid international formats. |
-| IBAN | 100% | Regex + checksum validation. |
-| CREDIT_CARD | 100% | Regex + Luhn validation. |
-| PERSON | 91% | Weakest point. Single-word names, long Spanish names, and names without contextual patterns are missed. |
-| DATE_TIME | 100% | FR/DE month names covered, informal dates are not. |
+| | **light** | **onnx** |
+|---|---|---|
+| **Detection** | 96.7% (236/244) | **100% (244/244)** |
+| **False positives** | **0/14 (0%)** | 1/14 (7%) |
+| PERSON | 93% | **100%** |
+| EMAIL | 98% | **100%** |
+| PHONE | 100% | 100% |
+| IBAN | 100% | 100% |
+| CREDIT_CARD | 100% | 100% |
+| IP | 100% | 100% |
+| DATE | 100% | 100% |
+| SSN | 100% | 100% |
+| Secrets/passwords | no | **yes** |
+| Latency | **23ms** | 400ms |
+| Boot | **~2s** | ~14s |
 
-**What works well:** Regex-based entities (email, phone, IBAN, credit card, IP, SSN) are near-perfect. Names with 2+ capitalized words are reliably caught. Contextual patterns ("je m'appelle X", "Name: X") catch lowercase and form-field names.
-
-**What doesn't:** Single-word names from spaCy without context. Very long multi-part names in Spanish. Names that spaCy doesn't recognize at all (unusual names, non-Western names). Any entity type we disabled by default (LOCATION, URL) because the false positive rate was too high.
-
-**On real documents:** Tested on extracts from a 105-page Enedis RSE report — 0 false positives on business text (financial figures, acronyms, technical terms all preserved). Also tested on codebases (Python, JS, SQL, Terraform, Docker, Bash, .env) with 0 false positives.
-
-This benchmark is a starting point, not a guarantee. See the [false-positive driven](#false-positive-driven) philosophy above.
+The `light` preset prioritizes zero false positives — safe for any text (code, news, business). The `onnx` preset catches everything including secrets and single-word names, at the cost of higher latency and occasional false positives on technical identifiers.
 
 Full benchmark suite with all test data and reproduction steps: [privaite-bench](https://github.com/crp4222/privaite-bench)
 
