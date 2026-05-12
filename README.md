@@ -4,129 +4,114 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-green.svg)](LICENSE)
 
-Privacy-first LLM proxy with transparent PII anonymization. Drop-in replacement for any OpenAI-compatible API.
-
-PrivAiTe sits between your client (OpenWebUI, custom app, etc.) and your LLM providers (OpenAI, Anthropic, Ollama...). It automatically detects and anonymizes personal data before it reaches the LLM, then de-anonymizes the response before returning it to you. All processing is 100% local.
-
-## False-positive driven
-
-PII detection quality depends heavily on the underlying NLP models — spaCy NER, Presidio recognizers, and their interaction with real-world text. Raw detection engines produce false positives that break user experience: tech terms flagged as persons, method calls matched as URLs, business acronyms anonymized as locations.
-
-PrivAiTe is built around a simple principle: **every false positive reported is a bug to fix, not a tradeoff to accept.** The project continuously adapts its detection pipeline — filtering strategies, contextual recognizers, entity validation rules — based on real failures observed on real documents (corporate reports, codebases, news articles, multi-language conversations).
-
-The goal is that a user behind PrivAiTe should never notice the proxy is there. No broken text, no mangled code, no missing context. Privacy protection should be invisible to the end user while ensuring no personal data reaches the LLM provider in cleartext.
-
-If you hit a false positive, [open an issue](https://github.com/crp4222/PrivAiTe/issues) — it directly improves the project for everyone.
-
-## How it works
+A privacy proxy for LLMs. Sits between your app and the LLM provider, strips personal data before it leaves your machine, then restores it in the response. Works with any OpenAI-compatible client.
 
 ```
-Client (OpenWebUI) → PrivAiTe Proxy → Anonymize PII → LLM Provider → De-anonymize → Client
+You type: "Je m'appelle Marie Dupont, email marie@acme.com"
+LLM sees: "Je m'appelle <PERSON_1>, email <EMAIL_ADDRESS_1>"
+LLM says: "Bonjour <PERSON_1>, votre email <EMAIL_ADDRESS_1> est noté."
+You  see: "Bonjour Marie Dupont, votre email marie@acme.com est noté."
 ```
 
-**What the user sees** — real data, normal conversation:
+All detection runs locally. No PII ever reaches the LLM provider.
 
-![User view](docs/opwui.png)
+## How detection works
 
-**What the LLM provider receives** — only placeholders, no PII:
+PrivAiTe uses two detection engines that can run together or separately:
 
-![Provider logs](docs/openailogs.png)
+### Presidio (Microsoft) — regex + spaCy NER
 
-## PII detection coverage
+The default engine. Handles structured PII through pattern matching and basic NER.
 
-| Type | Method | Notes |
-|------|--------|-------|
-| Person names (2+ words) | spaCy NER | Capitalized names filtered for accuracy |
-| Person names (lowercase) | Contextual patterns | "je m'appelle X", "my name is X", "ich heiße X", "me llamo X", etc. |
-| Person names (forms) | Contextual patterns | "Nom: X", "Name: X", "Patient: X", "Beneficiary: X", etc. |
-| Email addresses | Regex | All formats |
-| Phone numbers | Regex + validation | International formats |
-| Credit cards | Regex + Luhn | Valid checksums only |
-| IBAN | Regex + validation | Valid checksums only |
-| IP addresses | Regex | IPv4 |
-| US SSN | Regex + validation | US format |
-| Dates (FR/DE) | Custom regex | "15 mars 1987", "3. März 1990" |
+| What it detects | How |
+|---|---|
+| Emails | Regex |
+| Phone numbers | Regex + international format validation |
+| Credit cards | Regex + Luhn checksum |
+| IBAN | Regex + checksum validation |
+| IP addresses | Regex |
+| US SSN | Regex + format validation |
+| Person names (capitalized, 2+ words) | spaCy NER — only kept if all words are capitalized |
+| Person names (lowercase or single word) | Contextual regex — only after "je m'appelle X", "my name is X", "ich heiße X", "Nom: X", etc. |
+| Dates (FR/DE) | Custom regex — "15 mars 1987", "3. März 1990" |
 
-**Not detected by default** (can be enabled in config):
-- Locations/cities (too many false positives on code and technical text)
-- URLs (Presidio matches method calls like `logging.getLogger` as URLs)
-- Passwords/secrets (requires the ONNX preset)
+Presidio is fast (~25ms/request) and produces zero false positives on code, news articles, and technical text. The tradeoff: it misses names that spaCy doesn't recognize (unusual names, single-word names without context) and doesn't detect secrets/passwords.
 
-**Languages:** FR, EN, DE, ES, IT, PT, NL — with spaCy NER models and contextual patterns per language.
+### OpenAI Privacy Filter — contextual ML model
 
-## Performance
+[OpenAI's open-source PII model](https://openai.com/index/introducing-openai-privacy-filter/) (1.5B params, 50M active, Apache 2.0). Runs locally via ONNX Runtime (~800MB, no PyTorch needed).
 
-Benchmarked on Apple M1 Pro (16GB), 20 runs per input. Cached models (not first download).
+| What it adds over Presidio | How |
+|---|---|
+| Person names (any format, any case) | ML NER — understands context, not just capitalization |
+| Passwords and secrets | Detects "SuperSecret2024!", API keys like "sk-proj-..." |
+| Account numbers | Detects bank account numbers, policy numbers, etc. |
+| Dates (all languages) | ML-based, not limited to FR/DE regex |
 
-### Boot time
+The Privacy Filter is slower (~400ms/request) and occasionally flags technical identifiers as account numbers (e.g., "CMD-2024-98765"). It runs as a second pass alongside Presidio — Presidio handles regex-based entities, the Privacy Filter handles contextual NER.
 
-| Preset | Detectors | Boot | Extra deps |
-|--------|-----------|------|------------|
-| `light` | Presidio (spaCy + regex + context patterns) | ~2s | spacy |
-| `standard` | + BERT NER (dslim/bert-base-NER, 110M) | ~10s | spacy, torch |
-| `onnx` | Presidio + OpenAI privacy-filter (Q4F16, 809MB) | ~7s | spacy, onnxruntime |
-| `full` | Presidio + BERT + privacy-filter (transformers) | 30s+ | spacy, torch |
+### Why two engines?
 
-### PII processing latency per request
+Neither is perfect alone:
+- **Presidio alone** misses names that spaCy doesn't recognize, and can't detect secrets. But it has zero false positives.
+- **Privacy Filter alone** misses some names in credit/list formats, and doesn't have regex validators for IBAN/credit card checksums.
+- **Both together** cover each other's blind spots. Presidio handles structured formats with validation, the Privacy Filter handles context-dependent PII.
 
-| Preset | Short text (50 chars, 2 PII) | Medium text (250 chars, 8 PII) | Notes |
-|--------|---:|---:|-------|
-| `light` | ~15ms | ~40ms | Fastest. Good for local LLMs. |
-| `onnx` | ~210ms | ~350ms | Adds ~250ms for ML inference. |
+## Presets
 
-### Proxy overhead (vs direct Ollama, ministral 8.9B local)
+Choose based on your needs:
 
-| Path | Avg latency |
-|------|------------|
-| Ollama direct | ~400ms |
-| Proxy + PII (light) | ~900ms |
-| Proxy + PII (onnx) | ~1150ms |
+| Preset | What runs | Detection | False positives | Speed | Install |
+|--------|-----------|-----------|-----------------|-------|---------|
+| `light` | Presidio only | 97% | **0%** | **23ms** | `pip install -e .` + spaCy models |
+| `onnx` | Presidio + Privacy Filter | **100%** | ~7% | 400ms | + `pip install onnxruntime` |
 
-On cloud providers (OpenAI, Anthropic) where latency is 1-5s, the overhead is negligible.
+```yaml
+pii:
+  preset: "light"   # Zero false positives, fast. Recommended for most users.
+  # preset: "onnx"  # Catches everything including secrets. Needs onnxruntime.
+```
 
-### Detection benchmark
+**When to use `light`:** You want zero disruption. Code, news, business text all pass through untouched. Only clearly identifiable PII (names, emails, phones, cards, IBANs) is anonymized.
 
-Tested on 61 documents (corporate letters, contracts, invoices, medical referrals, CVs, bank transfers, news articles, codebases) across 5 languages. Benchmark includes synthetic data with valid PII formats (Luhn-valid cards, valid IBANs) and real-world extracts from public reports.
+**When to use `onnx`:** You need maximum coverage. Secrets, passwords, API keys, account numbers, unusual names. Accept occasional false positives on technical identifiers.
+
+Two other presets exist (`standard`, `full`) but are less useful in practice — they add BERT NER which doesn't improve much over spaCy and requires PyTorch.
+
+## Benchmark
+
+Tested on 61 documents across 5 languages (FR, EN, DE, ES, IT). Corporate letters, contracts, invoices, medical referrals, CVs, bank transfers, news articles, codebases. Mix of synthetic data (valid checksums) and real-world public report extracts.
 
 | | **light** | **onnx** |
 |---|---|---|
-| **Detection** | 96.7% (236/244) | **100% (244/244)** |
-| **False positives** | **0/14 (0%)** | 1/14 (7%) |
+| Detection | 96.7% (236/244) | **100% (244/244)** |
+| False positives | **0/14 (0%)** | 1/14 (7%) |
 | PERSON | 93% | **100%** |
 | EMAIL | 98% | **100%** |
 | PHONE | 100% | 100% |
 | IBAN | 100% | 100% |
 | CREDIT_CARD | 100% | 100% |
-| IP | 100% | 100% |
 | DATE | 100% | 100% |
 | SSN | 100% | 100% |
-| Secrets/passwords | no | **yes** |
-| Latency | **23ms** | 400ms |
-| Boot | **~2s** | ~14s |
+| Secrets | no | **yes** |
 
-The `light` preset prioritizes zero false positives — safe for any text (code, news, business). The `onnx` preset catches everything including secrets and single-word names, at the cost of higher latency and occasional false positives on technical identifiers.
+The `light` misses are all PERSON entities: single-word names, long multi-part Spanish names, and names spaCy doesn't recognize. Regex entities are 100% on both presets.
 
-Full benchmark suite with all test data and reproduction steps: [privaite-bench](https://github.com/crp4222/privaite-bench)
+Full benchmark with all test data: [privaite-bench](https://github.com/crp4222/privaite-bench)
+
+## What's NOT detected by default
+
+- **Locations/cities** — "Paris", "London" alone aren't PII (they don't identify anyone). Detecting them causes massive false positives on any text ("Kubernetes", "PIB", "Saturday" all get flagged as locations by spaCy). Disabled by default.
+- **URLs** — Presidio's URL regex matches code like `logging.getLogger` because `.ge` is a valid TLD. Disabled by default.
+- **Passwords/secrets** — Only the `onnx` preset detects these via the Privacy Filter model.
+
+All of these can be re-enabled in the YAML config if your use case needs them.
 
 ## Privacy model
 
-PrivAiTe performs **local pseudonymization**, not guaranteed anonymization. The re-identification mapping exists in memory for the duration of each request to enable de-anonymization of responses. The mapping is never persisted to disk and is destroyed after the response is returned.
+PrivAiTe performs **local pseudonymization**, not guaranteed anonymization. The mapping (real data ↔ placeholder) exists in memory during the request and is destroyed after. The LLM provider never sees real PII.
 
-This means:
-- PII is never sent to the LLM provider in cleartext.
-- The proxy operator (you) can still re-identify data during a request's lifetime.
-- Once the request completes, the mapping is gone — but the original data still exists in the calling application (OpenWebUI, etc.).
-
-For compliance purposes (GDPR, HIPAA), treat this as **pseudonymization + transfer control**, not full anonymization. If your threat model requires that no one — including the proxy operator — can re-identify data, you should use `method: "redact"` (which destroys the original values) instead of `method: "placeholder"`.
-
-## Known limitations
-
-- **Single-word names** from spaCy NER are dropped to avoid false positives. Names like "Durand" alone won't be detected unless they appear after a form field pattern ("Nom: Durand") or intro pattern ("je m'appelle Durand").
-- **Lowercase names** require contextual patterns ("je m'appelle X", "my name is X", etc.). Without such patterns, lowercase names are missed.
-- **Locations and URLs** are disabled by default because they generate too many false positives on code and technical text. Enable them in config if needed.
-- **Dates** in informal format ("il y a deux ans", "last Tuesday") are not detected. Only explicit dates ("15 mars 1987", "3. März 1990") are caught.
-- **No policy gate:** all requests are forwarded after pseudonymization. There is no content classification or approval step.
-- **No audit trail:** PII counts per session are tracked via `/stats` endpoint but not persisted.
+For GDPR/HIPAA: treat this as pseudonymization + transfer control. If you need irreversible anonymization, use `method: "redact"` instead of `method: "placeholder"`.
 
 ## Quick start
 
@@ -138,14 +123,9 @@ python -m spacy download en_core_web_lg
 python -m spacy download fr_core_news_md
 ```
 
-For the ONNX detector:
+For the `onnx` preset (optional):
 ```bash
 pip install onnxruntime
-```
-
-For the BERT/transformers detectors (standard/full presets):
-```bash
-pip install -e ".[ml]"
 ```
 
 ### 2. Configure
@@ -155,23 +135,23 @@ cp .env.example .env
 cp config/privaite.example.yaml config/privaite.yaml
 ```
 
-Edit `.env` with your API keys and `config/privaite.yaml` with your providers and PII preset.
+Edit `.env` with your API keys and `config/privaite.yaml` with your LLM providers.
 
 ### 3. Run
 
 ```bash
-PRIVAITE_API_KEYS=sk-your-key python -m privaite
+python -m privaite
 
-# Development (auto-reload on changes)
-PRIVAITE_API_KEYS=sk-your-key python -m privaite --reload
+# Dev mode (auto-reload)
+python -m privaite --reload
 ```
 
-### 4. Connect your client
+### 4. Connect
 
 Point any OpenAI-compatible client to `http://localhost:8400/v1` with your proxy API key.
 
-**OpenWebUI:** Admin → Settings → Connections → OpenAI API:
-- URL: `http://host.docker.internal:8400/v1` (if OpenWebUI runs in Docker)
+**OpenWebUI (Docker):** Admin → Settings → Connections → OpenAI API:
+- URL: `http://host.docker.internal:8400/v1`
 - Key: your `PRIVAITE_API_KEYS` value
 
 ## Docker
@@ -182,33 +162,9 @@ docker compose up -d
 
 ## Configuration
 
-### PII presets
+### LLM providers
 
-```yaml
-pii:
-  preset: "light"    # Recommended for most users
-  # preset: "onnx"   # Adds password/secret detection
-```
-
-| Preset | Detectors | Best for |
-|--------|-----------|----------|
-| `light` | Presidio (spaCy NER + regex + context patterns) | Fast, low resource, good coverage |
-| `standard` | + BERT NER (dslim/bert-base-NER) | Better name detection |
-| `onnx` | Presidio + OpenAI privacy-filter (ONNX Q4F16) | Secret/password detection, no PyTorch |
-| `full` | Presidio + BERT + privacy-filter (transformers) | Maximum coverage, heavy |
-
-### Anonymization modes
-
-```yaml
-pii:
-  anonymization:
-    method: "placeholder"        # <PERSON_1>, <EMAIL_ADDRESS_1> (recommended)
-    # method: "fake_replacement" # Realistic fakes via Faker
-    # method: "redact"           # [PERSON], [EMAIL_ADDRESS]
-    # method: "mask"             # ********
-```
-
-### Provider examples
+Any [LiteLLM-supported provider](https://docs.litellm.ai/docs/providers) works:
 
 ```yaml
 providers:
@@ -217,54 +173,75 @@ providers:
       model: "openai/gpt-4o"
       api_key: "${OPENAI_API_KEY}"
 
-  - model_name: "claude-sonnet"
-    litellm_params:
-      model: "anthropic/claude-sonnet-4-20250514"
-      api_key: "${ANTHROPIC_API_KEY}"
-
-  - model_name: "llama3"
+  - model_name: "local-llama"
     litellm_params:
       model: "ollama/llama3.1"
       api_base: "http://localhost:11434"
 ```
 
-Any provider supported by [LiteLLM](https://docs.litellm.ai/docs/providers) works out of the box.
+### Anonymization method
+
+```yaml
+pii:
+  anonymization:
+    method: "placeholder"        # <PERSON_1>, <EMAIL_ADDRESS_1> — recommended
+    # method: "fake_replacement" # Realistic fakes via Faker (Jean → Michel)
+    # method: "redact"           # [PERSON], [EMAIL_ADDRESS] — irreversible
+    # method: "mask"             # ********
+```
+
+### Custom regex patterns
+
+Add your own PII patterns without touching code:
+
+```yaml
+pii:
+  custom_patterns:
+    - pattern: "KD-\\d{6}"
+      entity_type: "CUSTOMER_ID"
+    - pattern: "REF-[A-Z]{3}-\\d+"
+      entity_type: "REFERENCE"
+```
+
+### Languages
+
+7 languages supported with spaCy NER + contextual patterns: FR, EN, DE, ES, IT, PT, NL.
+
+```yaml
+pii:
+  detectors:
+    presidio:
+      languages: ["fr", "en"]  # Add "de", "es", etc.
+```
+
+Each language needs its spaCy model: `python -m spacy download de_core_news_md`
 
 ## API
 
-OpenAI-compatible endpoints:
+OpenAI-compatible:
 
-- `POST /v1/chat/completions` — Chat (streaming + non-streaming)
-- `POST /v1/completions` — Text completions
-- `POST /v1/embeddings` — Embeddings (PII anonymized, no de-anonymization)
-- `GET /v1/models` — List available models
-- `GET /health` — Health check
-- `GET /ready` — Readiness check
+| Endpoint | Description |
+|----------|-------------|
+| `POST /v1/chat/completions` | Chat (streaming + non-streaming) |
+| `POST /v1/completions` | Text completions |
+| `POST /v1/embeddings` | Embeddings (anonymized, no de-anonymization) |
+| `GET /v1/models` | List configured models |
+| `GET /health` | Health check |
+| `GET /ready` | Readiness check |
+| `GET /stats` | PII detection stats per session |
+
+## Known limitations
+
+- **Single-word names** from spaCy are dropped (too many false positives). Caught by contextual patterns ("Nom: X") or the `onnx` preset.
+- **Lowercase names** need intro patterns ("je m'appelle X"). The `onnx` preset catches them without patterns.
+- **Informal dates** ("last Tuesday", "il y a deux ans") are not detected.
+- **No policy gate** — all requests are forwarded after pseudonymization.
 
 ## Development
 
 ```bash
 pip install -e ".[dev]"
 python -m pytest tests/ -v
-```
-
-## Architecture
-
-```
-privaite/
-├── api/          FastAPI endpoints (OpenAI-compatible)
-├── config/       YAML config + Pydantic schemas
-├── middleware/    Auth (Bearer token, constant-time comparison)
-├── pii/          PII detection, anonymization, de-anonymization
-│   ├── detector_presidio.py    spaCy NER + regex (FR/EN)
-│   ├── detector_onnx.py        OpenAI privacy-filter via ONNX Runtime
-│   ├── recognizer_context.py   "je m'appelle X" pattern matching
-│   ├── recognizer_fr_date.py   French date detection
-│   ├── anonymizer.py           Numbered placeholders or Faker-based replacements
-│   └── deanonymizer.py         Reverse mapping (exact + fuzzy)
-├── providers/    LiteLLM-based multi-provider routing
-├── streaming/    SSE streaming with token-level de-anonymization (trie buffer)
-└── utils/        Logging, security, error handling
 ```
 
 ## License
