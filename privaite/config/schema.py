@@ -65,9 +65,7 @@ class OnnxDetectorConfig(BaseModel):
         "private_person": "PERSON",
         "private_email": "EMAIL_ADDRESS",
         "private_phone": "PHONE_NUMBER",
-        "private_address": "LOCATION",
         "private_date": "DATE_TIME",
-        "private_url": "URL",
         "account_number": "FINANCIAL",
         "secret": "SECRET",
     })
@@ -153,6 +151,11 @@ class PIIConfig(BaseModel):
             self.detectors.onnx.enabled = False
         elif self.preset == "onnx":
             self.detectors.presidio.enabled = True
+            if not self.detectors.presidio.entities:
+                self.detectors.presidio.entities = [
+                    "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD",
+                    "IBAN_CODE", "IP_ADDRESS", "DATE_TIME", "US_SSN", "UK_NHS",
+                ]
             self.detectors.bert_ner.enabled = False
             self.detectors.mlmodel.enabled = False
             self.detectors.onnx.enabled = True
