@@ -13,7 +13,7 @@ LLM says: "Bonjour <PERSON_1>, votre email <EMAIL_ADDRESS_1> est noté."
 You  see: "Bonjour Marie Dupont, votre email marie@acme.com est noté."
 ```
 
-All detection runs locally. No PII ever reaches the LLM provider.
+All detection runs locally. No filtered PII ever reaches the LLM provider.
 
 ## How detection works
 
