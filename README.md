@@ -122,6 +122,17 @@ PrivAiTe performs **local pseudonymization**, not guaranteed anonymization. Dete
 
 For GDPR/HIPAA: treat this as pseudonymization + transfer minimization, not anonymization. If you need irreversible removal, use `method: "redact"` instead of `method: "placeholder"`.
 
+## Alternatives
+
+Keeping PII out of LLM calls is a crowded space, and PrivAiTe is not always the right pick. Based on each project's public docs as of June 2026:
+
+- [AI Security Gateway](https://github.com/aisecuritygateway/aisecuritygateway) does more than PII: it adds secret detection and prompt-injection blocking. If you want those in the same proxy, start there. Its PII scanning targets plain message text.
+- [Philter](https://philterd.ai/) is a mature, drop-in "change one URL" redaction proxy for plain-text prompts.
+- LiteLLM has a built-in Presidio guardrail, the natural choice if you already run the LiteLLM proxy and want PII handling inline (there are a few open bugs around scrubbing requests and responses).
+- Managed/cloud options exist too, such as Microsoft PII Shield and [LangChain's gateway redaction](https://docs.langchain.com/langsmith/llm-gateway-redaction).
+
+Where PrivAiTe differs: it anonymizes PII **inside tool-call arguments and multimodal content**, not just message text (LangChain's gateway docs, for instance, note that tool-call arguments are not scanned), it **restores** the original values in the response, and it ships a [reproducible benchmark](https://github.com/crp4222/privaite-bench). If your traffic is agentic or multimodal, that gap is the reason this exists.
+
 ## Quick start
 
 ### 1. Install
