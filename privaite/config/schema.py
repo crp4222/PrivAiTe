@@ -8,6 +8,7 @@ class ServerConfig(BaseModel):
     port: int = 8400
     workers: int = 1
     log_level: str = "info"
+    max_request_bytes: int = 10_000_000
 
 
 class AuthConfig(BaseModel):

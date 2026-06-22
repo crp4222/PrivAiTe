@@ -4,7 +4,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-green.svg)](LICENSE)
 
-A privacy proxy for LLMs. Sits between your app and the LLM provider, strips personal data before it leaves your machine, then restores it in the response. Works with any OpenAI-compatible client.
+A privacy proxy for LLMs. It sits between your app and the provider, replaces personal data with placeholders before the request leaves your machine, and restores it in the response — across message text, **tool-call arguments, and multimodal content**. Works with any OpenAI-compatible client.
 
 ```
 You type: "Je m'appelle Marie Dupont, email marie@acme.com"
@@ -13,7 +13,7 @@ LLM says: "Bonjour <PERSON_1>, votre email <EMAIL_ADDRESS_1> est noté."
 You  see: "Bonjour Marie Dupont, votre email marie@acme.com est noté."
 ```
 
-All detection runs locally. No filtered PII ever reaches the LLM provider.
+Detection runs locally. This is **local pseudonymization, not guaranteed anonymization** — what it does and doesn't protect against is spelled out in [Threat model](#threat-model).
 
 ## How detection works
 
@@ -107,11 +107,20 @@ Full benchmark with all test data: [privaite-bench](https://github.com/crp4222/p
 
 All of these can be re-enabled in the YAML config if your use case needs them.
 
-## Privacy model
+## Threat model
 
-PrivAiTe performs **local pseudonymization**, not guaranteed anonymization. The mapping (real data ↔ placeholder) exists in memory during the request and is destroyed after. The LLM provider never sees real PII.
+PrivAiTe performs **local pseudonymization**, not guaranteed anonymization. Detection runs on your machine; the real ↔ placeholder mapping lives in memory only for the duration of a request and is dropped afterwards.
 
-For GDPR/HIPAA: treat this as pseudonymization + transfer control. If you need irreversible anonymization, use `method: "redact"` instead of `method: "placeholder"`.
+**What it protects against:** the LLM provider storing, training on, or logging your raw PII. The provider receives placeholders (`<PERSON_1>`, …) for everything the detector catches — across message content, tool-call arguments, and multimodal text.
+
+**What it does NOT protect against:**
+
+- **PII the detector misses.** Detection is statistical and never 100% (see the [benchmark](https://github.com/crp4222/privaite-bench)). A name it doesn't recognize reaches the provider. The `onnx` preset has the best recall; treat the output as best-effort, not a guarantee.
+- **Re-identification from context.** Even with names replaced, the surrounding text can stay identifying ("the CEO of `<ORG_1>` who resigned in March").
+- **A compromised local machine.** The mapping and raw text live in local memory; this is not a defense against a local attacker.
+- **The provider correlating** requests within a session.
+
+For GDPR/HIPAA: treat this as pseudonymization + transfer minimization, not anonymization. If you need irreversible removal, use `method: "redact"` instead of `method: "placeholder"`.
 
 ## Quick start
 

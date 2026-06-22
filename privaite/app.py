@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from privaite.api.router import api_router
 from privaite.config.schema import PrivAiTeConfig
 from privaite.middleware.auth import AuthMiddleware
+from privaite.middleware.limits import RequestSizeLimitMiddleware
 from privaite.providers.router import ProviderRouter
 from privaite.utils.logging import setup_logging
 from privaite.utils.security import get_api_keys
@@ -62,13 +63,14 @@ def create_app(config: PrivAiTeConfig | None = None) -> FastAPI:
     app = FastAPI(
         title="PrivAiTe",
         description="Privacy-first LLM proxy with transparent PII anonymization",
-        version="0.2.0",
+        version="0.2.1",
         lifespan=lifespan,
     )
 
     app.state.config = config
 
     app.add_middleware(AuthMiddleware)
+    app.add_middleware(RequestSizeLimitMiddleware)
     app.include_router(api_router)
 
     return app

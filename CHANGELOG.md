@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-06-22
+
+### Added
+- Request bodies are capped at `server.max_request_bytes` (10 MB by default);
+  larger requests are rejected with HTTP 413.
+
+### Documentation
+- Added an explicit **Threat model** section to the README (what the proxy does
+  and does not protect against) so the privacy posture is not over-claimed.
+
 ## [0.2.0] - 2026-06-22
 
 ### Added
