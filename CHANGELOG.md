@@ -12,11 +12,18 @@ All notable changes to this project are documented here. The format follows
   counts bytes as they arrive, so a chunked request that omits `Content-Length`
   can no longer exceed `server.max_request_bytes`. The buffered body is replayed
   to the application unchanged.
+- The size check runs against the projected total before each chunk is appended,
+  so a single oversized frame is rejected without first being copied into the
+  buffer.
 
 ### Added
 - Open WebUI Filter Function (`integrations/openwebui/`) that runs the engine
   in-process, with a setup guide. The response path now also restores PII inside
   the legacy `function_call`, matching the proxy.
+- `onnx` install extra (`pip install "privaite[onnx]"`). The ONNX privacy-filter
+  preset runs on onnxruntime plus the transformers tokenizer and does not need
+  torch, so this extra installs that path without pulling torch or scipy. The
+  `ml` extra (BERT NER) still installs torch, as that detector requires it.
 
 ### Tooling
 - CI lint now runs `ruff check .` over the whole tree, including `integrations/`,

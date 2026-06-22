@@ -33,6 +33,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# ONNX privacy-filter preset. Inference is onnxruntime only and uses the
+# tokenizer from transformers, so torch is not needed here. Install this for
+# the `onnx` preset on a machine where torch and scipy are awkward.
+onnx = [
+    "onnxruntime>=1.17",
+    "transformers>=4.40",
+    "huggingface_hub>=0.23",
+]
+# BERT NER detector (the `standard`/`full` presets). This one does need torch.
 ml = [
     "transformers>=4.40",
     "torch>=2.0",

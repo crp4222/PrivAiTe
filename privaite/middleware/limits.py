@@ -70,10 +70,13 @@ class RequestSizeLimitMiddleware:
                 # with the message replayed first so the app still sees it.
                 await self.app(scope, _replay_message(message, receive), send)
                 return
-            body.extend(message.get("body", b""))
-            if len(body) > self.max_bytes:
+            chunk = message.get("body", b"")
+            # Check the projected size before extending so a single oversized
+            # frame is rejected without first being copied into the buffer.
+            if len(body) + len(chunk) > self.max_bytes:
                 await self._too_large(send)
                 return
+            body.extend(chunk)
             more_body = message.get("more_body", False)
 
         await self.app(scope, _replay_body(bytes(body), receive), send)

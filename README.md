@@ -64,13 +64,17 @@ Choose based on your needs:
 | Preset | What runs | Detection | False positives | Speed | Install |
 |--------|-----------|-----------|-----------------|-------|---------|
 | `light` | Presidio only | 97% | **0%** | **23ms** | `pip install -e .` + spaCy models |
-| `onnx` | Presidio + Privacy Filter | **100%** | ~7% | 400ms | + `pip install onnxruntime` |
+| `onnx` | Presidio + Privacy Filter | **100%** | ~7% | 400ms | `pip install "privaite[onnx]"` |
 
 ```yaml
 pii:
   preset: "light"   # Zero false positives, fast. Recommended for most users.
-  # preset: "onnx"  # Catches everything including secrets. Needs onnxruntime.
+  # preset: "onnx"  # Catches everything including secrets. Needs the onnx extra.
 ```
+
+The `onnx` preset runs on onnxruntime plus the transformers tokenizer, so the
+`onnx` extra does not pull in torch or scipy. The `ml` extra (the `standard` and
+`full` presets) is the only one that installs torch.
 
 **When to use `light`:** You want zero disruption. Code, news, business text all pass through untouched. Only clearly identifiable PII (names, emails, phones, cards, IBANs) is anonymized.
 
