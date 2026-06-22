@@ -11,6 +11,7 @@ from privaite.config.schema import PrivAiTeConfig
 from privaite.middleware.auth import AuthMiddleware
 from privaite.providers.router import ProviderRouter
 from privaite.utils.logging import setup_logging
+from privaite.utils.security import get_api_keys
 
 logger = logging.getLogger("privaite.app")
 
@@ -23,6 +24,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info(
         "Provider router ready with %d model(s)", len(config.providers)
     )
+
+    if config.auth.enabled and not get_api_keys():
+        logger.warning(
+            "Auth is enabled but PRIVAITE_API_KEYS is empty; all requests will be "
+            "rejected with 401 until a key is set (or set auth.enabled=false)."
+        )
 
     if config.pii.enabled:
         from privaite.pii.engine import PIIEngine
@@ -55,7 +62,7 @@ def create_app(config: PrivAiTeConfig | None = None) -> FastAPI:
     app = FastAPI(
         title="PrivAiTe",
         description="Privacy-first LLM proxy with transparent PII anonymization",
-        version="0.1.0",
+        version="0.2.0",
         lifespan=lifespan,
     )
 

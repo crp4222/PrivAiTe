@@ -33,7 +33,10 @@ def _interpolate_env_vars(obj: object) -> object:
 
 
 def load_config(path: str | Path | None = None) -> PrivAiTeConfig:
-    load_dotenv(override=True)
+    # override=False so the explicit environment (e.g. PRIVAITE_CONFIG_PATH set by
+    # the CLI from --config) wins over .env; .env only fills in variables that are
+    # not already set, such as OPENAI_API_KEY.
+    load_dotenv(override=False)
 
     if path is None:
         path = os.environ.get("PRIVAITE_CONFIG_PATH", "config/privaite.yaml")

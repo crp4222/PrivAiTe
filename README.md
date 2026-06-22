@@ -230,12 +230,23 @@ OpenAI-compatible:
 | `GET /ready` | Readiness check |
 | `GET /stats` | PII detection stats per session |
 
+### What gets anonymized
+
+PII is stripped from every field that carries user text to the provider:
+
+- `messages[].content`, whether a plain string or a multimodal list of parts (text parts are scrubbed, images and audio are left alone).
+- `tool_calls[].function.arguments` and the legacy `function_call.arguments`: parsed as JSON and scrubbed value by value, so object keys and the function name stay intact. Arguments that are not valid JSON are scrubbed as free text.
+- `/v1/completions` `prompt` and `/v1/embeddings` `input`, as a string or a list of strings.
+
+On the way back, the original values are restored in `message.content` and, for non-streaming chat, in returned `tool_calls`. Set `pii.passthrough.tool_calls: true` to forward tool-call arguments unchanged.
+
 ## Known limitations
 
 - **Single-word names** from spaCy are dropped (too many false positives). Caught by contextual patterns ("Nom: X") or the `onnx` preset.
 - **Lowercase names** need intro patterns ("je m'appelle X"). The `onnx` preset catches them without patterns.
 - **Informal dates** ("last Tuesday", "il y a deux ans") are not detected.
 - **No policy gate** — all requests are forwarded after pseudonymization.
+- **Streaming tool calls**: argument deltas are not de-anonymized, so a streamed tool call may show placeholders instead of the original values. Request-side anonymization still applies, so no PII leaks.
 
 ## Development
 

@@ -38,9 +38,14 @@ async def completions(
 
     if config.pii.enabled and pii_engine is not None:
         try:
-            messages = [{"role": "user", "content": prompt}]
-            messages, mapping = await pii_engine.process_request(messages)
-            prompt = messages[0]["content"]
+            if isinstance(prompt, list) and all(isinstance(p, str) for p in prompt):
+                msgs = [{"role": "user", "content": p} for p in prompt]
+                msgs, mapping = await pii_engine.process_request(msgs)
+                prompt = [m["content"] for m in msgs]
+            else:
+                msgs = [{"role": "user", "content": prompt}]
+                msgs, mapping = await pii_engine.process_request(msgs)
+                prompt = msgs[0]["content"]
         except Exception:
             logger.exception("PII processing failed")
             if config.pii.on_error == "block":

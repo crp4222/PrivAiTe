@@ -50,6 +50,12 @@ STOP_WORDS = {
 
 COMPILED = [re.compile(p, re.IGNORECASE | re.UNICODE) for p in PATTERNS]
 
+# macOS/iOS and most chat UIs emit a typographic apostrophe (U+2019) for "'".
+# Map the common variants to a straight quote so intro patterns like
+# "je m'appelle X" still match. The mapping is length-preserving, so the regex
+# offsets keep pointing at the right span in the original text.
+_APOSTROPHES = {ord(c): "'" for c in "’‘ʼ＇´`"}
+
 
 def _trim_name(name: str) -> str:
     words = name.split()
@@ -76,9 +82,10 @@ class ContextualNameRecognizer(EntityRecognizer):
         self, text: str, entities: list[str], nlp_artifacts: NlpArtifacts = None
     ) -> list[RecognizerResult]:
         results = []
+        normalized = text.translate(_APOSTROPHES)
 
         for pattern in COMPILED:
-            for match in pattern.finditer(text):
+            for match in pattern.finditer(normalized):
                 raw_name = match.group("name")
                 name = _trim_name(raw_name)
                 if not name or len(name) < 2:

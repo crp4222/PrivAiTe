@@ -43,6 +43,14 @@ class TestContextualNameRecognizer:
         results = self.rec.analyze("je m'appelle Éloïse Bérénice", ["PERSON"], None)
         assert len(results) == 1
 
+    def test_curly_apostrophe_intro(self):
+        # macOS/iOS smart quotes emit U+2019; the intro must still match so the
+        # lowercase name does not leak to the provider.
+        text = "je m’appelle jean michel"
+        results = self.rec.analyze(text, ["PERSON"], None)
+        assert len(results) == 1
+        assert text[results[0].start : results[0].end] == "jean michel"
+
 
 class TestFrenchDateRecognizer:
     def setup_method(self):

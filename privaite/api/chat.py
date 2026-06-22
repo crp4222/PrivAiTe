@@ -106,6 +106,16 @@ async def chat_completions(
             content = msg.get("content")
             if content:
                 msg["content"] = await pii_engine.process_response(content, mapping)
+            tool_calls = msg.get("tool_calls")
+            if tool_calls:
+                msg["tool_calls"] = await pii_engine.process_response_tool_calls(
+                    tool_calls, mapping
+                )
+            function_call = msg.get("function_call")
+            if function_call:
+                msg["function_call"] = await pii_engine.process_response_function_call(
+                    function_call, mapping
+                )
         return response_dict
 
     if hasattr(response, "model_dump"):

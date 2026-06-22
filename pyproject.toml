@@ -1,6 +1,6 @@
 [project]
 name = "privaite"
-version = "0.1.0"
+version = "0.2.0"
 description = "Privacy-first LLM proxy with transparent PII anonymization"
 requires-python = ">=3.11"
 license = "BSD-3-Clause"

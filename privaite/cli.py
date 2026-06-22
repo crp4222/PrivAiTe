@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import click
 import uvicorn
 
@@ -12,6 +14,10 @@ from privaite.config.loader import load_config
 @click.option("--port", default=None, type=int, help="Override server port")
 @click.option("--reload", is_flag=True, help="Auto-reload on file changes (dev mode)")
 def main(config_path: str | None, host: str | None, port: int | None, reload: bool) -> None:
+    # uvicorn re-imports create_app() in the worker process, so the path has to
+    # travel through the environment to reach the factory's load_config().
+    if config_path:
+        os.environ["PRIVAITE_CONFIG_PATH"] = config_path
     config = load_config(config_path)
 
     run_host = host or config.server.host

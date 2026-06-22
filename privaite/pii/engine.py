@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -74,35 +75,196 @@ class PIIEngine:
         self, messages: list[dict[str, Any]]
     ) -> tuple[list[dict[str, Any]], PIIMapping]:
         mapping = PIIMapping()
+        language = self._language()
         anonymized_messages = []
 
         for message in messages:
             role = message.get("role", "")
-            content = message.get("content", "")
 
             if self.config.passthrough.system_messages and role == "system":
                 anonymized_messages.append(dict(message))
                 continue
 
-            if not content or not isinstance(content, str):
-                anonymized_messages.append(dict(message))
-                continue
-
-            langs = self.config.detectors.presidio.languages
-            language = langs[0] if langs else "en"
-            entities = await self._detect_all(content, language)
-            anonymized_content = self.anonymizer.anonymize(content, entities, mapping)
-
             new_msg = dict(message)
-            new_msg["content"] = anonymized_content
+
+            if "content" in message:
+                new_msg["content"] = await self._anonymize_content(
+                    message["content"], mapping, language
+                )
+
+            if not self.config.passthrough.tool_calls and message.get("tool_calls"):
+                new_msg["tool_calls"] = await self._anonymize_tool_calls(
+                    message["tool_calls"], mapping, language
+                )
+
+            # Legacy (pre-tool_calls) OpenAI function calling.
+            if not self.config.passthrough.tool_calls and message.get("function_call"):
+                new_msg["function_call"] = await self._anonymize_function_call(
+                    message["function_call"], mapping, language
+                )
+
             anonymized_messages.append(new_msg)
 
         return anonymized_messages, mapping
+
+    def _language(self) -> str:
+        langs = self.config.detectors.presidio.languages
+        return langs[0] if langs else "en"
+
+    async def _anonymize_text(
+        self, text: Any, mapping: PIIMapping, language: str
+    ) -> Any:
+        if not text or not isinstance(text, str):
+            return text
+        entities = await self._detect_all(text, language)
+        return self.anonymizer.anonymize(text, entities, mapping)
+
+    async def _anonymize_content(
+        self, content: Any, mapping: PIIMapping, language: str
+    ) -> Any:
+        if isinstance(content, str):
+            return await self._anonymize_text(content, mapping, language)
+
+        # Multimodal parts: [{"type": "text", "text": ...}, {"type": "image_url", ...}]
+        if isinstance(content, list):
+            new_parts: list[Any] = []
+            for part in content:
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    new_part = dict(part)
+                    new_part["text"] = await self._anonymize_text(
+                        part["text"], mapping, language
+                    )
+                    new_parts.append(new_part)
+                else:
+                    new_parts.append(part)
+            return new_parts
+
+        return content
+
+    async def _anonymize_tool_calls(
+        self, tool_calls: Any, mapping: PIIMapping, language: str
+    ) -> Any:
+        if not isinstance(tool_calls, list):
+            return tool_calls
+
+        new_calls: list[Any] = []
+        for call in tool_calls:
+            if not isinstance(call, dict):
+                new_calls.append(call)
+                continue
+            new_call = dict(call)
+            function = call.get("function")
+            if isinstance(function, dict) and isinstance(function.get("arguments"), str):
+                new_function = dict(function)
+                new_function["arguments"] = await self._anonymize_arguments(
+                    function["arguments"], mapping, language
+                )
+                new_call["function"] = new_function
+            new_calls.append(new_call)
+        return new_calls
+
+    async def _anonymize_function_call(
+        self, function_call: Any, mapping: PIIMapping, language: str
+    ) -> Any:
+        if not isinstance(function_call, dict) or not isinstance(
+            function_call.get("arguments"), str
+        ):
+            return function_call
+        new_call = dict(function_call)
+        new_call["arguments"] = await self._anonymize_arguments(
+            function_call["arguments"], mapping, language
+        )
+        return new_call
+
+    async def _anonymize_arguments(
+        self, arguments: str, mapping: PIIMapping, language: str
+    ) -> str:
+        try:
+            parsed = json.loads(arguments)
+        except (json.JSONDecodeError, ValueError):
+            # Arguments are not valid JSON: anonymize the raw string instead.
+            return await self._anonymize_text(arguments, mapping, language)
+        walked = await self._walk_anonymize(parsed, mapping, language)
+        return json.dumps(walked, ensure_ascii=False)
+
+    async def _walk_anonymize(
+        self, value: Any, mapping: PIIMapping, language: str
+    ) -> Any:
+        if isinstance(value, str):
+            return await self._anonymize_text(value, mapping, language)
+        if isinstance(value, dict):
+            result: dict[Any, Any] = {}
+            for key, item in value.items():
+                result[key] = await self._walk_anonymize(item, mapping, language)
+            return result
+        if isinstance(value, list):
+            return [await self._walk_anonymize(item, mapping, language) for item in value]
+        return value
 
     async def process_response(self, content: str, mapping: PIIMapping) -> str:
         if not self.config.deanonymization.enabled:
             return content
         return self.deanonymizer.deanonymize(content, mapping)
+
+    async def process_response_tool_calls(
+        self, tool_calls: Any, mapping: PIIMapping | None
+    ) -> Any:
+        if (
+            not self.config.deanonymization.enabled
+            or mapping is None
+            or mapping.is_empty
+            or not isinstance(tool_calls, list)
+        ):
+            return tool_calls
+
+        new_calls: list[Any] = []
+        for call in tool_calls:
+            if not isinstance(call, dict):
+                new_calls.append(call)
+                continue
+            new_call = dict(call)
+            function = call.get("function")
+            if isinstance(function, dict) and isinstance(function.get("arguments"), str):
+                new_function = dict(function)
+                new_function["arguments"] = self._deanonymize_arguments(
+                    function["arguments"], mapping
+                )
+                new_call["function"] = new_function
+            new_calls.append(new_call)
+        return new_calls
+
+    async def process_response_function_call(
+        self, function_call: Any, mapping: PIIMapping | None
+    ) -> Any:
+        if (
+            not self.config.deanonymization.enabled
+            or mapping is None
+            or mapping.is_empty
+            or not isinstance(function_call, dict)
+            or not isinstance(function_call.get("arguments"), str)
+        ):
+            return function_call
+        new_call = dict(function_call)
+        new_call["arguments"] = self._deanonymize_arguments(
+            function_call["arguments"], mapping
+        )
+        return new_call
+
+    def _deanonymize_arguments(self, arguments: str, mapping: PIIMapping) -> str:
+        try:
+            parsed = json.loads(arguments)
+        except (json.JSONDecodeError, ValueError):
+            return self.deanonymizer.deanonymize(arguments, mapping)
+        return json.dumps(self._walk_deanonymize(parsed, mapping), ensure_ascii=False)
+
+    def _walk_deanonymize(self, value: Any, mapping: PIIMapping) -> Any:
+        if isinstance(value, str):
+            return self.deanonymizer.deanonymize(value, mapping)
+        if isinstance(value, dict):
+            return {k: self._walk_deanonymize(v, mapping) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._walk_deanonymize(v, mapping) for v in value]
+        return value
 
     async def _detect_all(
         self, text: str, language: str = "en"

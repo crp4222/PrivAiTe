@@ -28,3 +28,4 @@ htmlcov/
 Thumbs.db
 
 .claude/
+docs/.posts.md

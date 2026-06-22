@@ -24,7 +24,20 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         allowed_keys = get_api_keys()
         if not allowed_keys:
-            return await call_next(request)
+            # Fail closed: auth is on but nothing can authenticate, so reject
+            # rather than silently forwarding every request to the provider.
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": {
+                        "message": (
+                            "Authentication is enabled but no API keys are configured. "
+                            "Set PRIVAITE_API_KEYS or disable auth (auth.enabled=false)."
+                        ),
+                        "type": "auth_error",
+                    }
+                },
+            )
 
         auth_header = request.headers.get("authorization", "")
         if not auth_header.startswith("Bearer "):

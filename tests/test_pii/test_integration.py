@@ -38,9 +38,11 @@ def engine():
         deanonymization=DeanonymizationConfig(enabled=True),
     )
     eng = PIIEngine(config)
-    asyncio.get_event_loop().run_until_complete(eng.initialize())
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(eng.initialize())
     yield eng
-    asyncio.get_event_loop().run_until_complete(eng.shutdown())
+    loop.run_until_complete(eng.shutdown())
+    loop.close()
 
 
 HEAVY_TEXT_FR = (

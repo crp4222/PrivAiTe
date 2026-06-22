@@ -110,3 +110,15 @@ async def test_auth_disabled_allows_all(app_auth_disabled):
     ) as client:
         resp = await client.get("/v1/models")
         assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_auth_enabled_without_keys_denies():
+    # Fail closed: auth on + no configured keys must reject, not pass through.
+    os.environ.pop("PRIVAITE_API_KEYS", None)
+    app = _inject_state(create_app(_make_config(auth_enabled=True)))
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/v1/models")
+        assert resp.status_code == 401
