@@ -147,9 +147,9 @@ python -m spacy download en_core_web_lg
 python -m spacy download fr_core_news_md
 ```
 
-For the `onnx` preset (optional):
+For the `onnx` preset (optional, torch-free):
 ```bash
-pip install onnxruntime
+pip install -e ".[onnx]"
 ```
 
 ### 2. Configure
