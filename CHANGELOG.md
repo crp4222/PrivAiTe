@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.3] - 2026-06-22
+
+### Security
+- The request size limit is now enforced at the body-stream level, not only from
+  the `Content-Length` header. The middleware was rewritten as pure ASGI and
+  counts bytes as they arrive, so a chunked request that omits `Content-Length`
+  can no longer exceed `server.max_request_bytes`. The buffered body is replayed
+  to the application unchanged.
+
+### Added
+- Open WebUI Filter Function (`integrations/openwebui/`) that runs the engine
+  in-process, with a setup guide. The response path now also restores PII inside
+  the legacy `function_call`, matching the proxy.
+
+### Tooling
+- CI lint now runs `ruff check .` over the whole tree, including `integrations/`,
+  rather than only `privaite/` and `tests/`.
+
 ## [0.2.2] - 2026-06-22
 
 ### Security

@@ -11,6 +11,7 @@ from privaite.config.schema import (
     PrivAiTeConfig,
     ServerConfig,
 )
+from privaite.middleware.limits import RequestSizeLimitMiddleware
 from privaite.providers.router import ProviderRouter
 
 
@@ -55,3 +56,64 @@ async def test_request_within_limit_passes_size_check():
     # The size middleware lets it through; the request fails later for another
     # reason (unknown model), never with 413.
     assert resp.status_code != 413
+
+
+@pytest.mark.asyncio
+async def test_chunked_body_without_content_length_is_rejected():
+    """A body streamed in chunks with no Content-Length still hits the limit."""
+
+    async def downstream(scope, receive, send):  # pragma: no cover - must not run
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    mw = RequestSizeLimitMiddleware(downstream, max_bytes=100)
+
+    chunks = [
+        {"type": "http.request", "body": b"x" * 60, "more_body": True},
+        {"type": "http.request", "body": b"x" * 60, "more_body": False},
+    ]
+
+    async def receive():
+        return chunks.pop(0)
+
+    sent: list[dict] = []
+
+    async def send(message):
+        sent.append(message)
+
+    await mw({"type": "http", "headers": []}, receive, send)
+
+    assert sent[0]["type"] == "http.response.start"
+    assert sent[0]["status"] == 413
+
+
+@pytest.mark.asyncio
+async def test_body_within_limit_is_replayed_intact():
+    """A body under the limit reaches the downstream app unchanged."""
+    received = bytearray()
+
+    async def downstream(scope, receive, send):
+        while True:
+            message = await receive()
+            received.extend(message.get("body", b""))
+            if not message.get("more_body", False):
+                break
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    mw = RequestSizeLimitMiddleware(downstream, max_bytes=1000)
+
+    chunks = [
+        {"type": "http.request", "body": b"hello ", "more_body": True},
+        {"type": "http.request", "body": b"world", "more_body": False},
+    ]
+
+    async def receive():
+        return chunks.pop(0)
+
+    async def send(message):
+        pass
+
+    await mw({"type": "http", "headers": []}, receive, send)
+
+    assert bytes(received) == b"hello world"

@@ -63,14 +63,16 @@ def create_app(config: PrivAiTeConfig | None = None) -> FastAPI:
     app = FastAPI(
         title="PrivAiTe",
         description="Privacy-first LLM proxy with transparent PII anonymization",
-        version="0.2.2",
+        version="0.2.3",
         lifespan=lifespan,
     )
 
     app.state.config = config
 
     app.add_middleware(AuthMiddleware)
-    app.add_middleware(RequestSizeLimitMiddleware)
+    app.add_middleware(
+        RequestSizeLimitMiddleware, max_bytes=config.server.max_request_bytes
+    )
     app.include_router(api_router)
 
     return app

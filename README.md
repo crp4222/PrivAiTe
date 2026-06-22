@@ -174,11 +174,27 @@ Point any OpenAI-compatible client to `http://localhost:8400/v1` with your proxy
 - URL: `http://host.docker.internal:8400/v1`
 - Key: your `PRIVAITE_API_KEYS` value
 
+If you would rather not run a separate proxy, there is also an in-process Open
+WebUI filter (see [Open WebUI filter](#open-webui-filter) below).
+
 ## Docker
 
 ```bash
 docker compose up -d
 ```
+
+## Open WebUI filter
+
+`integrations/openwebui/privaite_filter.py` is an Open WebUI Filter Function. It
+runs the engine inside Open WebUI, so it anonymizes the outgoing request and
+restores PII in the reply without a separate proxy. It covers message text,
+tool-call arguments, and multimodal text.
+
+To install it: Admin Panel → Functions → "+", paste the file, save, enable it,
+then open its valves to pick the preset (`light` or `onnx`) and the languages.
+The filter pulls Presidio and spaCy into Open WebUI and downloads the spaCy
+models on first use, so the first request after enabling it can be slow. Setup
+notes are in [`integrations/openwebui/README.md`](integrations/openwebui/README.md).
 
 ## Configuration
 

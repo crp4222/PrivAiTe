@@ -1,6 +1,6 @@
 [project]
 name = "privaite"
-version = "0.2.2"
+version = "0.2.3"
 description = "Privacy-first LLM proxy with transparent PII anonymization"
 readme = "README.md"
 requires-python = ">=3.11"

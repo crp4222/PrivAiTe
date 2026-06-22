@@ -2,10 +2,10 @@
 title: PrivAiTe PII Anonymizer
 author: crp4222
 author_url: https://github.com/crp4222/PrivAiTe
-version: 0.1.0
+version: 0.1.1
 required_open_webui_version: 0.5.0
 requirements: privaite>=0.2.2
-description: Anonymize PII locally before a request leaves for the provider, and restore it in the response. Covers message text, tool-call arguments, and multimodal text.
+description: Anonymize PII (text, tool calls, multimodal) before requests reach the provider.
 """
 
 # Runs PrivAiTe's engine in-process inside Open WebUI. inlet() anonymizes the
@@ -18,8 +18,6 @@ description: Anonymize PII locally before a request leaves for the provider, and
 # run PrivAiTe as a standalone proxy and point your connection at it instead.
 
 from __future__ import annotations
-
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -90,7 +88,7 @@ class Filter:
         self._engine_key = key
         return engine
 
-    async def inlet(self, body: dict, __metadata__: Optional[dict] = None) -> dict:
+    async def inlet(self, body: dict, __metadata__: dict | None = None) -> dict:
         messages = body.get("messages")
         if not messages:
             return body
@@ -104,7 +102,7 @@ class Filter:
             __metadata__["privaite_map"] = dict(mapping.get_all_fakes())
         return body
 
-    async def outlet(self, body: dict, __metadata__: Optional[dict] = None) -> dict:
+    async def outlet(self, body: dict, __metadata__: dict | None = None) -> dict:
         if not self.valves.deanonymize or __metadata__ is None:
             return body
         fakes = __metadata__.get("privaite_map")
@@ -128,5 +126,10 @@ class Filter:
             if tool_calls:
                 message["tool_calls"] = await engine.process_response_tool_calls(
                     tool_calls, mapping
+                )
+            function_call = message.get("function_call")
+            if function_call:
+                message["function_call"] = await engine.process_response_function_call(
+                    function_call, mapping
                 )
         return body

@@ -36,7 +36,7 @@ jobs:
           python -m spacy download fr_core_news_md
 
       - name: Lint
-        run: ruff check privaite/ tests/
+        run: ruff check .
 
       - name: Test
         run: python -m pytest tests/ -v --tb=short
