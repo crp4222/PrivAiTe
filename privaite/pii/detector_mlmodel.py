@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 from privaite.config.schema import MLModelDetectorConfig
 from privaite.pii.detector_base import PIIDetector
@@ -33,7 +34,7 @@ def _resolve_dtype(dtype_str: str):
 class MLModelDetector(PIIDetector):
     def __init__(self, config: MLModelDetectorConfig) -> None:
         self.config = config
-        self._classifier = None
+        self._classifier: Any = None
 
     @property
     def name(self) -> str:

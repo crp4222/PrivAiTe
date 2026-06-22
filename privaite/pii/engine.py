@@ -14,6 +14,14 @@ from privaite.pii.mapping import PIIMapping
 
 logger = logging.getLogger("privaite.pii.engine")
 
+_KNOWN_MEDIA_PART_TYPES = frozenset(
+    {"image_url", "image", "input_audio", "audio", "video", "file", "document", "refusal"}
+)
+
+
+class UnsupportedContentError(Exception):
+    """Raised in strict mode when a payload shape cannot be inspected for PII."""
+
 
 class PIIEngine:
     def __init__(self, config: PIIConfig) -> None:
@@ -31,7 +39,7 @@ class PIIEngine:
         if self.config.detectors.presidio.enabled:
             from privaite.pii.detector_presidio import PresidioDetector
 
-            detector = PresidioDetector(
+            detector: PIIDetector = PresidioDetector(
                 self.config.detectors.presidio,
                 custom_patterns=self.config.custom_patterns,
             )
@@ -124,6 +132,8 @@ class PIIEngine:
     ) -> Any:
         if isinstance(content, str):
             return await self._anonymize_text(content, mapping, language)
+        if content is None:
+            return content
 
         # Multimodal parts: [{"type": "text", "text": ...}, {"type": "image_url", ...}]
         if isinstance(content, list):
@@ -135,11 +145,26 @@ class PIIEngine:
                         part["text"], mapping, language
                     )
                     new_parts.append(new_part)
+                elif self._is_known_media_part(part):
+                    new_parts.append(part)
                 else:
+                    self._reject_if_strict(part)
                     new_parts.append(part)
             return new_parts
 
+        self._reject_if_strict(content)
         return content
+
+    def _is_known_media_part(self, part: Any) -> bool:
+        # A media part (image/audio/...) carries no text to scrub, so passing it
+        # through is safe even in strict mode.
+        return isinstance(part, dict) and part.get("type") in _KNOWN_MEDIA_PART_TYPES
+
+    def _reject_if_strict(self, value: Any) -> None:
+        if self.config.strict:
+            raise UnsupportedContentError(
+                f"strict mode: content of type {type(value).__name__} cannot be inspected"
+            )
 
     async def _anonymize_tool_calls(
         self, tool_calls: Any, mapping: PIIMapping, language: str
@@ -277,7 +302,7 @@ class PIIEngine:
 
         all_entities: list[PIIEntity] = []
         for result in results:
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 logger.error("Detector failed: %s", result)
                 raise result
             all_entities.extend(result)

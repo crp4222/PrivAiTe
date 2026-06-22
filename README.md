@@ -240,6 +240,8 @@ PII is stripped from every field that carries user text to the provider:
 
 On the way back, the original values are restored in `message.content` and, for non-streaming chat, in returned `tool_calls`. Set `pii.passthrough.tool_calls: true` to forward tool-call arguments unchanged.
 
+For a stricter posture, set `pii.strict: true`: any request whose content can't be inspected (a shape that is neither text nor a known media part) is rejected with `400` instead of being forwarded.
+
 ## Known limitations
 
 - **Single-word names** from spaCy are dropped (too many false positives). Caught by contextual patterns ("Nom: X") or the `onnx` preset.

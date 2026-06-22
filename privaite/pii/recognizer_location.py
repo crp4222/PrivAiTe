@@ -40,7 +40,7 @@ class ContextualLocationRecognizer(EntityRecognizer):
         pass
 
     def analyze(
-        self, text: str, entities: list[str], nlp_artifacts: NlpArtifacts = None
+        self, text: str, entities: list[str], nlp_artifacts: NlpArtifacts | None = None
     ) -> list[RecognizerResult]:
         results = []
         for pattern in COMPILED:

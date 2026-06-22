@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 from privaite.config.schema import BertNERDetectorConfig
 from privaite.pii.detector_base import PIIDetector
@@ -13,7 +14,7 @@ logger = logging.getLogger("privaite.pii.detector_bert_ner")
 class BertNERDetector(PIIDetector):
     def __init__(self, config: BertNERDetectorConfig) -> None:
         self.config = config
-        self._classifier = None
+        self._classifier: Any = None
 
     @property
     def name(self) -> str:

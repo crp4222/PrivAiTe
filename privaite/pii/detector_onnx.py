@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -131,8 +132,8 @@ class OnnxPrivacyFilterDetector(PIIDetector):
 
     def __init__(self, config: OnnxDetectorConfig) -> None:
         self.config = config
-        self._session = None
-        self._tokenizer = None
+        self._session: Any = None
+        self._tokenizer: Any = None
 
     @property
     def name(self) -> str:

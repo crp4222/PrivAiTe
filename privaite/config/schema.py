@@ -127,6 +127,7 @@ class PIIConfig(BaseModel):
     merge_strategy: str = "union"
     overlap_resolution: str = "highest_score"
     on_error: str = "block"
+    strict: bool = False
     anonymization: AnonymizationConfig = Field(default_factory=AnonymizationConfig)
     deanonymization: DeanonymizationConfig = Field(default_factory=DeanonymizationConfig)
     passthrough: PassthroughConfig = Field(default_factory=PassthroughConfig)

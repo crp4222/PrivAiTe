@@ -13,7 +13,7 @@ from privaite.config.schema import (
     PresidioDetectorConfig,
 )
 from privaite.pii.detector_base import PIIDetector
-from privaite.pii.engine import PIIEngine
+from privaite.pii.engine import PIIEngine, UnsupportedContentError
 from privaite.pii.entity import PIIEntity
 
 
@@ -52,13 +52,16 @@ class FakeDetector(PIIDetector):
         return entities
 
 
-def _make_engine(passthrough: PassthroughConfig | None = None) -> PIIEngine:
+def _make_engine(
+    passthrough: PassthroughConfig | None = None, strict: bool = False
+) -> PIIEngine:
     config = PIIConfig(
         enabled=True,
         detectors=DetectorsConfig(presidio=PresidioDetectorConfig(enabled=False)),
         anonymization=AnonymizationConfig(method="placeholder"),
         deanonymization=DeanonymizationConfig(enabled=True, fuzzy_matching=False),
         passthrough=passthrough or PassthroughConfig(),
+        strict=strict,
     )
     engine = PIIEngine(config)
     engine.detectors = [
@@ -219,3 +222,35 @@ async def test_legacy_function_call_passthrough_flag():
     out, _ = await engine.process_request(messages)
 
     assert out[0]["function_call"]["arguments"] == args
+
+
+@pytest.mark.asyncio
+async def test_strict_mode_rejects_uninspectable_content():
+    engine = _make_engine(strict=True)
+    with pytest.raises(UnsupportedContentError):
+        await engine.process_request([{"role": "user", "content": {"weird": "shape"}}])
+
+
+@pytest.mark.asyncio
+async def test_strict_mode_allows_text_and_media_parts():
+    engine = _make_engine(strict=True)
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Marie Dupont"},
+                {"type": "image_url", "image_url": {"url": "http://x"}},
+            ],
+        }
+    ]
+    out, _ = await engine.process_request(messages)
+    assert "<PERSON_1>" in out[0]["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_non_strict_passes_uninspectable_through():
+    engine = _make_engine()  # strict=False
+    out, _ = await engine.process_request(
+        [{"role": "user", "content": {"weird": "shape"}}]
+    )
+    assert out[0]["content"] == {"weird": "shape"}

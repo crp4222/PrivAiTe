@@ -29,7 +29,7 @@ class CustomPatternRecognizer(EntityRecognizer):
         pass
 
     def analyze(
-        self, text: str, entities: list[str], nlp_artifacts: NlpArtifacts = None
+        self, text: str, entities: list[str], nlp_artifacts: NlpArtifacts | None = None
     ) -> list[RecognizerResult]:
         results = []
         for compiled, entity_type, score in self._patterns:

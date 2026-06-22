@@ -43,32 +43,34 @@ class FakeDetector(PIIDetector):
         return out
 
 
-class FakeProviderRouter:
-    """Captures the messages it is handed and echoes them back as a response."""
-
+class FakeRouter:
     def __init__(self) -> None:
-        self.received_messages: list[dict] | None = None
+        self.completion_messages = None
+        self.embedding_input = None
 
     def has_model(self, model: str) -> bool:
         return True
 
     async def completion(self, model_alias, messages, **kwargs):
-        self.received_messages = messages
-        last = messages[-1]
-        message: dict = {"role": "assistant", "content": None}
-        if isinstance(last.get("content"), str):
-            message["content"] = f"Echo: {last['content']}"
-        if last.get("tool_calls"):
-            message["tool_calls"] = last["tool_calls"]
+        self.completion_messages = messages
+        content = messages[-1]["content"]
+        echoed = content if isinstance(content, str) else json.dumps(content)
         return {
-            "id": "fake",
-            "object": "chat.completion",
+            "object": "text_completion",
             "model": model_alias,
-            "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
+            "choices": [{"index": 0, "text": f"Echo: {echoed}"}],
+        }
+
+    async def embedding(self, model_alias, input_text, **kwargs):
+        self.embedding_input = input_text
+        return {
+            "object": "list",
+            "model": model_alias,
+            "data": [{"index": 0, "embedding": [0.0, 0.1]}],
         }
 
 
-def _make_app(strict: bool = False) -> tuple[object, FakeProviderRouter]:
+def _make_app() -> tuple[object, FakeRouter]:
     config = PrivAiTeConfig(
         server=ServerConfig(host="127.0.0.1", port=8400),
         auth=AuthConfig(enabled=False),
@@ -78,118 +80,84 @@ def _make_app(strict: bool = False) -> tuple[object, FakeProviderRouter]:
             detectors=DetectorsConfig(presidio=PresidioDetectorConfig(enabled=False)),
             anonymization=AnonymizationConfig(method="placeholder"),
             deanonymization=DeanonymizationConfig(enabled=True, fuzzy_matching=False),
-            strict=strict,
         ),
         logging=LoggingConfig(format="text", level="debug"),
     )
     app = create_app(config)
-
     engine = PIIEngine(config.pii)
     engine.detectors = [
         FakeDetector({"Marie Dupont": "PERSON", "marie@acme.com": "EMAIL_ADDRESS"})
     ]
     engine._ready = True
-
     app.state.pii_engine = engine
     app.state.pii_tracker = PIITracker()
-    router = FakeProviderRouter()
+    router = FakeRouter()
     app.state.provider_router = router
     return app, router
 
 
 @pytest.mark.asyncio
-async def test_provider_receives_anonymized_and_response_restored():
+async def test_completions_string_prompt_anonymized_and_restored():
     app, router = _make_app()
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         resp = await client.post(
-            "/v1/chat/completions",
-            json={
-                "model": "m",
-                "messages": [
-                    {"role": "user", "content": "Contact Marie Dupont at marie@acme.com"}
-                ],
-            },
+            "/v1/completions",
+            json={"model": "m", "prompt": "Contact Marie Dupont at marie@acme.com"},
         )
 
     assert resp.status_code == 200
-
-    # The provider only ever saw placeholders, never the real PII.
-    sent = router.received_messages[-1]["content"]
+    sent = router.completion_messages[-1]["content"]
     assert "Marie Dupont" not in sent
     assert "marie@acme.com" not in sent
-    assert "<PERSON_1>" in sent
 
-    # The client gets the real values back.
-    content = resp.json()["choices"][0]["message"]["content"]
-    assert "Marie Dupont" in content
-    assert "marie@acme.com" in content
+    text = resp.json()["choices"][0]["text"]
+    assert "Marie Dupont" in text
+    assert "marie@acme.com" in text
 
 
 @pytest.mark.asyncio
-async def test_tool_call_arguments_anonymized_and_restored_through_endpoint():
-    app, router = _make_app()
-    args = json.dumps({"to": "marie@acme.com", "name": "Marie Dupont"})
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        resp = await client.post(
-            "/v1/chat/completions",
-            json={
-                "model": "m",
-                "messages": [
-                    {
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [
-                            {
-                                "id": "c1",
-                                "type": "function",
-                                "function": {"name": "send_email", "arguments": args},
-                            }
-                        ],
-                    }
-                ],
-            },
-        )
-
-    assert resp.status_code == 200
-
-    sent_args = router.received_messages[-1]["tool_calls"][0]["function"]["arguments"]
-    assert "Marie Dupont" not in sent_args
-    assert "marie@acme.com" not in sent_args
-
-    out_args = resp.json()["choices"][0]["message"]["tool_calls"][0]["function"][
-        "arguments"
-    ]
-    assert json.loads(out_args) == json.loads(args)
-
-
-@pytest.mark.asyncio
-async def test_clean_message_passes_through_unchanged():
+async def test_completions_list_prompt_anonymized():
     app, router = _make_app()
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         resp = await client.post(
-            "/v1/chat/completions",
-            json={"model": "m", "messages": [{"role": "user", "content": "hello there"}]},
+            "/v1/completions",
+            json={"model": "m", "prompt": ["I am Marie Dupont", "nothing here"]},
         )
 
     assert resp.status_code == 200
-    assert router.received_messages[-1]["content"] == "hello there"
+    sent = json.dumps(router.completion_messages[-1]["content"])
+    assert "Marie Dupont" not in sent
 
 
 @pytest.mark.asyncio
-async def test_strict_mode_returns_400_on_uninspectable_payload():
-    app, router = _make_app(strict=True)
+async def test_embeddings_string_input_anonymized():
+    app, router = _make_app()
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         resp = await client.post(
-            "/v1/chat/completions",
-            json={"model": "m", "messages": [{"role": "user", "content": {"x": "y"}}]},
+            "/v1/embeddings",
+            json={"model": "m", "input": "my email is marie@acme.com"},
         )
-    assert resp.status_code == 400
-    assert router.received_messages is None
+
+    assert resp.status_code == 200
+    assert "marie@acme.com" not in router.embedding_input
+
+
+@pytest.mark.asyncio
+async def test_embeddings_list_input_anonymized():
+    app, router = _make_app()
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.post(
+            "/v1/embeddings",
+            json={"model": "m", "input": ["Marie Dupont", "clean"]},
+        )
+
+    assert resp.status_code == 200
+    assert "Marie Dupont" not in json.dumps(router.embedding_input)

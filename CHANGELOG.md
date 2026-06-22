@@ -23,6 +23,9 @@ All notable changes to this project are documented here. The format follows
 - The `pii.passthrough.tool_calls` config flag is now honored. It was previously
   declared in the schema but never read. Default is `false` (anonymize); set it
   to `true` to forward tool-call arguments unchanged.
+- `pii.strict` option (default `false`): when enabled, a request whose content
+  cannot be inspected (a shape that is neither text nor a known media part) is
+  rejected with HTTP 400 instead of being forwarded to the provider.
 
 ### Security
 - Authentication now fails closed: when `auth.enabled` is set but no API keys are
@@ -42,6 +45,12 @@ All notable changes to this project are documented here. The format follows
 - Integration test fixture used `asyncio.get_event_loop()`, which raises on
   Python 3.12+. It now creates a dedicated event loop, so the suite is green on
   Python 3.11 through 3.13.
+
+### Tooling
+- The type checker is now clean (`mypy privaite/` passes) and runs in CI as a
+  dedicated job. CI also installs the spaCy models so the integration suite runs.
+- Added endpoint tests (chat, completions, embeddings) and streaming-handler
+  tests covering the request and response anonymization paths.
 
 ### Notes
 - Streaming responses do not yet de-anonymize tool-call argument deltas. This is

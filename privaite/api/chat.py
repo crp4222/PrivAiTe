@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from privaite.api.dependencies import get_config, get_pii_engine, get_provider_router
 from privaite.config.schema import PrivAiTeConfig
+from privaite.pii.engine import UnsupportedContentError
 from privaite.providers.router import ProviderRouter
 from privaite.utils.errors import openai_error, provider_error_response
 
@@ -45,12 +46,14 @@ async def chat_completions(
                     "x-session-id",
                     request.headers.get("authorization", "anonymous"),
                 )
-                counts = {}
+                counts: dict[str, int] = {}
                 for orig in mapping._original_to_fake:
                     t = mapping.get_entity_type(orig)
                     if t:
                         counts[t] = counts.get(t, 0) + 1
                 tracker.record(session_id, counts)
+        except UnsupportedContentError as exc:
+            return openai_error(str(exc), "invalid_request_error", 400)
         except Exception:
             logger.exception("PII processing failed")
             if config.pii.on_error == "block":

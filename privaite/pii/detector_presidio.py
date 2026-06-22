@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 from privaite.config.schema import PresidioDetectorConfig
 from privaite.pii.detector_base import PIIDetector
@@ -14,7 +15,7 @@ class PresidioDetector(PIIDetector):
     def __init__(self, config: PresidioDetectorConfig, custom_patterns=None) -> None:
         self.config = config
         self._custom_patterns = custom_patterns or []
-        self._analyzer = None
+        self._analyzer: Any = None
 
     @property
     def name(self) -> str:
@@ -34,7 +35,7 @@ class PresidioDetector(PIIDetector):
             "nl": "nl_core_news_md",
         }
 
-        nlp_config = {
+        nlp_config: dict[str, Any] = {
             "nlp_engine_name": "spacy",
             "models": [],
         }

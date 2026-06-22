@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Request
 
 from privaite.api.dependencies import get_config, get_pii_engine, get_provider_router
 from privaite.config.schema import PrivAiTeConfig
+from privaite.pii.engine import UnsupportedContentError
 from privaite.providers.router import ProviderRouter
 from privaite.utils.errors import openai_error, provider_error_response
 
@@ -45,6 +46,8 @@ async def embeddings(
                     msgs, _ = await pii_engine.process_request(msgs)
                     anonymized.append(msgs[0]["content"])
                 input_text = anonymized
+        except UnsupportedContentError as exc:
+            return openai_error(str(exc), "invalid_request_error", 400)
         except Exception:
             logger.exception("PII processing failed")
             if config.pii.on_error == "block":
