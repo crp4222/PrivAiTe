@@ -2,8 +2,19 @@
 name = "privaite"
 version = "0.2.1"
 description = "Privacy-first LLM proxy with transparent PII anonymization"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "BSD-3-Clause"
+keywords = ["privacy", "pii", "llm", "proxy", "anonymization", "openai", "gdpr"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 
 dependencies = [
     "fastapi>=0.115.0",
@@ -38,6 +49,11 @@ dev = [
 
 [project.scripts]
 privaite = "privaite.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/crp4222/PrivAiTe"
+Repository = "https://github.com/crp4222/PrivAiTe"
+Changelog = "https://github.com/crp4222/PrivAiTe/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 include = ["privaite*"]
