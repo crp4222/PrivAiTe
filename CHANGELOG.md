@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] - 2026-06-22
+
+### Security
+- The `/stats` tracker now stores a salted hash of the session identifier instead
+  of the raw value. The identifier can be derived from the `Authorization` header
+  (an API key), so it is no longer kept in memory or exposed by `/stats`.
+
 ## [0.2.1] - 2026-06-22
 
 ### Added

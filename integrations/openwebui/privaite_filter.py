@@ -4,7 +4,7 @@ author: crp4222
 author_url: https://github.com/crp4222/PrivAiTe
 version: 0.1.0
 required_open_webui_version: 0.5.0
-requirements: privaite==0.2.1
+requirements: privaite>=0.2.2
 description: Anonymize PII locally before a request leaves for the provider, and restore it in the response. Covers message text, tool-call arguments, and multimodal text.
 """
 
