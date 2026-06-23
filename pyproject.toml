@@ -1,6 +1,6 @@
 [project]
 name = "privaite"
-version = "0.2.3"
+version = "0.2.4"
 description = "Privacy-first LLM proxy with transparent PII anonymization"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -28,22 +28,17 @@ dependencies = [
     "presidio-analyzer>=2.2",
     "presidio-anonymizer>=2.2",
     "spacy>=3.7",
+    "onnxruntime>=1.17",
+    "transformers>=4.40",
+    "huggingface_hub>=0.23",
     "faker>=25.0",
     "click>=8.0",
 ]
 
 [project.optional-dependencies]
-# ONNX privacy-filter preset. Inference is onnxruntime only and uses the
-# tokenizer from transformers, so torch is not needed here. Install this for
-# the `onnx` preset on a machine where torch and scipy are awkward.
-onnx = [
-    "onnxruntime>=1.17",
-    "transformers>=4.40",
-    "huggingface_hub>=0.23",
-]
-# BERT NER detector (the `standard`/`full` presets). This one does need torch.
+# BERT NER detector (the `standard`/`full` presets). This is the only path that
+# needs torch; the default `onnx` preset runs on onnxruntime (a core dependency).
 ml = [
-    "transformers>=4.40",
     "torch>=2.0",
 ]
 dev = [

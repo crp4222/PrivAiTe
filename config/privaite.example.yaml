@@ -40,7 +40,10 @@ providers:
 
 pii:
   enabled: true
-  preset: "light"
+  # Full suite: detects everything including secrets and passwords. Downloads the
+  # ONNX model on first run. Use "light" for the fast, zero false-positive
+  # Presidio-only path.
+  preset: "onnx"
 
   detectors:
     presidio:

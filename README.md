@@ -4,7 +4,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-green.svg)](LICENSE)
 
-A privacy proxy for LLMs. It sits between your app and the provider, replaces personal data with placeholders before the request leaves your machine, and restores it in the response — across message text, **tool-call arguments, and multimodal content**. Works with any OpenAI-compatible client.
+A privacy proxy for LLMs. It sits between your app and the provider, replaces personal data with placeholders before the request leaves your machine, and restores it in the response, across message text, **tool-call arguments, and multimodal content**. By default it runs the full ONNX suite, so it catches **secrets and passwords** on top of names, emails, phones, cards, and IBANs. Works with any OpenAI-compatible client.
 
 ```
 You type: "Je m'appelle Marie Dupont, email marie@acme.com"
@@ -59,28 +59,26 @@ Neither is perfect alone:
 
 ## Presets
 
-Choose based on your needs:
+`onnx` is the default. It runs the full suite and detects everything, including secrets and passwords. `light` is a faster, zero false-positive option for when you only care about classic PII.
 
-| Preset | What runs | Detection | False positives | Speed | Install |
+| Preset | What runs | Detection | False positives | Speed | Secrets |
 |--------|-----------|-----------|-----------------|-------|---------|
-| `light` | Presidio only | 97% | **0%** | **23ms** | `pip install -e .` + spaCy models |
-| `onnx` | Presidio + Privacy Filter | **100%** | ~7% | 400ms | `pip install "privaite[onnx]"` |
+| `onnx` (default) | Presidio + Privacy Filter | **100%** | ~7% | 400ms | **yes** |
+| `light` | Presidio only | 97% | **0%** | **23ms** | no |
 
 ```yaml
 pii:
-  preset: "light"   # Zero false positives, fast. Recommended for most users.
-  # preset: "onnx"  # Catches everything including secrets. Needs the onnx extra.
+  preset: "onnx"    # Default. Detects everything including secrets. Downloads the model on first run.
+  # preset: "light" # Faster, zero false positives, classic PII only.
 ```
 
-The `onnx` preset runs on onnxruntime plus the transformers tokenizer, so the
-`onnx` extra does not pull in torch or scipy. The `ml` extra (the `standard` and
-`full` presets) is the only one that installs torch.
+The default install already includes onnxruntime and the tokenizer, so the `onnx` preset works out of the box. The model is downloaded the first time the proxy starts. The `ml` extra (the `standard` and `full` BERT presets) is the only one that adds torch.
 
-**When to use `light`:** You want zero disruption. Code, news, business text all pass through untouched. Only clearly identifiable PII (names, emails, phones, cards, IBANs) is anonymized.
+**When to use `onnx` (default):** You want maximum coverage. Secrets, passwords, API keys, account numbers, unusual names. Accept occasional false positives on technical identifiers.
 
-**When to use `onnx`:** You need maximum coverage. Secrets, passwords, API keys, account numbers, unusual names. Accept occasional false positives on technical identifiers.
+**When to use `light`:** You want zero disruption and the fastest path. Code, news, business text all pass through untouched. Only clearly identifiable PII (names, emails, phones, cards, IBANs) is anonymized.
 
-Two other presets exist (`standard`, `full`) but are less useful in practice — they add BERT NER which doesn't improve much over spaCy and requires PyTorch.
+Two other presets exist (`standard`, `full`) but are less useful in practice: they add BERT NER, which does not improve much over spaCy and pulls in PyTorch.
 
 ## Benchmark
 
@@ -105,11 +103,10 @@ Full benchmark with all test data: [privaite-bench](https://github.com/crp4222/p
 
 ## What's NOT detected by default
 
-- **Locations/cities** — "Paris", "London" alone aren't PII (they don't identify anyone). Detecting them causes massive false positives on any text ("Kubernetes", "PIB", "Saturday" all get flagged as locations by spaCy). Disabled by default.
-- **URLs** — Presidio's URL regex matches code like `logging.getLogger` because `.ge` is a valid TLD. Disabled by default.
-- **Passwords/secrets** — Only the `onnx` preset detects these via the Privacy Filter model.
+- **Locations/cities:** "Paris", "London" alone aren't PII (they don't identify anyone). Detecting them causes massive false positives on any text ("Kubernetes", "PIB", "Saturday" all get flagged as locations by spaCy). Disabled by default.
+- **URLs:** Presidio's URL regex matches code like `logging.getLogger` because `.ge` is a valid TLD. Disabled by default.
 
-All of these can be re-enabled in the YAML config if your use case needs them.
+Both can be re-enabled in the YAML config if your use case needs them. Secrets and passwords **are** detected by default (the `onnx` preset); switch to `light` if you want classic PII only.
 
 ## Threat model
 
@@ -130,8 +127,6 @@ For GDPR/HIPAA: treat this as pseudonymization + transfer minimization, not anon
 
 Keeping PII out of LLM calls is a crowded space, and PrivAiTe is not always the right pick. Based on each project's public docs as of June 2026:
 
-- [AI Security Gateway](https://github.com/aisecuritygateway/aisecuritygateway) does more than PII: it adds secret detection and prompt-injection blocking. If you want those in the same proxy, start there. Its PII scanning targets plain message text.
-- [Philter](https://philterd.ai/) is a mature, drop-in "change one URL" redaction proxy for plain-text prompts.
 - LiteLLM has a built-in Presidio guardrail, the natural choice if you already run the LiteLLM proxy and want PII handling inline (there are a few open bugs around scrubbing requests and responses).
 - Managed/cloud options exist too, such as Microsoft PII Shield and [LangChain's gateway redaction](https://docs.langchain.com/langsmith/llm-gateway-redaction).
 
@@ -147,10 +142,7 @@ python -m spacy download en_core_web_lg
 python -m spacy download fr_core_news_md
 ```
 
-For the `onnx` preset (optional, torch-free):
-```bash
-pip install -e ".[onnx]"
-```
+The default `onnx` preset downloads its model the first time the proxy starts. Want the lighter, faster path with no model download? Set `preset: "light"` in your config.
 
 ### 2. Configure
 

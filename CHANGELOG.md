@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.4] - 2026-06-23
+
+### Changed
+- The default preset is now `onnx` (the full Privacy Filter suite). A fresh
+  install detects everything including secrets and passwords out of the box, not
+  only the classic regex and spaCy PII. Set `preset: "light"` for the fast, zero
+  false-positive Presidio-only path, or `preset: null` to drive detectors by hand.
+- `onnxruntime`, `transformers`, and `huggingface_hub` are now core dependencies
+  (previously the separate `onnx` extra), so the default preset works without an
+  extra install. The Privacy Filter model is downloaded on first start. The `ml`
+  extra now only adds torch, used by the `standard` and `full` BERT presets.
+
+### Documentation
+- README leads with the ONNX full suite as the default preset and emphasizes that
+  secrets and passwords are detected by default.
+
 ## [0.2.3] - 2026-06-22
 
 ### Security

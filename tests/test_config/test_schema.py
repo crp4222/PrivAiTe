@@ -24,10 +24,18 @@ def test_preset_full():
     assert config.detectors.mlmodel.enabled is True
 
 
+def test_default_preset_is_onnx():
+    config = PIIConfig()
+    assert config.preset == "onnx"
+    assert config.detectors.onnx.enabled is True
+    assert config.detectors.presidio.enabled is True
+
+
 def test_preset_none_uses_defaults():
     config = PIIConfig(preset=None)
     assert config.detectors.presidio.enabled is True
     assert config.detectors.mlmodel.enabled is False
+    assert config.detectors.onnx.enabled is False
 
 
 def test_preset_invalid_raises():

@@ -122,7 +122,10 @@ class PassthroughConfig(BaseModel):
 
 class PIIConfig(BaseModel):
     enabled: bool = True
-    preset: str | None = None
+    # Default to the full ONNX suite: it detects everything the light preset does
+    # plus secrets and passwords. Set preset: "light" for the fast, zero
+    # false-positive Presidio-only path, or preset: null to drive detectors by hand.
+    preset: str | None = "onnx"
     detectors: DetectorsConfig = Field(default_factory=DetectorsConfig)
     custom_patterns: list[CustomPatternConfig] = Field(default_factory=list)
     merge_strategy: str = "union"
