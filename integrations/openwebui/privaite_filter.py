@@ -2,9 +2,9 @@
 title: PrivAiTe PII Anonymizer
 author: crp4222
 author_url: https://github.com/crp4222/PrivAiTe
-version: 0.1.1
+version: 0.1.2
 required_open_webui_version: 0.5.0
-requirements: privaite>=0.2.2
+requirements: privaite>=0.2.4
 description: Anonymize PII (text, tool calls, multimodal) before requests reach the provider.
 """
 
@@ -14,8 +14,10 @@ description: Anonymize PII (text, tool calls, multimodal) before requests reach 
 #
 # Note: this pulls Presidio and spaCy into Open WebUI's environment and downloads
 # the spaCy models for the chosen languages on first use (en_core_web_lg alone is
-# ~560MB), so the first request after enabling it can be slow. For a lighter setup,
-# run PrivAiTe as a standalone proxy and point your connection at it instead.
+# ~560MB). The default "onnx" preset also downloads the Privacy Filter model on
+# first use, so the first request after enabling it can be slow. Set the preset
+# valve to "light" to skip the ONNX model, or run PrivAiTe as a standalone proxy
+# and point your connection at it instead.
 
 from __future__ import annotations
 
@@ -34,7 +36,7 @@ _LANG_MODELS = {
 
 class Filter:
     class Valves(BaseModel):
-        preset: str = Field(default="light", description="Detection preset: 'light' or 'onnx'.")
+        preset: str = Field(default="onnx", description="'onnx' (full, secrets) or 'light' (fast)")
         languages: str = Field(default="en,fr", description="Comma-separated spaCy languages.")
         deanonymize: bool = Field(default=True, description="Restore PII in the response.")
 

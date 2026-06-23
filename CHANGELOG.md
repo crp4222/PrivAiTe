@@ -20,6 +20,13 @@ All notable changes to this project are documented here. The format follows
 - README leads with the ONNX full suite as the default preset and emphasizes that
   secrets and passwords are detected by default.
 
+### Integrations
+- The Open WebUI filter now defaults to the `onnx` preset as well (valve), and
+  requires `privaite>=0.2.4` so the ONNX dependencies are present. Bumped to v0.1.2.
+- The Docker image pre-downloads the ONNX Privacy Filter model at build time, so a
+  container with the default preset starts fast and works offline from the first
+  request instead of downloading the model on startup.
+
 ## [0.2.3] - 2026-06-22
 
 ### Security
