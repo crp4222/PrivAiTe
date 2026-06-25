@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.5] - 2026-06-25
+
+### Fixed
+- The ONNX preset was discarding two entity types the Privacy Filter model
+  actually detects: `private_address` and `private_url`. They are now mapped to
+  `LOCATION` and `URL`, so addresses and personal URLs are anonymized instead of
+  silently reaching the provider. On the comparative benchmark this lifts ONNX
+  recall from about 72% to 84%.
+- Streaming responses now de-anonymize tool-call argument deltas and the legacy
+  `function_call` arguments, not just message content. Each tool call buffers its
+  own argument stream, so a placeholder split across deltas is still restored.
+  Previously a streamed tool call delivered placeholders to the client instead of
+  the real values; non-streaming already restored them.
+
 ## [0.2.4] - 2026-06-23
 
 ### Changed

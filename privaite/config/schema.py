@@ -67,6 +67,8 @@ class OnnxDetectorConfig(BaseModel):
         "private_email": "EMAIL_ADDRESS",
         "private_phone": "PHONE_NUMBER",
         "private_date": "DATE_TIME",
+        "private_address": "LOCATION",
+        "private_url": "URL",
         "account_number": "FINANCIAL",
         "secret": "SECRET",
     })
