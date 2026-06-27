@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Integrations
+- LiteLLM custom guardrail (`integrations/litellm/privaite_guardrail.py`). Mount it
+  next to a LiteLLM `config.yaml` and reference it by dot-notation to anonymize
+  requests and restore responses inline, including inside tool-call arguments and
+  the legacy `function_call`, plus streaming, which LiteLLM's built-in Presidio
+  guardrail does not cover. This is a repo integration, not part of the PyPI
+  package; it imports `privaite` at run time.
+
 ## [0.2.8] - 2026-06-27
 
 ### Documentation

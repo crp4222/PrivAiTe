@@ -30,7 +30,7 @@ jobs:
         run: ruff check .
 
       - name: Type check
-        run: mypy privaite/ integrations/openwebui/privaite_filter.py
+        run: mypy privaite/ integrations/openwebui/privaite_filter.py integrations/litellm/privaite_guardrail.py
 
       - name: Test
         run: python -m pytest tests/ -q

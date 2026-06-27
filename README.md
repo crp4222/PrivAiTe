@@ -197,6 +197,14 @@ The filter pulls Presidio and spaCy into Open WebUI and downloads the spaCy
 models on first use, so the first request after enabling it can be slow. Setup
 notes are in [`integrations/openwebui/README.md`](integrations/openwebui/README.md).
 
+## LiteLLM guardrail
+
+`integrations/litellm/privaite_guardrail.py` is a LiteLLM custom guardrail. If you
+already run the LiteLLM proxy, mount it next to your `config.yaml` and reference it
+by dot-notation to anonymize requests and restore responses inline, including
+inside tool-call arguments, which LiteLLM's built-in Presidio guardrail does not
+cover. Setup is in [`integrations/litellm/README.md`](integrations/litellm/README.md).
+
 ## Configuration
 
 ### LLM providers
