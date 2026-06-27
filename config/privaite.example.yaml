@@ -40,9 +40,9 @@ providers:
 
 pii:
   enabled: true
-  # Full suite: detects everything including secrets and passwords. Downloads the
-  # ONNX model on first run. Use "light" for the fast, zero false-positive
-  # Presidio-only path.
+  # Full ONNX suite (default): detects everything including secrets and passwords.
+  # Downloads the ONNX model on first run. Use "light" for the fast, zero
+  # false-positive Presidio-only path.
   preset: "onnx"
 
   detectors:
@@ -60,6 +60,15 @@ pii:
         - DATE_TIME
         - US_SSN
         - UK_NHS
+
+    # ONNX privacy-filter detector. This is what preset: "onnx" turns on (the
+    # default). The preset enables it automatically; uncomment to tune it.
+    # onnx:
+    #   enabled: true
+    #   model_name: "openai/privacy-filter"
+    #   onnx_variant: "q4f16"     # quantized variant downloaded from Hugging Face
+    #   device: "auto"            # auto, cpu, cuda, coreml/mps
+    #   score_threshold: 0.5
 
     bert_ner:
       enabled: false

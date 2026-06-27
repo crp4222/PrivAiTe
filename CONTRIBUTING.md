@@ -21,11 +21,11 @@ python -m ruff check privaite/ tests/
 
 ## Project structure
 
-- `privaite/pii/` — PII detection, anonymization, de-anonymization
-- `privaite/api/` — FastAPI endpoints (OpenAI-compatible)
-- `privaite/streaming/` — SSE streaming with token-level de-anonymization
-- `privaite/providers/` — LiteLLM-based provider routing
-- `tests/` — Unit and integration tests
+- `privaite/pii/`: PII detection, anonymization, de-anonymization
+- `privaite/api/`: FastAPI endpoints (OpenAI-compatible)
+- `privaite/streaming/`: SSE streaming with token-level de-anonymization
+- `privaite/providers/`: LiteLLM-based provider routing
+- `tests/`: Unit and integration tests
 
 ## What to work on
 

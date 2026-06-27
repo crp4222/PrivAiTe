@@ -18,6 +18,23 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Download spaCy models
+        run: |
+          python -m spacy download en_core_web_lg
+          python -m spacy download fr_core_news_md
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Type check
+        run: mypy privaite/ integrations/openwebui/privaite_filter.py
+
+      - name: Test
+        run: python -m pytest tests/ -q
+
       - name: Build
         run: |
           python -m pip install --upgrade build

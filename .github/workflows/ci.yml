@@ -55,7 +55,7 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Type check
-        run: mypy privaite/
+        run: mypy privaite/ integrations/openwebui/privaite_filter.py
 
   docker:
     runs-on: ubuntu-latest

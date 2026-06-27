@@ -4,6 +4,31 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.6] - 2026-06-27
+
+### Changed
+- The default anonymization method is now `placeholder` (`<PERSON_1>`), matching
+  the example config, the README, and the threat model, which already documented
+  placeholders as the default. Previously the schema default was
+  `fake_replacement`, so running with no config file produced realistic fake
+  names instead of placeholders. Set `method: "fake_replacement"` to keep fakes.
+- The default Presidio language order is now `["fr", "en"]`, matching the example
+  config and README.
+
+### Documentation
+- Reworked the README hero around the differentiator (tool-call arguments,
+  multimodal, agent egress, zero telemetry) with legally careful wording
+  (pseudonymization, not anonymization). Corrected the "What's NOT detected by
+  default" section: the default `onnx` preset does detect personal addresses and
+  URLs; only Presidio's broad LOCATION/URL recognizers stay off. Added website
+  landing copy under `docs/landing.md`, fixed stale latency and language figures,
+  and noted the removed `[onnx]` extra in the 0.2.3 changelog entry.
+
+### Tooling
+- CI typecheck now also covers the Open WebUI filter; the publish workflow runs
+  lint, typecheck, and tests before publishing; a `.dockerignore` keeps a local
+  config out of the image. Added a test that locks the Open WebUI filter contract.
+
 ## [0.2.5] - 2026-06-25
 
 ### Fixed
@@ -57,10 +82,12 @@ All notable changes to this project are documented here. The format follows
 - Open WebUI Filter Function (`integrations/openwebui/`) that runs the engine
   in-process, with a setup guide. The response path now also restores PII inside
   the legacy `function_call`, matching the proxy.
-- `onnx` install extra (`pip install "privaite[onnx]"`). The ONNX privacy-filter
-  preset runs on onnxruntime plus the transformers tokenizer and does not need
-  torch, so this extra installs that path without pulling torch or scipy. The
-  `ml` extra (BERT NER) still installs torch, as that detector requires it.
+- `onnx` install extra (`pip install "privaite[onnx]"`, removed in 0.2.4 once
+  onnxruntime, transformers and huggingface_hub became core dependencies, so no
+  extra is needed anymore). The ONNX privacy-filter preset runs on onnxruntime
+  plus the transformers tokenizer and does not need torch, so this extra installed
+  that path without pulling torch or scipy. The `ml` extra (BERT NER) still
+  installs torch, as that detector requires it.
 
 ### Tooling
 - CI lint now runs `ruff check .` over the whole tree, including `integrations/`,

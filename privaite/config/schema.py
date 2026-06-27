@@ -30,7 +30,7 @@ class ProviderConfig(BaseModel):
 
 class PresidioDetectorConfig(BaseModel):
     enabled: bool = True
-    languages: list[str] = Field(default_factory=lambda: ["en", "fr"])
+    languages: list[str] = Field(default_factory=lambda: ["fr", "en"])
     score_threshold: float = 0.4
     entities: list[str] | None = None
 
@@ -94,13 +94,13 @@ class DetectorsConfig(BaseModel):
 
 
 class EntityOverride(BaseModel):
-    method: str = "fake_replacement"
+    method: str = "placeholder"
     masking_char: str = "*"
     domain_preserve: bool = False
 
 
 class AnonymizationConfig(BaseModel):
-    method: str = "fake_replacement"
+    method: str = "placeholder"
     faker_locale: list[str] = Field(default_factory=lambda: ["fr_FR", "en_US"])
     entity_overrides: dict[str, EntityOverride] = Field(default_factory=dict)
 

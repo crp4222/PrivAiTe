@@ -3,7 +3,7 @@ from privaite.pii.faker_providers import FakerReplacementGenerator
 
 
 def test_deterministic():
-    config = AnonymizationConfig(faker_locale=["en_US"])
+    config = AnonymizationConfig(faker_locale=["en_US"], method="fake_replacement")
     gen = FakerReplacementGenerator(config)
 
     r1 = gen.generate("PERSON", "jean dupont")
@@ -12,7 +12,7 @@ def test_deterministic():
 
 
 def test_different_inputs_different_outputs():
-    config = AnonymizationConfig(faker_locale=["en_US"])
+    config = AnonymizationConfig(faker_locale=["en_US"], method="fake_replacement")
     gen = FakerReplacementGenerator(config)
 
     r1 = gen.generate("PERSON", "alice")
@@ -21,7 +21,7 @@ def test_different_inputs_different_outputs():
 
 
 def test_generate_variant():
-    config = AnonymizationConfig(faker_locale=["en_US"])
+    config = AnonymizationConfig(faker_locale=["en_US"], method="fake_replacement")
     gen = FakerReplacementGenerator(config)
 
     r0 = gen.generate("PERSON", "alice")
@@ -31,7 +31,7 @@ def test_generate_variant():
 
 
 def test_email_generation():
-    config = AnonymizationConfig(faker_locale=["en_US"])
+    config = AnonymizationConfig(faker_locale=["en_US"], method="fake_replacement")
     gen = FakerReplacementGenerator(config)
 
     result = gen.generate("EMAIL_ADDRESS", "test@example.com")

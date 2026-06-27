@@ -4,7 +4,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-green.svg)](LICENSE)
 
-A privacy proxy for LLMs. It sits between your app and the provider, replaces personal data with placeholders before the request leaves your machine, and restores it in the response, across message text, **tool-call arguments, and multimodal content**. By default it runs the full ONNX suite, so it catches **secrets and passwords** on top of names, emails, phones, cards, and IBANs. Works with any OpenAI-compatible client.
+Keep personal data out of your LLM calls. PrivAiTe is a local proxy that sits between your app and the model provider. It finds names, emails, phone numbers, cards, IBANs, secrets and more, swaps them for stand-ins before anything leaves your machine, and puts the real values back in the reply. It does this across message text, **tool-call arguments, and multimodal content**, which is where most tools stop looking. Detection runs on your machine and nothing phones home. By default it runs the full ONNX suite, so it also catches **secrets and passwords**, not just the easy regex entities. Point any OpenAI-compatible client at it.
 
 ```
 You type: "Je m'appelle Marie Dupont, email marie@acme.com"
@@ -13,13 +13,13 @@ LLM says: "Bonjour <PERSON_1>, votre email <EMAIL_ADDRESS_1> est noté."
 You  see: "Bonjour Marie Dupont, votre email marie@acme.com est noté."
 ```
 
-Detection runs locally. This is **local pseudonymization, not guaranteed anonymization** — what it does and doesn't protect against is spelled out in [Threat model](#threat-model).
+This is local pseudonymization, not anonymization, and detection is best-effort rather than a guarantee. You remain the data controller. The [Threat model](#threat-model) spells out exactly what it protects against and what it does not.
 
 ## How detection works
 
 PrivAiTe uses two detection engines that can run together or separately:
 
-### Presidio (Microsoft) — regex + spaCy NER
+### Presidio (Microsoft): regex + spaCy NER
 
 The default engine. Handles structured PII through pattern matching and basic NER.
 
@@ -31,24 +31,24 @@ The default engine. Handles structured PII through pattern matching and basic NE
 | IBAN | Regex + checksum validation |
 | IP addresses | Regex |
 | US SSN | Regex + format validation |
-| Person names (capitalized, 2+ words) | spaCy NER — only kept if all words are capitalized |
-| Person names (lowercase or single word) | Contextual regex — only after "je m'appelle X", "my name is X", "ich heiße X", "Nom: X", etc. |
-| Dates (FR/DE) | Custom regex — "15 mars 1987", "3. März 1990" |
+| Person names (capitalized, 2+ words) | spaCy NER, only kept if all words are capitalized |
+| Person names (lowercase or single word) | Contextual regex, only after "je m'appelle X", "my name is X", "ich heiße X", "Nom: X", etc. |
+| Dates (FR/DE) | Custom regex, "15 mars 1987", "3. März 1990" |
 
-Presidio is fast (~25ms/request) and produces zero false positives on code, news articles, and technical text. The tradeoff: it misses names that spaCy doesn't recognize (unusual names, single-word names without context) and doesn't detect secrets/passwords.
+Presidio is fast (~23ms/request) and produces zero false positives on code, news articles, and technical text. The tradeoff: it misses names that spaCy doesn't recognize (unusual names, single-word names without context) and doesn't detect secrets/passwords.
 
-### OpenAI Privacy Filter — contextual ML model
+### OpenAI Privacy Filter: contextual ML model
 
 [OpenAI's open-source PII model](https://openai.com/index/introducing-openai-privacy-filter/) (1.5B params, 50M active, Apache 2.0). Runs locally via ONNX Runtime (~800MB, no PyTorch needed).
 
 | What it adds over Presidio | How |
 |---|---|
-| Person names (any format, any case) | ML NER — understands context, not just capitalization |
+| Person names (any format, any case) | ML NER, understands context, not just capitalization |
 | Passwords and secrets | Detects "SuperSecret2024!", API keys like "sk-proj-..." |
 | Account numbers | Detects bank account numbers, policy numbers, etc. |
 | Dates (all languages) | ML-based, not limited to FR/DE regex |
 
-The Privacy Filter is slower (~400ms/request) and occasionally flags technical identifiers as account numbers (e.g., "CMD-2024-98765"). It runs as a second pass alongside Presidio — Presidio handles regex-based entities, the Privacy Filter handles contextual NER.
+The Privacy Filter is slower (~400ms/request) and occasionally flags technical identifiers as account numbers (e.g., "CMD-2024-98765"). It runs as a second pass alongside Presidio, which handles the regex-based entities while the Privacy Filter handles contextual NER.
 
 ### Why two engines?
 
@@ -103,16 +103,18 @@ Full benchmark with all test data: [privaite-bench](https://github.com/crp4222/p
 
 ## What's NOT detected by default
 
-- **Locations/cities:** "Paris", "London" alone aren't PII (they don't identify anyone). Detecting them causes massive false positives on any text ("Kubernetes", "PIB", "Saturday" all get flagged as locations by spaCy). Disabled by default.
-- **URLs:** Presidio's URL regex matches code like `logging.getLogger` because `.ge` is a valid TLD. Disabled by default.
+The default `onnx` preset does detect personal addresses (as `LOCATION`) and personal URLs (as `URL`) through the Privacy Filter model, and replaces them. What stays off by default are Presidio's broad recognizers for those types, because they cause heavy false positives:
 
-Both can be re-enabled in the YAML config if your use case needs them. Secrets and passwords **are** detected by default (the `onnx` preset); switch to `light` if you want classic PII only.
+- **Generic place names (the Presidio LOCATION recognizer):** "Paris" or "London" on their own aren't PII, and spaCy flags ordinary words ("Kubernetes", "Saturday") as locations. The `onnx` preset keeps this recognizer off and relies on the model's context-aware address detection instead.
+- **The Presidio URL regex:** it matches code like `logging.getLogger` because `.ge` is a valid TLD. The `onnx` preset keeps it off, and the model still catches genuine personal URLs.
+
+On the `light` preset (Presidio only), addresses and URLs are not detected. Secrets and passwords are detected only by the `onnx` preset. Any recognizer can be turned on in the YAML config.
 
 ## Threat model
 
 PrivAiTe performs **local pseudonymization**, not guaranteed anonymization. Detection runs on your machine; the real ↔ placeholder mapping lives in memory only for the duration of a request and is dropped afterwards.
 
-**What it protects against:** the LLM provider storing, training on, or logging your raw PII. The provider receives placeholders (`<PERSON_1>`, …) for everything the detector catches — across message content, tool-call arguments, and multimodal text.
+**What it protects against:** the LLM provider storing, training on, or logging your raw PII. The provider receives placeholders (`<PERSON_1>`, …) for everything the detector catches, across message content, tool-call arguments, and multimodal text.
 
 **What it does NOT protect against:**
 
@@ -216,9 +218,9 @@ providers:
 ```yaml
 pii:
   anonymization:
-    method: "placeholder"        # <PERSON_1>, <EMAIL_ADDRESS_1> — recommended
+    method: "placeholder"        # <PERSON_1>, <EMAIL_ADDRESS_1> (recommended)
     # method: "fake_replacement" # Realistic fakes via Faker (Jean → Michel)
-    # method: "redact"           # [PERSON], [EMAIL_ADDRESS] — irreversible
+    # method: "redact"           # [PERSON], [EMAIL_ADDRESS] (irreversible)
     # method: "mask"             # ********
 ```
 
@@ -237,7 +239,7 @@ pii:
 
 ### Languages
 
-7 languages supported with spaCy NER + contextual patterns: FR, EN, DE, ES, IT, PT, NL.
+7 languages supported with spaCy NER and contextual patterns: FR, EN, DE, ES, IT (benchmarked), plus PT and NL (best-effort, not yet in the benchmark).
 
 ```yaml
 pii:

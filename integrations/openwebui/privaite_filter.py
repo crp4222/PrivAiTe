@@ -21,6 +21,8 @@ description: Anonymize PII (text, tool calls, multimodal) before requests reach 
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 _LANG_MODELS = {
@@ -42,8 +44,8 @@ class Filter:
 
     def __init__(self) -> None:
         self.valves = self.Valves()
-        self._engine = None
-        self._engine_key = None
+        self._engine: Any = None
+        self._engine_key: Any = None
 
     def _languages(self) -> list[str]:
         return [lang.strip() for lang in self.valves.languages.split(",") if lang.strip()]

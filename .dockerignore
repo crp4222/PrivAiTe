@@ -1,0 +1,15 @@
+# Local working files that must not be baked into the image.
+# In particular a local config/privaite.yaml could pin a different preset; the
+# container should fall back to the schema defaults (onnx) unless you mount a config.
+config/privaite.yaml
+.venv/
+.venv*/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.git/
+.github/
+.DS_Store
