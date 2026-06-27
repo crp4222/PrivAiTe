@@ -166,7 +166,7 @@ python -m privaite --reload
 
 ### 4. Connect
 
-Point any OpenAI-compatible client to `http://localhost:8400/v1` with your proxy API key.
+Point any OpenAI-compatible client to `http://localhost:8400/v1` with your proxy API key. Ready-to-run client snippets (curl, Python, Node) are in [`examples/`](examples/).
 
 **OpenWebUI (Docker):** Admin → Settings → Connections → OpenAI API:
 - URL: `http://host.docker.internal:8400/v1`
