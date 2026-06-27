@@ -1,19 +1,31 @@
 [project]
 name = "privaite"
-version = "0.2.7"
-description = "Privacy-first LLM proxy with transparent PII anonymization"
+version = "0.2.8"
+description = "Drop-in self-hosted LLM proxy that reversibly redacts PII before LLM calls, including tool-call arguments and multimodal content"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "BSD-3-Clause"
-keywords = ["privacy", "pii", "llm", "proxy", "anonymization", "openai", "gdpr"]
+keywords = [
+    "privacy", "pii", "pii-redaction", "redaction", "anonymization",
+    "de-identification", "data-masking", "llm", "llm-security", "proxy",
+    "openai", "chatgpt", "gdpr", "presidio", "guardrails", "self-hosted",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Framework :: FastAPI",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Security",
+    "Topic :: Internet :: Proxy Servers",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Natural Language :: English",
+    "Natural Language :: French",
+    "Natural Language :: German",
+    "Natural Language :: Spanish",
+    "Natural Language :: Italian",
 ]
 
 dependencies = [

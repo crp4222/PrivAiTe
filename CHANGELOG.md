@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.8] - 2026-06-27
+
+### Documentation
+- Discoverability pass. Richer PyPI keywords and Trove classifiers, a clearer
+  one-line description, and a canonical positioning tagline in the README. Added
+  `docs/comparison.md` (PrivAiTe vs Presidio, LLM Guard, and LiteLLM PII masking)
+  and an `llms.txt` so AI coding assistants can identify PrivAiTe as a
+  PII-redaction proxy. GitHub repository topics and About were refreshed too.
+
 ## [0.2.7] - 2026-06-27
 
 ### Fixed

@@ -3,6 +3,9 @@
 [![CI](https://github.com/crp4222/PrivAiTe/actions/workflows/ci.yml/badge.svg)](https://github.com/crp4222/PrivAiTe/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-green.svg)](LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/privaite.svg)](https://pypi.org/project/privaite/)
+
+**A drop-in, self-hosted LLM proxy that reversibly redacts PII before it reaches the provider, including inside tool-call arguments and multimodal content, with zero telemetry.**
 
 Keep personal data out of your LLM calls. PrivAiTe is a local proxy that sits between your app and the model provider. It finds names, emails, phone numbers, cards, IBANs, secrets and more, swaps them for stand-ins before anything leaves your machine, and puts the real values back in the reply. It does this across message text, **tool-call arguments, and multimodal content**, which is where most tools stop looking. Detection runs on your machine and nothing phones home. By default it runs the full ONNX suite, so it also catches **secrets and passwords**, not just the easy regex entities. Point any OpenAI-compatible client at it.
 
@@ -99,7 +102,7 @@ Tested on 61 documents across 5 languages (FR, EN, DE, ES, IT). Corporate letter
 
 The `light` misses are all PERSON entities: single-word names, long multi-part Spanish names, and names spaCy doesn't recognize. Regex entities are 100% on both presets.
 
-Full benchmark with all test data: [privaite-bench](https://github.com/crp4222/privaite-bench)
+Full benchmark with all test data: [privaite-bench](https://github.com/crp4222/privaite-bench). Head-to-head feature comparison with Presidio, LLM Guard, and LiteLLM PII masking: [docs/comparison.md](docs/comparison.md).
 
 ## What's NOT detected by default
 
