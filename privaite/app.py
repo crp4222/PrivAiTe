@@ -63,7 +63,7 @@ def create_app(config: PrivAiTeConfig | None = None) -> FastAPI:
     app = FastAPI(
         title="PrivAiTe",
         description="Privacy-first LLM proxy with transparent PII anonymization",
-        version="0.2.6",
+        version="0.2.7",
         lifespan=lifespan,
     )
 

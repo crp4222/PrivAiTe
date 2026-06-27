@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.7] - 2026-06-27
+
+### Fixed
+- Anonymization method dispatch now lives in one place (the `Anonymizer`); the
+  faker generator is reduced to producing fake values only, removing a duplicate
+  implementation that had drifted. Two entity-override bugs are fixed as a result:
+  an override with method `placeholder` now produces a numbered `<TYPE_n>`
+  placeholder (it previously emitted a literal `<REDACTED>`), and an override with
+  method `fake_replacement` now generates a fake for the correct entity type (it
+  previously used a generic fallback). An override with method `redact` now
+  returns `[TYPE]`, matching the global redact output and the documentation (it
+  previously returned `[REDACTED]`).
+
 ## [0.2.6] - 2026-06-27
 
 ### Changed

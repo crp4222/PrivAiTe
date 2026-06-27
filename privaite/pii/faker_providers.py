@@ -5,39 +5,27 @@ from collections.abc import Callable
 
 from faker import Faker
 
-from privaite.config.schema import AnonymizationConfig, EntityOverride
+from privaite.config.schema import AnonymizationConfig
 
 
 class FakerReplacementGenerator:
+    """Produces realistic fake values for the ``fake_replacement`` method.
+
+    This class only generates fakes. Method dispatch (placeholder, mask, redact)
+    and entity overrides are owned by :class:`~privaite.pii.anonymizer.Anonymizer`,
+    the single place that also holds the per-request mapping used to number
+    placeholders. Keeping dispatch in one place avoids the two implementations
+    drifting apart.
+    """
+
     def __init__(self, config: AnonymizationConfig) -> None:
         self.config = config
-        self.faker = Faker(config.faker_locale)
-        self._counters: dict[str, int] = {}
 
     def generate(self, entity_type: str, original: str) -> str:
-        override = self.config.entity_overrides.get(entity_type)
-        if override:
-            return self._apply_override(override, original)
-
-        method = self.config.method
-        if method == "redact":
-            return f"[{entity_type}]"
-        if method == "mask":
-            return "*" * len(original)
-        if method == "placeholder":
-            return self._next_placeholder(entity_type)
-
         return self._generate_fake(entity_type, original)
 
     def generate_variant(self, entity_type: str, original: str, variant: int) -> str:
-        if self.config.method == "placeholder":
-            return self._next_placeholder(entity_type)
         return self._generate_fake(entity_type, original, salt=variant)
-
-    def _next_placeholder(self, entity_type: str) -> str:
-        n = self._counters.get(entity_type, 0) + 1
-        self._counters[entity_type] = n
-        return f"<{entity_type}_{n}>"
 
     def _seeded_faker(self, original: str, salt: int = 0) -> Faker:
         raw = original.lower().strip() + str(salt)
@@ -71,13 +59,3 @@ class FakerReplacementGenerator:
             return generator()
 
         return f"[{entity_type}_{f.pystr(min_chars=4, max_chars=8)}]"
-
-    def _apply_override(self, override: EntityOverride, original: str) -> str:
-        if override.method == "redact":
-            return "[REDACTED]"
-        if override.method == "mask":
-            return override.masking_char * len(original)
-        if override.method == "placeholder":
-            return "<REDACTED>"
-
-        return self._generate_fake("GENERIC", original)

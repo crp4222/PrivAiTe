@@ -123,3 +123,80 @@ def test_placeholder_mode():
     assert "<PERSON_1>" in result
     assert "Jean Michel" not in result
     assert mapping.get_original("<PERSON_1>") == "Jean Michel"
+
+
+def test_global_redact_uses_typed_marker():
+    config = AnonymizationConfig(faker_locale=["en_US"], method="redact")
+    anon = Anonymizer(config)
+    mapping = PIIMapping()
+
+    result = anon.anonymize(
+        "Hi John Smith", [_entity("PERSON", "John Smith", 3, 13)], mapping
+    )
+    assert "[PERSON]" in result
+    assert "John Smith" not in result
+
+
+def test_global_mask():
+    config = AnonymizationConfig(faker_locale=["en_US"], method="mask")
+    anon = Anonymizer(config)
+    mapping = PIIMapping()
+
+    result = anon.anonymize("Hi John", [_entity("PERSON", "John", 3, 7)], mapping)
+    assert "****" in result
+    assert "John" not in result
+
+
+def test_override_redact_matches_global_typed_marker():
+    config = AnonymizationConfig(
+        faker_locale=["en_US"],
+        method="placeholder",
+        entity_overrides={"SECRET": EntityOverride(method="redact")},
+    )
+    anon = Anonymizer(config)
+    mapping = PIIMapping()
+
+    result = anon.anonymize(
+        "key sk-abc123", [_entity("SECRET", "sk-abc123", 4, 13)], mapping
+    )
+    assert "[SECRET]" in result
+    assert "sk-abc123" not in result
+
+
+def test_override_placeholder_is_numbered():
+    # An override of method "placeholder" must yield a numbered placeholder, not a
+    # literal marker, even when the global method is fake_replacement.
+    config = AnonymizationConfig(
+        faker_locale=["en_US"],
+        method="fake_replacement",
+        entity_overrides={"PERSON": EntityOverride(method="placeholder")},
+    )
+    anon = Anonymizer(config)
+    mapping = PIIMapping()
+
+    result = anon.anonymize(
+        "Hi John Smith", [_entity("PERSON", "John Smith", 3, 13)], mapping
+    )
+    assert "<PERSON_1>" in result
+    assert mapping.get_original("<PERSON_1>") == "John Smith"
+
+
+def test_override_fake_replacement_uses_entity_type():
+    # An override of method "fake_replacement" must produce a real fake for the
+    # entity type, not the generic fallback and not a placeholder.
+    config = AnonymizationConfig(
+        faker_locale=["en_US"],
+        method="placeholder",
+        entity_overrides={"EMAIL_ADDRESS": EntityOverride(method="fake_replacement")},
+    )
+    anon = Anonymizer(config)
+    mapping = PIIMapping()
+
+    result = anon.anonymize(
+        "mail a@b.com", [_entity("EMAIL_ADDRESS", "a@b.com", 5, 12)], mapping
+    )
+    fake = mapping.get_fake("a@b.com")
+    assert fake is not None
+    assert "a@b.com" not in result
+    assert "@" in fake
+    assert not fake.startswith("<")

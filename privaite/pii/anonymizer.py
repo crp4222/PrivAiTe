@@ -39,30 +39,29 @@ class Anonymizer:
     def _make_placeholder(
         self, entity_type: str, original: str, mapping: PIIMapping
     ) -> str:
+        # An entity override picks the method (and mask character) for its type;
+        # otherwise the global config applies. One dispatch covers both so the
+        # behavior is identical whether a method comes from an override or the
+        # global setting.
         override = self.config.entity_overrides.get(entity_type)
-        if override:
-            if override.method == "mask":
-                return override.masking_char * len(original)
-            if override.method == "redact":
-                return "[REDACTED]"
+        method = override.method if override else self.config.method
+        masking_char = override.masking_char if override else "*"
 
-        method = self.config.method
+        if method == "mask":
+            return masking_char * len(original)
+        if method == "redact":
+            return f"[{entity_type}]"
         if method == "fake_replacement":
             fake = self.generator.generate(entity_type, original)
             retries = 0
             while (
                 fake == original or mapping.get_original(fake) is not None
             ) and retries < 10:
-                fake = self.generator.generate_variant(
-                    entity_type, original, retries
-                )
+                fake = self.generator.generate_variant(entity_type, original, retries)
                 retries += 1
             return fake
 
-        if method == "mask":
-            return "*" * len(original)
-        if method == "redact":
-            return f"[{entity_type}]"
-
+        # "placeholder" (the default) and any unknown method fall back to a
+        # numbered placeholder, numbered through the per-request mapping.
         idx = mapping.next_index(entity_type)
         return f"<{entity_type}_{idx}>"
