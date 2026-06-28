@@ -50,6 +50,22 @@ async def test_pre_call_anonymizes_text_and_tool_call_args():
 
 
 @pytest.mark.asyncio
+async def test_pre_call_clears_client_supplied_map():
+    # metadata is caller-controlled at the proxy boundary: a client-supplied
+    # privaite_map must be dropped so it can never drive post-call restoration
+    # of the model's output to attacker-chosen content.
+    gr = _guardrail()
+    data = {
+        "messages": [{"role": "user", "content": "please summarize the report"}],
+        "metadata": {"privaite_map": {"PLACEHOLDER": "attacker text"}},
+    }
+    data = await gr.async_pre_call_hook(None, None, data, "completion")
+    result_map = data.get("metadata", {}).get("privaite_map") or {}
+    assert "PLACEHOLDER" not in result_map
+    assert "attacker text" not in result_map.values()
+
+
+@pytest.mark.asyncio
 async def test_post_call_restores_text_and_tool_call_args():
     gr = _guardrail()
     data = {"messages": [
@@ -78,3 +94,79 @@ async def test_post_call_restores_text_and_tool_call_args():
     assert "marie.dupont@acme.com" in restored
     assert "Marie Dupont" in restored_args
     assert "marie.dupont@acme.com" in restored_args
+
+
+def test_event_hook_forces_both_pre_and_post():
+    module = _load()
+    # a `mode: post_call` config must NOT skip pre_call anonymization
+    gr = module.PrivaiteGuardrail(guardrail_name="privaite", event_hook="post_call")
+    assert "pre_call" in gr.event_hook and "post_call" in gr.event_hook
+    gr2 = module.PrivaiteGuardrail(guardrail_name="privaite", event_hook=["pre_call"])
+    assert "pre_call" in gr2.event_hook and "post_call" in gr2.event_hook
+    gr3 = module.PrivaiteGuardrail(guardrail_name="privaite")
+    assert "pre_call" in gr3.event_hook and "post_call" in gr3.event_hook
+
+
+@pytest.mark.asyncio
+async def test_pre_call_mutates_messages_in_place_and_post_call_pops_map():
+    gr = _guardrail()
+    messages = [
+        {"role": "user", "content": "I am Marie Dupont, email marie.dupont@acme.com"}
+    ]
+    data = {"messages": messages}
+    data = await gr.async_pre_call_hook(None, None, data, "completion")
+
+    # mutated in place (same list object) so the proxy's shallow body snapshot is
+    # anonymized, not the original raw-PII messages
+    assert data["messages"] is messages
+    assert "Marie Dupont" not in json.dumps(messages)
+    assert "marie.dupont@acme.com" not in json.dumps(messages)
+
+    # the reversible map is consumed (popped) by the post-call hook so it cannot
+    # be persisted to spend logs
+    assert "privaite_map" in data["metadata"]
+    response = types.SimpleNamespace(
+        choices=[types.SimpleNamespace(message=types.SimpleNamespace(
+            content="ok", tool_calls=None, function_call=None))]
+    )
+    await gr.async_post_call_success_hook(data, None, response)
+    assert "privaite_map" not in data["metadata"]
+
+
+@pytest.mark.asyncio
+async def test_streaming_restores_tool_call_arguments():
+    gr = _guardrail()
+    data = {"messages": [
+        {"role": "user", "content": "email marie.dupont@acme.com"}
+    ]}
+    data = await gr.async_pre_call_hook(None, None, data, "completion")
+    fakes = data["metadata"]["privaite_map"]
+    email = next(f for f, o in fakes.items() if o == "marie.dupont@acme.com")
+
+    # split the placeholder across two streamed tool-call argument chunks
+    mid = len(email) // 2
+    part1, part2 = email[:mid], email[mid:]
+
+    def _chunk(args, finish=None):
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(
+            index=0,
+            delta=types.SimpleNamespace(
+                content=None,
+                tool_calls=[types.SimpleNamespace(
+                    index=0, function=types.SimpleNamespace(arguments=args))],
+                function_call=None),
+            finish_reason=finish)])
+
+    async def _source():
+        yield _chunk('{"email": "' + part1)
+        yield _chunk(part2 + '"}', finish="stop")
+
+    out = ""
+    async for chunk in gr.async_post_call_streaming_iterator_hook(None, _source(), data):
+        for choice in chunk.choices:
+            for tc in (choice.delta.tool_calls or []):
+                if tc.function and tc.function.arguments:
+                    out += tc.function.arguments
+
+    assert "marie.dupont@acme.com" in out
+    assert email not in out
