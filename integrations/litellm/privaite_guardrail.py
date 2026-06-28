@@ -9,6 +9,8 @@ built-in Presidio guardrail does not touch. It also anonymizes Responses API
 `input` and restores Responses `output_text` / function_call output. Chat
 streaming is restored too: text content, streamed tool-call arguments, and the
 streamed function_call. (Responses API streaming restore is not yet implemented.)
+On the failure path the map is dropped from metadata as well (best-effort), so it
+is not left for a failure spend-log to persist.
 
 It reuses PrivAiTe's engine, so there is no detection or masking logic here.
 
@@ -345,3 +347,17 @@ class PrivaiteGuardrail(CustomGuardrail):
                 finished = getattr(choice, "finish_reason", None) is not None
                 self._restore_delta(delta, index, finished, _restore)
             yield chunk
+
+    async def async_post_call_failure_hook(
+        self, request_data: Any, original_exception: Any, user_api_key_dict: Any,
+        traceback_str: Any = None,
+    ) -> Any:
+        # The success/streaming hooks pop the reversible map after restoring, but
+        # they never run when the call fails. Drop it here too so the originals
+        # are not left in metadata for a failure spend-log to persist. (Recent
+        # LiteLLM also strips "privaite_map" from the spend-log body itself; this
+        # is the best-effort defense for a stock install that predates that.)
+        metadata = request_data.get("metadata") if isinstance(request_data, dict) else None
+        if isinstance(metadata, dict):
+            metadata.pop("privaite_map", None)
+        return None

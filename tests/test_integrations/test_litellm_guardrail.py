@@ -221,3 +221,14 @@ async def test_responses_both_messages_and_input_are_anonymized():
     data = await gr.async_pre_call_hook(None, None, data, "aresponses")
     assert "carol.smith@example.net" not in data["input"]
     assert data["metadata"]["privaite_map"]
+
+
+@pytest.mark.asyncio
+async def test_post_call_failure_hook_pops_map():
+    gr = _guardrail()
+    rd = {"metadata": {"privaite_map": {"<PERSON_1>": "X"}, "other": 1}}
+    assert await gr.async_post_call_failure_hook(rd, RuntimeError("x"), None) is None
+    assert "privaite_map" not in rd["metadata"]
+    assert rd["metadata"]["other"] == 1
+    assert await gr.async_post_call_failure_hook({}, RuntimeError("x"), None) is None
+    assert await gr.async_post_call_failure_hook(None, RuntimeError("x"), None) is None
