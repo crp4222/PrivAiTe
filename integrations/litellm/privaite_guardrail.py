@@ -5,8 +5,10 @@ Runs PrivAiTe's engine in-process inside LiteLLM. The pre-call hook anonymizes t
 request and stashes the reversible map in the request metadata (consumed and popped
 by the post-call hook); the post-call hook restores the real values in the response,
 including inside tool-call arguments and the legacy function_call, which LiteLLM's
-built-in Presidio guardrail does not touch. Streaming is restored too: text
-content, streamed tool-call arguments, and the streamed function_call.
+built-in Presidio guardrail does not touch. It also anonymizes Responses API
+`input` and restores Responses `output_text` / function_call output. Chat
+streaming is restored too: text content, streamed tool-call arguments, and the
+streamed function_call. (Responses API streaming restore is not yet implemented.)
 
 It reuses PrivAiTe's engine, so there is no detection or masking logic here.
 
@@ -17,7 +19,7 @@ dot-notation. See integrations/litellm/README.md.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, cast
+from typing import Any, TypeGuard, cast
 
 from litellm.integrations.custom_guardrail import CustomGuardrail
 from litellm.types.guardrails import GuardrailEventHooks
@@ -31,6 +33,19 @@ _LANG_MODELS = {
     "pt": "pt_core_news_md",
     "nl": "nl_core_news_md",
 }
+
+
+def _obj_get(obj: Any, key: str) -> Any:
+    """Read a field from a dict-or-object response item."""
+    return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+
+
+def _obj_set(obj: Any, key: str, value: Any) -> None:
+    """Write a field on a dict-or-object response item."""
+    if isinstance(obj, dict):
+        obj[key] = value
+    else:
+        setattr(obj, key, value)
 
 
 class PrivaiteGuardrail(CustomGuardrail):
@@ -120,6 +135,60 @@ class PrivaiteGuardrail(CustomGuardrail):
             self._engine_key = key
             return engine
 
+    @staticmethod
+    def _is_role_message_list(value: Any) -> TypeGuard[list]:
+        return (
+            isinstance(value, list)
+            and bool(value)
+            and all(isinstance(item, dict) and "role" in item for item in value)
+        )
+
+    def _overwrite_snapshot_input(self, data: dict, new_input: Any) -> None:
+        # A plain `data["input"] = ...` rebind leaks for string input: the proxy
+        # snapshots the request body by shallow-copying data before this hook,
+        # so the original string stays in proxy_server_request.body["input"].
+        # Overwrite the snapshot copy too. (List inputs are mutated in place, so
+        # the aliased snapshot already reflects the anonymized values.)
+        psr = data.get("proxy_server_request")
+        body = psr.get("body") if isinstance(psr, dict) else None
+        if isinstance(body, dict) and "input" in body:
+            body["input"] = new_input
+
+    async def _anonymize_request(self, data: dict, engine: Any) -> Any:
+        """Anonymize chat `messages` and/or Responses `input` in place using the
+        engine (span-precise). Returns the reversible mapping, or None if there
+        was nothing to anonymize."""
+        messages = data.get("messages")
+        if isinstance(messages, list) and messages:
+            anonymized, mapping = await engine.process_request(messages)
+            messages[:] = anonymized
+            return mapping
+
+        # Responses API: `input` is a str, a list of content parts, or a list of
+        # role messages. None of these live under `messages`.
+        input_value = data.get("input")
+        if self._is_role_message_list(input_value):
+            anonymized, mapping = await engine.process_request(input_value)
+            input_value[:] = anonymized
+            return mapping
+        if isinstance(input_value, str) and input_value:
+            anonymized, mapping = await engine.process_request(
+                [{"role": "user", "content": input_value}]
+            )
+            new_text = anonymized[0].get("content", input_value)
+            data["input"] = new_text
+            self._overwrite_snapshot_input(data, new_text)
+            return mapping
+        if isinstance(input_value, list) and input_value:
+            anonymized, mapping = await engine.process_request(
+                [{"role": "user", "content": input_value}]
+            )
+            new_content = anonymized[0].get("content")
+            if isinstance(new_content, list):
+                input_value[:] = new_content
+            return mapping
+        return None
+
     async def async_pre_call_hook(
         self, user_api_key_dict: Any, cache: Any, data: dict, call_type: str
     ) -> dict:
@@ -131,23 +200,13 @@ class PrivaiteGuardrail(CustomGuardrail):
         if isinstance(metadata, dict):
             metadata.pop("privaite_map", None)
 
-        messages = data.get("messages")
-        if not messages:
+        if not data.get("messages") and not data.get("input"):
             return data
 
         engine = await self._engine_for(self._languages())
-        anonymized, mapping = await engine.process_request(messages)
-        # Mutate the list in place rather than rebinding data["messages"]: the
-        # proxy snapshots the request body by shallow-copying data BEFORE this
-        # hook runs, so a rebind would leave the original raw-PII messages in
-        # that snapshot (and thus in spend logs). An in-place update keeps the
-        # snapshot pointing at the anonymized messages.
-        if isinstance(messages, list):
-            messages[:] = anonymized
-        else:
-            data["messages"] = anonymized
+        mapping = await self._anonymize_request(data, engine)
 
-        if self.deanonymize and not mapping.is_empty:
+        if mapping is not None and self.deanonymize and not mapping.is_empty:
             # Carry a plain fake->original dict to the post-call hook on the same
             # request, the same channel LiteLLM's Presidio guardrail uses. The
             # post-call hook pops it again so it does not linger in metadata.
@@ -195,7 +254,23 @@ class PrivaiteGuardrail(CustomGuardrail):
             message = getattr(choice, "message", None)
             if message is not None:
                 await self._restore_message(message, engine, mapping)
+        # Responses API results carry text under `output`, not `choices`.
+        await self._restore_responses_output(response, engine, mapping)
         return response
+
+    async def _restore_responses_output(
+        self, response: Any, engine: Any, mapping: Any
+    ) -> None:
+        """Restore originals in a Responses API result: output_text content
+        blocks and any function_call output-item arguments (dict or object)."""
+        for item in (getattr(response, "output", None) or []):
+            for block in (_obj_get(item, "content") or []):
+                text = _obj_get(block, "text")
+                if isinstance(text, str) and text:
+                    _obj_set(block, "text", await engine.process_response(text, mapping))
+            args = _obj_get(item, "arguments")
+            if isinstance(args, str) and args:
+                _obj_set(item, "arguments", await engine.process_response(args, mapping))
 
     def _restore_delta(self, delta: Any, index: int, finished: bool, restore) -> None:
         """Restore one streamed delta in place: text content, streamed tool-call

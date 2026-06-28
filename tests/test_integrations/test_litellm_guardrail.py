@@ -170,3 +170,42 @@ async def test_streaming_restores_tool_call_arguments():
 
     assert "marie.dupont@acme.com" in out
     assert email not in out
+
+
+@pytest.mark.asyncio
+async def test_responses_api_input_anonymized_and_output_restored():
+    gr = _guardrail()
+    body = {"input": "I am Marie Dupont, email marie.dupont@acme.com"}
+    data = {
+        "input": "I am Marie Dupont, email marie.dupont@acme.com",
+        "proxy_server_request": {"body": body},
+    }
+    data = await gr.async_pre_call_hook(None, None, data, "aresponses")
+
+    # input anonymized, and the shallow body snapshot fixed (no raw PII left)
+    assert "Marie Dupont" not in data["input"]
+    assert "marie.dupont@acme.com" not in data["input"]
+    assert "Marie Dupont" not in body["input"]
+    fakes = data["metadata"]["privaite_map"]
+    person = next(f for f, o in fakes.items() if o == "Marie Dupont")
+    email = next(f for f, o in fakes.items() if o == "marie.dupont@acme.com")
+
+    # the model echoes placeholders inside a Responses-style output
+    response = types.SimpleNamespace(
+        output=[
+            {
+                "type": "message",
+                "content": [{"type": "output_text", "text": f"Noted {person}"}],
+            },
+            types.SimpleNamespace(
+                type="function_call",
+                content=None,
+                arguments=json.dumps({"email": email}),
+            ),
+        ]
+    )
+    out = await gr.async_post_call_success_hook(data, None, response)
+
+    assert out.output[0]["content"][0]["text"] == "Noted Marie Dupont"
+    assert "marie.dupont@acme.com" in out.output[1].arguments
+    assert "privaite_map" not in data["metadata"]
