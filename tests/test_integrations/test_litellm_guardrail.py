@@ -209,3 +209,15 @@ async def test_responses_api_input_anonymized_and_output_restored():
     assert out.output[0]["content"][0]["text"] == "Noted Marie Dupont"
     assert "marie.dupont@acme.com" in out.output[1].arguments
     assert "privaite_map" not in data["metadata"]
+
+
+@pytest.mark.asyncio
+async def test_responses_both_messages_and_input_are_anonymized():
+    # a crafted /v1/responses body with decoy messages + PII in input: neither
+    # source may be left un-anonymized.
+    gr = _guardrail()
+    messages = [{"role": "user", "content": "hi"}]
+    data = {"messages": messages, "input": "reach me at carol.smith@example.net"}
+    data = await gr.async_pre_call_hook(None, None, data, "aresponses")
+    assert "carol.smith@example.net" not in data["input"]
+    assert data["metadata"]["privaite_map"]

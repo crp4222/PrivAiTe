@@ -150,41 +150,52 @@ class PrivaiteGuardrail(CustomGuardrail):
         if isinstance(body, dict) and "input" in body:
             body["input"] = new_input
 
-    async def _anonymize_request(self, data: dict, engine: Any) -> Any:
-        """Anonymize chat `messages` and/or Responses `input` in place using the
-        engine (span-precise). Returns the reversible mapping, or None if there
-        was nothing to anonymize."""
-        messages = data.get("messages")
-        if isinstance(messages, list) and messages:
-            anonymized, mapping = await engine.process_request(messages)
-            messages[:] = anonymized
-            return mapping
-
-        # Responses API: `input` is a str, a list of content parts, or a list of
-        # role messages. None of these live under `messages`. The outer isinstance
-        # narrows `input_value` so the in-place writes below are well-typed.
-        input_value = data.get("input")
+    def _input_as_messages(self, input_value: Any) -> tuple:
+        """Represent the Responses API `input` as message dicts for the engine.
+        Returns (kind, [messages]) where kind drives write-back."""
         if isinstance(input_value, str) and input_value:
-            anonymized, mapping = await engine.process_request(
-                [{"role": "user", "content": input_value}]
-            )
+            return "str", [{"role": "user", "content": input_value}]
+        if isinstance(input_value, list) and input_value:
+            if self._is_role_message_list(input_value):
+                return "role_list", list(input_value)
+            return "content_list", [{"role": "user", "content": input_value}]
+        return "none", []
+
+    def _write_back_input(
+        self, data: dict, kind: str, input_value: Any, anonymized: list
+    ) -> None:
+        if kind == "str":
             new_text = anonymized[0].get("content", input_value)
             data["input"] = new_text
             self._overwrite_snapshot_input(data, new_text)
-            return mapping
-        if isinstance(input_value, list) and input_value:
-            if self._is_role_message_list(input_value):
-                anonymized, mapping = await engine.process_request(input_value)
-                input_value[:] = anonymized
-                return mapping
-            anonymized, mapping = await engine.process_request(
-                [{"role": "user", "content": input_value}]
-            )
+        elif kind == "role_list":
+            input_value[:] = anonymized
+        elif kind == "content_list":
             new_content = anonymized[0].get("content")
             if isinstance(new_content, list):
                 input_value[:] = new_content
-            return mapping
-        return None
+
+    async def _anonymize_request(self, data: dict, engine: Any) -> Any:
+        """Anonymize chat `messages` AND Responses `input` in place using the
+        engine (span-precise), sharing ONE mapping so neither is left untouched
+        when a crafted request carries both. Returns the mapping, or None if
+        there was nothing to anonymize."""
+        messages = data.get("messages")
+        msg_list = messages if isinstance(messages, list) else []
+        input_kind, input_msgs = self._input_as_messages(data.get("input"))
+
+        if not msg_list and not input_msgs:
+            return None
+
+        batch = list(msg_list) + input_msgs
+        anonymized, mapping = await engine.process_request(batch)
+
+        n = len(msg_list)
+        if msg_list:
+            # msg_list is data["messages"] (same object) -> mutate it in place.
+            msg_list[:] = anonymized[:n]
+        self._write_back_input(data, input_kind, data.get("input"), anonymized[n:])
+        return mapping
 
     async def async_pre_call_hook(
         self, user_api_key_dict: Any, cache: Any, data: dict, call_type: str
