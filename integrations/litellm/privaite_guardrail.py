@@ -19,7 +19,7 @@ dot-notation. See integrations/litellm/README.md.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, TypeGuard, cast
+from typing import Any, cast
 
 from litellm.integrations.custom_guardrail import CustomGuardrail
 from litellm.types.guardrails import GuardrailEventHooks
@@ -136,12 +136,8 @@ class PrivaiteGuardrail(CustomGuardrail):
             return engine
 
     @staticmethod
-    def _is_role_message_list(value: Any) -> TypeGuard[list]:
-        return (
-            isinstance(value, list)
-            and bool(value)
-            and all(isinstance(item, dict) and "role" in item for item in value)
-        )
+    def _is_role_message_list(value: list) -> bool:
+        return all(isinstance(item, dict) and "role" in item for item in value)
 
     def _overwrite_snapshot_input(self, data: dict, new_input: Any) -> None:
         # A plain `data["input"] = ...` rebind leaks for string input: the proxy
@@ -165,12 +161,9 @@ class PrivaiteGuardrail(CustomGuardrail):
             return mapping
 
         # Responses API: `input` is a str, a list of content parts, or a list of
-        # role messages. None of these live under `messages`.
+        # role messages. None of these live under `messages`. The outer isinstance
+        # narrows `input_value` so the in-place writes below are well-typed.
         input_value = data.get("input")
-        if self._is_role_message_list(input_value):
-            anonymized, mapping = await engine.process_request(input_value)
-            input_value[:] = anonymized
-            return mapping
         if isinstance(input_value, str) and input_value:
             anonymized, mapping = await engine.process_request(
                 [{"role": "user", "content": input_value}]
@@ -180,6 +173,10 @@ class PrivaiteGuardrail(CustomGuardrail):
             self._overwrite_snapshot_input(data, new_text)
             return mapping
         if isinstance(input_value, list) and input_value:
+            if self._is_role_message_list(input_value):
+                anonymized, mapping = await engine.process_request(input_value)
+                input_value[:] = anonymized
+                return mapping
             anonymized, mapping = await engine.process_request(
                 [{"role": "user", "content": input_value}]
             )
