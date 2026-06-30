@@ -74,6 +74,19 @@ class PIIEngine:
         self._ready = True
         logger.info("PII engine ready with %d detector(s)", len(self.detectors))
 
+    async def warmup(self) -> None:
+        """Exercise the detectors once so the first real request does not pay
+        cold-start cost (onnxruntime graph warm, spaCy first-parse JIT). Models
+        are already loaded by initialize(); this just runs one throwaway pass."""
+        if not self.detectors:
+            return
+        try:
+            await self.process_request(
+                [{"role": "user", "content": "warm up jean@example.com"}]
+            )
+        except Exception:  # pragma: no cover - warmup is best-effort, never fatal
+            logger.warning("PII engine warmup pass failed (non-fatal)", exc_info=True)
+
     async def shutdown(self) -> None:
         for detector in self.detectors:
             await detector.shutdown()

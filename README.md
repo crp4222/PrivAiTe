@@ -75,6 +75,10 @@ pii:
   # preset: "light" # Faster, zero false positives, classic PII only.
 ```
 
+> **Footgun:** do not pin `detectors.presidio.entities` to a short allowlist on the `light` path. It restricts detection to only those types and roughly halves recall. Leave `entities` unset; the proxy logs a warning at startup if it detects a low-recall configuration.
+
+On the harder, independent [AI4Privacy 120-document benchmark](https://github.com/crp4222/privaite-bench) (real documents, agent-labeled), realistic recall is lower than the curated table below: `onnx` ~80-85%, `light` (no entity pin) ~58-62%, versus a Presidio-only baseline at ~65-70%. (The range is span-level vs strict token-level scoring; see the bench for both.) The table below is a smaller, partly-synthetic corpus and runs higher. Use the AI4Privacy figures for a worst-case estimate.
+
 The default install already includes onnxruntime and the tokenizer, so the `onnx` preset works out of the box. The model is downloaded the first time the proxy starts. The `ml` extra (the `standard` and `full` BERT presets) is the only one that adds torch.
 
 **When to use `onnx` (default):** You want maximum coverage. Secrets, passwords, API keys, account numbers, unusual names. Accept occasional false positives on technical identifiers.

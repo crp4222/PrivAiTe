@@ -193,3 +193,29 @@ async def test_strict_mode_returns_400_on_uninspectable_payload():
         )
     assert resp.status_code == 400
     assert router.received_messages is None
+
+
+@pytest.mark.asyncio
+async def test_pii_failure_fails_closed_by_default():
+    # If anonymization raises, the default (on_error="block") must block the
+    # request, never forward the raw PII to the provider.
+    app, router = _make_app()
+
+    async def _boom(_messages):
+        raise RuntimeError("detector exploded")
+
+    app.state.pii_engine.process_request = _boom
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "m",
+                "messages": [{"role": "user", "content": "Marie Dupont marie@acme.com"}],
+            },
+        )
+
+    assert resp.status_code == 500
+    assert router.received_messages is None

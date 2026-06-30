@@ -50,7 +50,7 @@ async def embeddings(
             return openai_error(str(exc), "invalid_request_error", 400)
         except Exception:
             logger.exception("PII processing failed")
-            if config.pii.on_error == "block":
+            if config.pii.on_error != "allow":  # fail closed unless explicit opt-out
                 return openai_error(
                     "PII anonymization failed. Request blocked for privacy.",
                     "server_error", 500, "pii_error",

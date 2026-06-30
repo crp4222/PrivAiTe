@@ -40,9 +40,11 @@ providers:
 
 pii:
   enabled: true
-  # Full ONNX suite (default): detects everything including secrets and passwords.
-  # Downloads the ONNX model on first run. Use "light" for the fast, zero
-  # false-positive Presidio-only path.
+  # Full ONNX suite (default): ~84.5% recall on the benchmark (~749ms). Detects
+  # everything including secrets and passwords; downloads the ONNX model on first
+  # run. Use "light" for the fast Presidio-only path (~62% recall, near-zero
+  # latency). Do NOT pin detectors.presidio.entities below on the light path: it
+  # restricts detection to only those types and drops recall to ~35%.
   preset: "onnx"
 
   detectors:
@@ -50,16 +52,9 @@ pii:
       enabled: true
       languages: ["fr", "en"]
       score_threshold: 0.4
-      entities:
-        - PERSON
-        - EMAIL_ADDRESS
-        - PHONE_NUMBER
-        - CREDIT_CARD
-        - IBAN_CODE
-        - IP_ADDRESS
-        - DATE_TIME
-        - US_SSN
-        - UK_NHS
+      # entities: leave unset. The onnx preset automatically scopes Presidio to
+      # the types it is precise at (the ONNX model covers the rest). Only pin an
+      # allowlist for advanced tuning, and never on preset: "light".
 
     # ONNX privacy-filter detector. This is what preset: "onnx" turns on (the
     # default). The preset enables it automatically; uncomment to tune it.

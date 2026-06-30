@@ -38,9 +38,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         engine = PIIEngine(config.pii)
         await engine.initialize()
+        await engine.warmup()
         app.state.pii_engine = engine
         app.state.pii_tracker = PIITracker()
         logger.info("PII engine initialized")
+
+        # Warn loudly when running a low-recall configuration, so an operator
+        # does not silently leak most PII. The light preset is ~62% recall; if
+        # presidio.entities is also pinned to a short allowlist it drops to ~35%.
+        presidio = config.pii.detectors.presidio
+        if config.pii.preset == "light":
+            if presidio.entities:
+                logger.warning(
+                    "PII preset 'light' with a pinned presidio.entities allowlist "
+                    "detects only those types (~35% recall on the benchmark). "
+                    "Remove the entities pin for full light recall (~62%), or use "
+                    "preset 'onnx' for ~84%."
+                )
+            else:
+                logger.warning(
+                    "PII preset 'light' is the fast Presidio-only path (~62% recall "
+                    "on the benchmark). Use preset 'onnx' for ~84% if recall matters."
+                )
     else:
         app.state.pii_engine = None
         app.state.pii_tracker = None

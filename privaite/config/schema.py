@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -124,15 +126,20 @@ class PassthroughConfig(BaseModel):
 
 class PIIConfig(BaseModel):
     enabled: bool = True
-    # Default to the full ONNX suite: it detects everything the light preset does
-    # plus secrets and passwords. Set preset: "light" for the fast, zero
-    # false-positive Presidio-only path, or preset: null to drive detectors by hand.
+    # Default to the full ONNX suite (~84.5% recall on the benchmark, ~749ms):
+    # it detects everything the light preset does plus secrets and passwords.
+    # preset: "light" is the fast Presidio-only path (~62% recall, near-zero
+    # latency); preset: null drives detectors by hand. Do NOT also pin
+    # detectors.presidio.entities to a short allowlist on the light path: that
+    # restricts it to those types only and drops recall to ~35%.
     preset: str | None = "onnx"
     detectors: DetectorsConfig = Field(default_factory=DetectorsConfig)
     custom_patterns: list[CustomPatternConfig] = Field(default_factory=list)
     merge_strategy: str = "union"
     overlap_resolution: str = "highest_score"
-    on_error: str = "block"
+    # Fail closed by default: if anonymization raises, block the request rather
+    # than forward raw PII. Only the explicit opt-out "allow" forwards on error.
+    on_error: Literal["block", "allow"] = "block"
     strict: bool = False
     anonymization: AnonymizationConfig = Field(default_factory=AnonymizationConfig)
     deanonymization: DeanonymizationConfig = Field(default_factory=DeanonymizationConfig)

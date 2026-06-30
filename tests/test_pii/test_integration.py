@@ -226,3 +226,16 @@ async def test_latency_short_text(engine):
 
     avg_ms = (sum(times) / len(times)) * 1000
     assert avg_ms < 500, f"Too slow for short text: avg={avg_ms:.0f}ms"
+
+
+@pytest.mark.asyncio
+async def test_warmup_is_safe_and_idempotent(engine):
+    # warmup exercises the real detectors once; it must not raise, must keep the
+    # engine ready, and a subsequent real request must still work.
+    await engine.warmup()
+    await engine.warmup()
+    assert engine.is_ready
+    _, mapping = await engine.process_request(
+        [{"role": "user", "content": "Jean Dupont jean@example.com"}]
+    )
+    assert mapping is not None
