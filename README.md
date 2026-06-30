@@ -38,7 +38,7 @@ The default engine. Handles structured PII through pattern matching and basic NE
 | Person names (lowercase or single word) | Contextual regex, only after "je m'appelle X", "my name is X", "ich heiße X", "Nom: X", etc. |
 | Dates (FR/DE) | Custom regex, "15 mars 1987", "3. März 1990" |
 
-Presidio is fast (~23ms/request) and produces zero false positives on code, news articles, and technical text. The tradeoff: it misses names that spaCy doesn't recognize (unusual names, single-word names without context) and doesn't detect secrets/passwords.
+Presidio is fast (tens of ms/request) and produces very few false positives on code, news articles, and technical text. The tradeoff: it misses names that spaCy doesn't recognize (unusual names, single-word names without context) and doesn't detect secrets/passwords.
 
 ### OpenAI Privacy Filter: contextual ML model
 
@@ -56,28 +56,28 @@ The Privacy Filter is slower (~400ms/request) and occasionally flags technical i
 ### Why two engines?
 
 Neither is perfect alone:
-- **Presidio alone** misses names that spaCy doesn't recognize, and can't detect secrets. But it has zero false positives.
+- **Presidio alone** misses names that spaCy doesn't recognize, and can't detect secrets. But it has very few false positives.
 - **Privacy Filter alone** misses some names in credit/list formats, and doesn't have regex validators for IBAN/credit card checksums.
 - **Both together** cover each other's blind spots. Presidio handles structured formats with validation, the Privacy Filter handles context-dependent PII.
 
 ## Presets
 
-`onnx` is the default. It runs the full suite and detects everything, including secrets and passwords. `light` is a faster, zero false-positive option for when you only care about classic PII.
+`onnx` is the default. It runs the full suite and detects everything, including secrets and passwords. `light` is a faster, Presidio-only option with very few false positives, for when you only care about classic PII.
 
-| Preset | What runs | Detection | False positives | Speed | Secrets |
-|--------|-----------|-----------|-----------------|-------|---------|
-| `onnx` (default) | Presidio + Privacy Filter | **100%** | ~7% | 400ms | **yes** |
-| `light` | Presidio only | 97% | **0%** | **23ms** | no |
+| Preset | What runs | Recall\* | False positives | Latency | Secrets |
+|--------|-----------|----------|-----------------|---------|---------|
+| `onnx` (default) | Presidio + Privacy Filter | **84.5%** | 2 / 14 | ~0.5s | **yes** |
+| `light` | Presidio only | 62.4% | 3 / 14 | ~60ms | no |
+
+\*Recall on the independent 120-document AI4Privacy benchmark (span-level; strict token-level ~80% / ~58%). Latency is hardware-dependent. See [Benchmark](#benchmark).
 
 ```yaml
 pii:
   preset: "onnx"    # Default. Detects everything including secrets. Downloads the model on first run.
-  # preset: "light" # Faster, zero false positives, classic PII only.
+  # preset: "light" # Faster, Presidio-only, classic PII only.
 ```
 
-> **Footgun:** do not pin `detectors.presidio.entities` to a short allowlist on the `light` path. It restricts detection to only those types and roughly halves recall. Leave `entities` unset; the proxy logs a warning at startup if it detects a low-recall configuration.
-
-On the harder, independent [AI4Privacy 120-document benchmark](https://github.com/crp4222/privaite-bench) (real documents, agent-labeled), realistic recall is lower than the curated table below: `onnx` ~80-85%, `light` (no entity pin) ~58-62%, versus a Presidio-only baseline at ~65-70%. (The range is span-level vs strict token-level scoring; see the bench for both.) The table below is a smaller, partly-synthetic corpus and runs higher. Use the AI4Privacy figures for a worst-case estimate.
+> **Footgun:** do not pin `detectors.presidio.entities` to a short allowlist on the `light` path. It restricts detection to only those types and roughly halves recall (to ~35%). Leave `entities` unset; the proxy logs a warning at startup if it detects a low-recall configuration.
 
 The default install already includes onnxruntime and the tokenizer, so the `onnx` preset works out of the box. The model is downloaded the first time the proxy starts. The `ml` extra (the `standard` and `full` BERT presets) is the only one that adds torch.
 
@@ -89,24 +89,19 @@ Two other presets exist (`standard`, `full`) but are less useful in practice: th
 
 ## Benchmark
 
-Tested on 61 documents across 5 languages (FR, EN, DE, ES, IT). Corporate letters, contracts, invoices, medical referrals, CVs, bank transfers, news articles, codebases. Mix of synthetic data (valid checksums) and real-world public report extracts.
+Measured on 120 real [AI4Privacy](https://github.com/crp4222/privaite-bench) documents (458 PII items, labeled by 10 independent auditor agents and cross-checked against the dataset's own sensitive mask) across DE, EN, FR, IT, plus 14 clean documents for false positives.
 
-| | **light** | **onnx** |
-|---|---|---|
-| Detection | 96.7% (236/244) | **100% (244/244)** |
-| False positives | **0/14 (0%)** | 1/14 (7%) |
-| PERSON | 93% | **100%** |
-| EMAIL | 98% | **100%** |
-| PHONE | 100% | 100% |
-| IBAN | 100% | 100% |
-| CREDIT_CARD | 100% | 100% |
-| DATE | 100% | 100% |
-| SSN | 100% | 100% |
-| Secrets | no | **yes** |
+| Solution | Recall (span) | Recall (strict) | False positives | Tool-call protection |
+|---|---|---|---|---|
+| `onnx` (default) | **84.5%** | **79.9%** | 2 / 14 | **100%** |
+| `light` (full Presidio) | 62.4% | 57.6% | 3 / 14 | **100%** |
+| Presidio baseline (flat-text) | 70.3% | 65.3% | 3 / 14 | 0.6% |
 
-The `light` misses are all PERSON entities: single-word names, long multi-part Spanish names, and names spaCy doesn't recognize. Regex entities are 100% on both presets.
+Two recall columns: **span** credits a multi-token PII span as caught when its exact full string disappears (an upper bound); **strict** requires every token of the span to be removed. The Presidio baseline is the common flat-text approach (the engine behind most drop-in PII proxies); by design it does not touch tool-call arguments or multimodal content, which is the gap PrivAiTe closes — hence 100% tool-call protection vs 0.6%. Read the structured columns as "structured-aware vs the flat-text approach", not "vs every competitor".
 
-Full benchmark with all test data: [privaite-bench](https://github.com/crp4222/privaite-bench). Head-to-head feature comparison with Presidio, LLM Guard, and LiteLLM PII masking: [docs/comparison.md](docs/comparison.md).
+Per-language and per-entity tables, the methodology, and how to reproduce: [privaite-bench](https://github.com/crp4222/privaite-bench). Head-to-head feature comparison with Presidio, LLM Guard, and LiteLLM PII masking: [docs/comparison.md](docs/comparison.md).
+
+(An earlier, smaller curated set of 61 partly-synthetic documents scores higher — `light` ~97%, `onnx` ~100% — because that data is easier; the AI4Privacy figures above are the realistic, independent numbers.)
 
 ## What's NOT detected by default
 
