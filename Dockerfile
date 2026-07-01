@@ -16,7 +16,7 @@ RUN python -m spacy download en_core_web_lg && \
 # Pre-download the default ONNX Privacy Filter model and tokenizer so the
 # container starts fast and works offline from the first request.
 RUN python -c "from privaite.pii.detector_onnx import download_onnx_model; download_onnx_model()" && \
-    python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('openai/privacy-filter', trust_remote_code=True)"
+    python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('openai/privacy-filter')"
 
 COPY config/ config/
 
@@ -25,4 +25,6 @@ EXPOSE 8400
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD curl -f http://localhost:8400/health || exit 1
 
-CMD ["python", "-m", "privaite", "--config", "/app/config/privaite.yaml"]
+# config/privaite.yaml is the operator's own file (gitignored); a fresh clone
+# only has the example. Fall back to it so the image runs out of the box.
+CMD ["sh", "-c", "python -m privaite --config \"$([ -f /app/config/privaite.yaml ] && echo /app/config/privaite.yaml || echo /app/config/privaite.example.yaml)\""]

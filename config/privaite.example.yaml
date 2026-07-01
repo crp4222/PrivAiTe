@@ -100,7 +100,9 @@ pii:
 
   deanonymization:
     enabled: true
-    fuzzy_matching: true
+    # Opt-in: also restore placeholders the model re-typed imperfectly (small
+    # wrong-substitution risk on lookalike spans).
+    fuzzy_matching: false
     fuzzy_threshold: 0.85
 
   passthrough:
@@ -110,7 +112,3 @@ pii:
 logging:
   format: "json"
   level: "info"
-  redact_fields:
-    - "messages"
-    - "content"
-    - "prompt"

@@ -40,10 +40,20 @@ class PresidioDetector(PIIDetector):
             "models": [],
         }
 
+        unknown = [lang for lang in self.config.languages if lang not in lang_model_map]
+        if unknown:
+            # Silently dropping a language here used to pass init and then crash
+            # EVERY request at detect() time (the analyze loop still used it).
+            # Fail fast at startup with an actionable message instead.
+            raise ValueError(
+                f"No spaCy model mapping for language(s) {unknown}. "
+                f"Supported: {sorted(lang_model_map)}"
+            )
+
         for lang in self.config.languages:
-            model = lang_model_map.get(lang)
-            if model:
-                nlp_config["models"].append({"lang_code": lang, "model_name": model})
+            nlp_config["models"].append(
+                {"lang_code": lang, "model_name": lang_model_map[lang]}
+            )
 
         if not nlp_config["models"]:
             nlp_config["models"].append({"lang_code": "en", "model_name": "en_core_web_lg"})

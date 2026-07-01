@@ -68,3 +68,19 @@ def test_block_entities_default_empty_and_accepts_list():
         "US_SSN",
         "CREDIT_CARD",
     ]
+
+
+def test_model_loading_is_supply_chain_safe_by_default():
+    # A PII proxy must not execute model-repo code, and should be pinnable to a
+    # revision so a rewritten repo cannot silently swap the weights.
+    from privaite.config.schema import (
+        BertNERDetectorConfig,
+        MLModelDetectorConfig,
+        OnnxDetectorConfig,
+    )
+
+    assert MLModelDetectorConfig().trust_remote_code is False
+    assert OnnxDetectorConfig().trust_remote_code is False
+    assert MLModelDetectorConfig().revision is None
+    assert OnnxDetectorConfig().revision is None
+    assert BertNERDetectorConfig().revision is None

@@ -28,6 +28,7 @@ class BertNERDetector(PIIDetector):
             self._classifier = pipeline(
                 task="token-classification",
                 model=self.config.model_name,
+                revision=self.config.revision,
                 device=device,
                 aggregation_strategy="simple",
             )

@@ -53,11 +53,14 @@ class MLModelDetector(PIIDetector):
             )
 
             tokenizer = AutoTokenizer.from_pretrained(
-                self.config.model_name, trust_remote_code=True
+                self.config.model_name,
+                revision=self.config.revision,
+                trust_remote_code=self.config.trust_remote_code,
             )
             model = AutoModelForTokenClassification.from_pretrained(
                 self.config.model_name,
-                trust_remote_code=True,
+                revision=self.config.revision,
+                trust_remote_code=self.config.trust_remote_code,
                 torch_dtype=dtype,
                 low_cpu_mem_usage=True,
             )

@@ -107,6 +107,7 @@ def download_onnx_model(
     repo_id: str = "openai/privacy-filter",
     variant: str = "q4f16",
     cache_dir: str | None = None,
+    revision: str | None = None,
 ) -> Path:
     from huggingface_hub import hf_hub_download
 
@@ -117,6 +118,7 @@ def download_onnx_model(
             repo_id=repo_id,
             filename=fn,
             cache_dir=cache_dir,
+            revision=revision,
         )
         if fn.endswith(".onnx"):
             local_path = Path(p)
@@ -148,6 +150,7 @@ class OnnxPrivacyFilterDetector(PIIDetector):
                 repo_id=self.config.model_name,
                 variant=self.config.onnx_variant,
                 cache_dir=self.config.cache_dir,
+                revision=self.config.revision,
             )
 
             providers = self._get_providers()
@@ -168,7 +171,9 @@ class OnnxPrivacyFilterDetector(PIIDetector):
             )
 
             self._tokenizer = AutoTokenizer.from_pretrained(
-                self.config.model_name, trust_remote_code=True
+                self.config.model_name,
+                revision=self.config.revision,
+                trust_remote_code=self.config.trust_remote_code,
             )
 
         logger.info("Loading ONNX privacy-filter model (%s)...", self.config.model_name)

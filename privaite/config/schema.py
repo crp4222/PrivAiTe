@@ -40,6 +40,12 @@ class PresidioDetectorConfig(BaseModel):
 class MLModelDetectorConfig(BaseModel):
     enabled: bool = False
     model_name: str = "openai/privacy-filter"
+    # Pin a Hugging Face revision (tag or commit sha) so a rewritten model repo
+    # cannot silently swap the weights this proxy runs. None = latest.
+    revision: str | None = None
+    # Off by default: a PII proxy must not execute code shipped inside a model
+    # repo unless the operator explicitly opts in for a custom-code model.
+    trust_remote_code: bool = False
     device: str = "auto"
     torch_dtype: str = "float16"
     score_threshold: float = 0.5
@@ -59,6 +65,11 @@ class MLModelDetectorConfig(BaseModel):
 class OnnxDetectorConfig(BaseModel):
     enabled: bool = False
     model_name: str = "openai/privacy-filter"
+    # Pin a Hugging Face revision (tag or commit sha); None = latest.
+    revision: str | None = None
+    # Off by default; only the tokenizer loads from the repo and the default
+    # model needs no repo code.
+    trust_remote_code: bool = False
     onnx_variant: str = "q4f16"
     device: str = "auto"
     score_threshold: float = 0.5
@@ -79,6 +90,8 @@ class OnnxDetectorConfig(BaseModel):
 class BertNERDetectorConfig(BaseModel):
     enabled: bool = False
     model_name: str = "dslim/bert-base-NER"
+    # Pin a Hugging Face revision (tag or commit sha); None = latest.
+    revision: str | None = None
     device: str = "auto"
     score_threshold: float = 0.5
     label_mapping: dict[str, str] = Field(default_factory=lambda: {
@@ -98,7 +111,6 @@ class DetectorsConfig(BaseModel):
 class EntityOverride(BaseModel):
     method: str = "placeholder"
     masking_char: str = "*"
-    domain_preserve: bool = False
 
 
 class AnonymizationConfig(BaseModel):
@@ -191,9 +203,6 @@ class PIIConfig(BaseModel):
 class LoggingConfig(BaseModel):
     format: str = "json"
     level: str = "info"
-    redact_fields: list[str] = Field(
-        default_factory=lambda: ["messages", "content", "prompt"]
-    )
 
 
 class PrivAiTeConfig(BaseModel):
