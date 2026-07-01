@@ -86,6 +86,16 @@ class PIIEngine:
             self.detectors.append(detector)
             logger.info("ONNX privacy-filter detector initialized")
 
+        if self.config.merge_strategy == "intersection" and len(self.detectors) < 2:
+            # Intersection keeps only spans confirmed by >=2 detectors. With fewer
+            # detectors NOTHING can ever be confirmed, so every request would be
+            # forwarded with all its PII raw. Refuse to start instead.
+            raise ValueError(
+                "merge_strategy 'intersection' requires at least 2 enabled "
+                f"detectors, got {len(self.detectors)}: it would silently disable "
+                "all PII detection"
+            )
+
         self._ready = True
         logger.info("PII engine ready with %d detector(s)", len(self.detectors))
 
@@ -252,6 +262,18 @@ class PIIEngine:
     ) -> Any:
         if isinstance(value, str):
             return await self._anonymize_text(value, mapping, language)
+        # bool is a subclass of int; leave true/false alone.
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            # A credit card or SSN sent as a bare JSON number would otherwise skip
+            # detection AND the block gate entirely. Scan the digits; only if PII is
+            # actually found does the leaf become a (masked) string, so ordinary
+            # numbers keep their type. The block gate still fires inside
+            # _anonymize_text for a blocked type.
+            as_text = str(value)
+            anonymized = await self._anonymize_text(as_text, mapping, language)
+            return anonymized if anonymized != as_text else value
         if isinstance(value, dict):
             result: dict[Any, Any] = {}
             for key, item in value.items():

@@ -124,6 +124,56 @@ async def test_tool_call_arguments_anonymized():
 
 
 @pytest.mark.asyncio
+async def test_numeric_json_value_with_pii_is_masked():
+    # A card number sent as a bare JSON number must not slip past detection just
+    # because it is not a string. On a hit the leaf becomes the masked string;
+    # plain numbers keep their type.
+    config = PIIConfig(
+        enabled=True,
+        detectors=DetectorsConfig(presidio=PresidioDetectorConfig(enabled=False)),
+        anonymization=AnonymizationConfig(method="placeholder"),
+    )
+    engine = PIIEngine(config)
+    engine.detectors = [FakeDetector({"4111111111111111": "CREDIT_CARD"})]
+    engine._ready = True
+
+    args = json.dumps({"card": 4111111111111111, "qty": 2})
+    messages = [{"role": "assistant", "tool_calls": [
+        {"function": {"name": "pay", "arguments": args}}
+    ]}]
+
+    out, _ = await engine.process_request(messages)
+    parsed = json.loads(out[0]["tool_calls"][0]["function"]["arguments"])
+
+    assert parsed["card"] == "<CREDIT_CARD_1>"  # detected in the number, masked
+    assert parsed["qty"] == 2  # ordinary number keeps its int type
+    assert "4111111111111111" not in out[0]["tool_calls"][0]["function"]["arguments"]
+
+
+@pytest.mark.asyncio
+async def test_numeric_json_value_triggers_block_gate():
+    from privaite.pii.engine import PIIBlockedError
+
+    config = PIIConfig(
+        enabled=True,
+        detectors=DetectorsConfig(presidio=PresidioDetectorConfig(enabled=False)),
+        anonymization=AnonymizationConfig(method="placeholder"),
+        block_entities=["CREDIT_CARD"],
+    )
+    engine = PIIEngine(config)
+    engine.detectors = [FakeDetector({"4111111111111111": "CREDIT_CARD"})]
+    engine._ready = True
+
+    args = json.dumps({"card": 4111111111111111})
+    messages = [{"role": "assistant", "tool_calls": [
+        {"function": {"name": "pay", "arguments": args}}
+    ]}]
+
+    with pytest.raises(PIIBlockedError):
+        await engine.process_request(messages)
+
+
+@pytest.mark.asyncio
 async def test_tool_call_roundtrip_restores_original():
     engine = _make_engine()
     original = {"to": "marie@acme.com", "name": "Marie Dupont"}

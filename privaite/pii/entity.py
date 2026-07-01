@@ -52,12 +52,34 @@ def _merge_union(
             merged.append(entity)
             continue
 
+        # Overlap. The winner only decides the TYPE/score label; the merged span
+        # covers the UNION of both, so a shorter (even higher-scored) detection can
+        # never leave the uncovered remainder of a longer one unmasked. Entities
+        # are sorted by (start asc, length desc), so last.start <= entity.start and
+        # only the end can extend.
         if entity.entity_type == last.entity_type:
             winner = last if last.score >= entity.score else entity
-            merged[-1] = winner
         else:
             winner = _resolve_overlap(last, entity, overlap_resolution)
-            merged[-1] = winner
+
+        new_start = last.start
+        new_end = max(last.end, entity.end)
+        if new_start == winner.start and new_end == winner.end:
+            text = winner.text
+        elif source_text is not None:
+            text = source_text[new_start:new_end]
+        else:
+            # No source text (unit paths): fall back to the widest known text.
+            text = last.text if last.length >= entity.length else entity.text
+
+        merged[-1] = PIIEntity(
+            entity_type=winner.entity_type,
+            text=text,
+            start=new_start,
+            end=new_end,
+            score=winner.score,
+            source=winner.source,
+        )
 
     return merged
 
@@ -84,5 +106,11 @@ def _resolve_overlap(
     if resolution == "longest_span":
         return a if a.length >= b.length else b
     if resolution == "presidio_priority":
-        return a if a.source == "presidio" else b
+        a_presidio = a.source == "presidio"
+        b_presidio = b.source == "presidio"
+        if a_presidio != b_presidio:
+            return a if a_presidio else b
+        # Neither (or both) from presidio: fall back to score instead of blindly
+        # keeping the later-sorted entity.
+        return a if a.score >= b.score else b
     return a if a.score >= b.score else b

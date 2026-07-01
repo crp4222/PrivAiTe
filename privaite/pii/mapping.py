@@ -16,6 +16,14 @@ class PIIMapping:
         self._entity_types[original] = entity_type
         self._type_counters[entity_type] = self._type_counters.get(entity_type, 0) + 1
 
+    def note(self, original: str, entity_type: str) -> None:
+        # Record a detection for stats/counting WITHOUT a reversible substitution.
+        # Used by lossy methods (mask, redact): they must never be restored, and
+        # two different originals that mask to the same string ("****") must not
+        # collide in the reverse map and cross-restore each other's PII.
+        self._entity_types[original] = entity_type
+        self._type_counters[entity_type] = self._type_counters.get(entity_type, 0) + 1
+
     def next_index(self, entity_type: str) -> int:
         return self._type_counters.get(entity_type, 0) + 1
 
@@ -33,6 +41,17 @@ class PIIMapping:
 
     def get_entity_type(self, original: str) -> str | None:
         return self._entity_types.get(original)
+
+    def entity_type_counts(self) -> dict[str, int]:
+        # Per-type detection counts, including lossy mask/redact ones that never
+        # enter the reversible map. Used for /stats.
+        return dict(self._type_counters)
+
+    @property
+    def has_detections(self) -> bool:
+        # True if ANY PII was detected (reversible or lossy). is_empty only tracks
+        # reversible substitutions, so a mask-only request is is_empty but not this.
+        return bool(self._entity_types)
 
     @property
     def count(self) -> int:

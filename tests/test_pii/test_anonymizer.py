@@ -147,6 +147,58 @@ def test_global_mask():
     assert "John" not in result
 
 
+def test_mask_is_irreversible_and_not_in_reverse_map():
+    config = AnonymizationConfig(faker_locale=["en_US"], method="mask")
+    anon = Anonymizer(config)
+    mapping = PIIMapping()
+
+    anon.anonymize("Hi John", [_entity("PERSON", "John", 3, 7)], mapping)
+    # nothing to restore: mask is lossy by definition
+    assert mapping.get_original("****") is None
+    assert mapping.is_empty  # is_empty tracks reversible substitutions only
+    # but the detection is still counted for /stats
+    assert mapping.has_detections
+    assert mapping.entity_type_counts() == {"PERSON": 1}
+
+
+def test_mask_collision_does_not_cross_restore():
+    # Two different 4-char names both mask to "****"; the reverse map must not
+    # end up mapping "****" to one of them, or restoration would inject the
+    # wrong person's name into the response.
+    config = AnonymizationConfig(faker_locale=["en_US"], method="mask")
+    anon = Anonymizer(config)
+    mapping = PIIMapping()
+
+    anon.anonymize(
+        "Jean and Marc met",
+        [_entity("PERSON", "Jean", 0, 4), _entity("PERSON", "Marc", 9, 13)],
+        mapping,
+    )
+    assert mapping.get_original("****") is None
+    assert mapping.entity_type_counts() == {"PERSON": 2}
+
+
+def test_redact_is_irreversible():
+    config = AnonymizationConfig(faker_locale=["en_US"], method="redact")
+    anon = Anonymizer(config)
+    mapping = PIIMapping()
+
+    anon.anonymize("Hi John Smith", [_entity("PERSON", "John Smith", 3, 13)], mapping)
+    assert mapping.get_original("[PERSON]") is None
+    assert mapping.is_empty
+    assert mapping.entity_type_counts() == {"PERSON": 1}
+
+
+def test_placeholder_stays_reversible():
+    config = AnonymizationConfig(faker_locale=["en_US"], method="placeholder")
+    anon = Anonymizer(config)
+    mapping = PIIMapping()
+
+    anon.anonymize("Hi Jean Michel", [_entity("PERSON", "Jean Michel", 3, 14)], mapping)
+    assert mapping.get_original("<PERSON_1>") == "Jean Michel"
+    assert not mapping.is_empty
+
+
 def test_override_redact_matches_global_typed_marker():
     config = AnonymizationConfig(
         faker_locale=["en_US"],
