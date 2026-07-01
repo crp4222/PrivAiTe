@@ -234,6 +234,18 @@ pii:
     # method: "mask"             # ********
 ```
 
+### Blocking specific PII types (hard policy gate)
+
+By default every detected PII item is pseudonymized and the request goes through. If some PII types must **never** leave your network at all, even as a placeholder, list them under `block_entities`. A request containing any listed type is rejected with `400` and nothing is forwarded to the provider. The error names the type(s), never the value.
+
+```yaml
+pii:
+  block_entities: []                     # default: block nothing, mask everything
+  # block_entities: ["US_SSN", "CREDIT_CARD"]  # opt-in: reject these outright
+```
+
+Types not listed are still masked as usual, so blocking is purely additive on top of the default behavior.
+
 ### Custom regex patterns
 
 Add your own PII patterns without touching code:
@@ -291,7 +303,6 @@ For a stricter posture, set `pii.strict: true`: any request whose content can't 
 - **Single-word names** from spaCy are dropped (too many false positives). Caught by contextual patterns ("Nom: X") or the `onnx` preset.
 - **Lowercase names** need intro patterns ("je m'appelle X"). The `onnx` preset catches them without patterns.
 - **Informal dates** ("last Tuesday", "il y a deux ans") are not detected.
-- **No policy gate**: all requests are forwarded after pseudonymization.
 
 ## Development
 

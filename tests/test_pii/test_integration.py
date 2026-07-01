@@ -229,6 +229,47 @@ async def test_latency_short_text(engine):
 
 
 @pytest.mark.asyncio
+async def test_block_entities_rejects_real_email():
+    # end-to-end with the REAL engine: a genuine email (detected as EMAIL_ADDRESS)
+    # triggers a hard block; a message without the blocked type is anonymized fine.
+    from privaite.config.schema import (
+        AnonymizationConfig,
+        DetectorsConfig,
+        PIIConfig,
+        PresidioDetectorConfig,
+    )
+    from privaite.pii.engine import PIIBlockedError, PIIEngine
+
+    config = PIIConfig(
+        enabled=True,
+        preset=None,
+        detectors=DetectorsConfig(
+            presidio=PresidioDetectorConfig(
+                enabled=True, languages=["en"], entities=["EMAIL_ADDRESS", "PERSON"]
+            )
+        ),
+        block_entities=["EMAIL_ADDRESS"],
+        anonymization=AnonymizationConfig(method="placeholder"),
+    )
+    eng = PIIEngine(config)
+    await eng.initialize()
+    try:
+        with pytest.raises(PIIBlockedError) as ei:
+            await eng.process_request(
+                [{"role": "user", "content": "email me at bob@example.com"}]
+            )
+        assert "EMAIL_ADDRESS" in str(ei.value)
+        assert "bob@example.com" not in str(ei.value)  # value never in the error
+        # a message without the blocked type still processes normally
+        anon, _ = await eng.process_request(
+            [{"role": "user", "content": "just saying hi"}]
+        )
+        assert anon
+    finally:
+        await eng.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_warmup_is_safe_and_idempotent(engine):
     # warmup exercises the real detectors once; it must not raise, must keep the
     # engine ready, and a subsequent real request must still work.

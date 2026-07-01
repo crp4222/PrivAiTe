@@ -82,6 +82,12 @@ pii:
   overlap_resolution: "highest_score"
   on_error: "block"
 
+  # Hard policy gate: PII types listed here cause the WHOLE request to be
+  # rejected (HTTP 400) instead of being pseudonymized. Empty by default, so
+  # every detected type is masked and forwarded as usual. Opt-in per type.
+  block_entities: []
+  # block_entities: ["US_SSN", "CREDIT_CARD"]
+
   anonymization:
     method: "placeholder"
     faker_locale: ["fr_FR", "en_US"]

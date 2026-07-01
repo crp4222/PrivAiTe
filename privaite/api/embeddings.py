@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Request
 
 from privaite.api.dependencies import get_config, get_pii_engine, get_provider_router
 from privaite.config.schema import PrivAiTeConfig
-from privaite.pii.engine import UnsupportedContentError
+from privaite.pii.engine import PIIBlockedError, UnsupportedContentError
 from privaite.providers.router import ProviderRouter
 from privaite.utils.errors import openai_error, provider_error_response
 
@@ -48,6 +48,10 @@ async def embeddings(
                 input_text = anonymized
         except UnsupportedContentError as exc:
             return openai_error(str(exc), "invalid_request_error", 400)
+        except PIIBlockedError as exc:
+            # Policy gate: a blocked PII type was found -> reject hard, forward
+            # nothing. Independent of on_error. The message names TYPES, not values.
+            return openai_error(str(exc), "invalid_request_error", 400, "pii_blocked")
         except Exception:
             logger.exception("PII processing failed")
             if config.pii.on_error != "allow":  # fail closed unless explicit opt-out

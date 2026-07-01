@@ -23,12 +23,27 @@ class UnsupportedContentError(Exception):
     """Raised in strict mode when a payload shape cannot be inspected for PII."""
 
 
+class PIIBlockedError(Exception):
+    """Raised when a request contains a PII type configured to be blocked outright
+    (pii.block_entities). Carries the entity TYPES that triggered the block, never
+    the underlying PII values."""
+
+    def __init__(self, entity_types: set[str]) -> None:
+        self.entity_types = sorted(entity_types)
+        super().__init__(
+            "request blocked: contains disallowed PII type(s): "
+            + ", ".join(self.entity_types)
+        )
+
+
 class PIIEngine:
     def __init__(self, config: PIIConfig) -> None:
         self.config = config
         self.detectors: list[PIIDetector] = []
         self.anonymizer = Anonymizer(config.anonymization)
         self.deanonymizer = DeAnonymizer(config.deanonymization)
+        # Types that cause a hard reject (empty = default: mask everything).
+        self._blocked: set[str] = set(config.block_entities or [])
         self._ready = False
 
     @property
@@ -138,6 +153,13 @@ class PIIEngine:
         if not text or not isinstance(text, str):
             return text
         entities = await self._detect_all(text, language)
+        # Hard policy gate: if any detected type is blocked, reject the whole
+        # request before anonymizing (nothing is forwarded). This single choke
+        # point covers message content, multimodal text, and tool-call arguments.
+        if self._blocked:
+            hit = {e.entity_type for e in entities if e.entity_type in self._blocked}
+            if hit:
+                raise PIIBlockedError(hit)
         return self.anonymizer.anonymize(text, entities, mapping)
 
     async def _anonymize_content(

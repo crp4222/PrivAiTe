@@ -68,7 +68,9 @@ class FakeProviderRouter:
         }
 
 
-def _make_app(strict: bool = False) -> tuple[object, FakeProviderRouter]:
+def _make_app(
+    strict: bool = False, block_entities: list[str] | None = None
+) -> tuple[object, FakeProviderRouter]:
     config = PrivAiTeConfig(
         server=ServerConfig(host="127.0.0.1", port=8400),
         auth=AuthConfig(enabled=False),
@@ -79,6 +81,7 @@ def _make_app(strict: bool = False) -> tuple[object, FakeProviderRouter]:
             anonymization=AnonymizationConfig(method="placeholder"),
             deanonymization=DeanonymizationConfig(enabled=True, fuzzy_matching=False),
             strict=strict,
+            block_entities=block_entities or [],
         ),
         logging=LoggingConfig(format="text", level="debug"),
     )
@@ -219,3 +222,46 @@ async def test_pii_failure_fails_closed_by_default():
 
     assert resp.status_code == 500
     assert router.received_messages is None
+
+
+@pytest.mark.asyncio
+async def test_block_entities_rejects_and_forwards_nothing():
+    # A blocked PII type in the request -> hard 400, provider never called, and
+    # the error names the TYPE, never the value.
+    app, router = _make_app(block_entities=["EMAIL_ADDRESS"])
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "m",
+                "messages": [{"role": "user", "content": "reach marie@acme.com"}],
+            },
+        )
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["error"]["code"] == "pii_blocked"
+    assert "EMAIL_ADDRESS" in body["error"]["message"]
+    assert "marie@acme.com" not in body["error"]["message"]  # value never leaked
+    assert router.received_messages is None
+
+
+@pytest.mark.asyncio
+async def test_block_entities_lets_non_blocked_pii_through_masked():
+    # A non-blocked type (PERSON) is still masked and forwarded as usual.
+    app, router = _make_app(block_entities=["EMAIL_ADDRESS"])
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "m",
+                "messages": [{"role": "user", "content": "hi Marie Dupont"}],
+            },
+        )
+    assert resp.status_code == 200
+    sent = router.received_messages[-1]["content"]
+    assert "Marie Dupont" not in sent
+    assert "<PERSON_1>" in sent

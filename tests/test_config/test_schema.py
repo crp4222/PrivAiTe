@@ -59,3 +59,12 @@ def test_on_error_rejects_typos():
     # a free string let a typo silently fail open; the Literal rejects it now.
     with pytest.raises(ValueError):
         PIIConfig(on_error="blcok")
+
+
+def test_block_entities_default_empty_and_accepts_list():
+    # default is empty -> behavior unchanged (everything masked, nothing blocked).
+    assert PIIConfig().block_entities == []
+    assert PIIConfig(block_entities=["US_SSN", "CREDIT_CARD"]).block_entities == [
+        "US_SSN",
+        "CREDIT_CARD",
+    ]

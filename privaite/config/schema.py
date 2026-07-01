@@ -140,6 +140,12 @@ class PIIConfig(BaseModel):
     # Fail closed by default: if anonymization raises, block the request rather
     # than forward raw PII. Only the explicit opt-out "allow" forwards on error.
     on_error: Literal["block", "allow"] = "block"
+    # Hard policy gate: entity TYPES listed here cause the WHOLE request to be
+    # rejected (HTTP 400) instead of pseudonymized — nothing is forwarded to the
+    # provider. Empty by default, so the default behavior is unchanged (all
+    # detected PII is masked with a placeholder). Opt-in per type, e.g.
+    # ["US_SSN", "CREDIT_CARD"]; everything not listed is still masked as usual.
+    block_entities: list[str] = Field(default_factory=list)
     strict: bool = False
     anonymization: AnonymizationConfig = Field(default_factory=AnonymizationConfig)
     deanonymization: DeanonymizationConfig = Field(default_factory=DeanonymizationConfig)
