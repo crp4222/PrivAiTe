@@ -97,7 +97,9 @@ class FakeRouter:
         }
 
 
-def _make_app() -> tuple[object, FakeRouter]:
+def _make_app(
+    block_entities: list[str] | None = None,
+) -> tuple[object, FakeRouter]:
     config = PrivAiTeConfig(
         server=ServerConfig(host="127.0.0.1", port=8400),
         auth=AuthConfig(enabled=False),
@@ -107,6 +109,7 @@ def _make_app() -> tuple[object, FakeRouter]:
             detectors=DetectorsConfig(presidio=PresidioDetectorConfig(enabled=False)),
             anonymization=AnonymizationConfig(method="placeholder"),
             deanonymization=DeanonymizationConfig(enabled=True, fuzzy_matching=False),
+            block_entities=block_entities or [],
         ),
         logging=LoggingConfig(format="text", level="debug"),
     )
@@ -224,6 +227,32 @@ async def test_embeddings_string_input_anonymized():
 
     assert resp.status_code == 200
     assert "marie@acme.com" not in router.embedding_input
+
+
+@pytest.mark.asyncio
+async def test_block_entities_rejects_on_completions_and_embeddings():
+    # the policy gate must hold on ALL entry points, not just chat.
+    app, router = _make_app(block_entities=["EMAIL_ADDRESS"])
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        comp = await client.post(
+            "/v1/completions",
+            json={"model": "m", "prompt": "reach marie@acme.com"},
+        )
+        emb = await client.post(
+            "/v1/embeddings",
+            json={"model": "m", "input": "reach marie@acme.com"},
+        )
+
+    for resp in (comp, emb):
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["error"]["code"] == "pii_blocked"
+        assert "EMAIL_ADDRESS" in body["error"]["message"]
+        assert "marie@acme.com" not in body["error"]["message"]
+    assert router.prompt is None  # nothing ever reached the provider
+    assert router.embedding_input is None
 
 
 @pytest.mark.asyncio

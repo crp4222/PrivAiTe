@@ -69,7 +69,9 @@ class FakeProviderRouter:
 
 
 def _make_app(
-    strict: bool = False, block_entities: list[str] | None = None
+    strict: bool = False,
+    block_entities: list[str] | None = None,
+    on_error: str = "block",
 ) -> tuple[object, FakeProviderRouter]:
     config = PrivAiTeConfig(
         server=ServerConfig(host="127.0.0.1", port=8400),
@@ -82,6 +84,7 @@ def _make_app(
             deanonymization=DeanonymizationConfig(enabled=True, fuzzy_matching=False),
             strict=strict,
             block_entities=block_entities or [],
+            on_error=on_error,  # type: ignore[arg-type]
         ),
         logging=LoggingConfig(format="text", level="debug"),
     )
@@ -222,6 +225,32 @@ async def test_pii_failure_fails_closed_by_default():
 
     assert resp.status_code == 500
     assert router.received_messages is None
+
+
+@pytest.mark.asyncio
+async def test_on_error_allow_forwards_despite_engine_failure():
+    # the explicit opt-out: when anonymization raises and on_error="allow", the
+    # request goes through with the ORIGINAL (raw) messages. Untested until now.
+    app, router = _make_app(on_error="allow")
+
+    async def _boom(_messages):
+        raise RuntimeError("detector exploded")
+
+    app.state.pii_engine.process_request = _boom
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "m",
+                "messages": [{"role": "user", "content": "Marie Dupont here"}],
+            },
+        )
+
+    assert resp.status_code == 200
+    assert router.received_messages[-1]["content"] == "Marie Dupont here"
 
 
 @pytest.mark.asyncio

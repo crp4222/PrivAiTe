@@ -49,6 +49,12 @@ All notable changes to this project are documented here. The format follows
   newlines no longer produce invalid JSON.
 - `/stats` now counts detections from `/v1/completions` and `/v1/embeddings`,
   not just chat.
+- The `bert_ner` and `mlmodel` detectors (presets `standard`/`full`) scan long
+  inputs in overlapping windows: the HF pipeline silently truncates at
+  model_max_length (~512 tokens), so PII past that point was invisible to
+  them. The default `onnx` path was not affected (128k max_length).
+- `download_onnx_model` no longer requires a `.onnx_data` side file: a variant
+  packed into a single `.onnx` used to fail at startup.
 
 ### Security
 - Hugging Face model loading defaults to `trust_remote_code=False` (the default

@@ -5,7 +5,7 @@ import logging
 from typing import Any
 
 from privaite.config.schema import MLModelDetectorConfig
-from privaite.pii.detector_base import PIIDetector
+from privaite.pii.detector_base import PIIDetector, chunk_text
 from privaite.pii.entity import PIIEntity
 
 logger = logging.getLogger("privaite.pii.detector_mlmodel")
@@ -84,34 +84,43 @@ class MLModelDetector(PIIDetector):
         if self._classifier is None:
             raise RuntimeError("MLModelDetector not initialized")
 
-        results = await asyncio.to_thread(self._classifier, text)
-
+        # The HF pipeline silently truncates at model_max_length, making PII past
+        # that point invisible; run overlapping windows instead.
         pii_entities: list[PIIEntity] = []
-        for result in results:
-            entity_group = result.get("entity_group", "")
-            score = result.get("score", 0.0)
+        seen: set[tuple[int, int, str]] = set()
+        for offset, chunk in chunk_text(text):
+            results = await asyncio.to_thread(self._classifier, chunk)
 
-            if score < self.config.score_threshold:
-                continue
+            for result in results:
+                entity_group = result.get("entity_group", "")
+                score = result.get("score", 0.0)
 
-            mapped_type = self.config.label_mapping.get(entity_group)
-            if not mapped_type:
-                continue
+                if score < self.config.score_threshold:
+                    continue
 
-            start = result.get("start", 0)
-            end = result.get("end", 0)
-            word = result.get("word", text[start:end])
+                mapped_type = self.config.label_mapping.get(entity_group)
+                if not mapped_type:
+                    continue
 
-            pii_entities.append(
-                PIIEntity(
-                    entity_type=mapped_type,
-                    text=word.strip(),
-                    start=start,
-                    end=end,
-                    score=score,
-                    source="mlmodel",
+                start = result.get("start", 0) + offset
+                end = result.get("end", 0) + offset
+                word = result.get("word", text[start:end])
+
+                key = (start, end, mapped_type)
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                pii_entities.append(
+                    PIIEntity(
+                        entity_type=mapped_type,
+                        text=word.strip(),
+                        start=start,
+                        end=end,
+                        score=score,
+                        source="mlmodel",
+                    )
                 )
-            )
 
         return pii_entities
 

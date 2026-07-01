@@ -110,21 +110,26 @@ def download_onnx_model(
     revision: str | None = None,
 ) -> Path:
     from huggingface_hub import hf_hub_download
+    from huggingface_hub.errors import EntryNotFoundError
 
-    filenames = [f"onnx/model_{variant}.onnx", f"onnx/model_{variant}.onnx_data"]
-    local_path: Path | None = None
-    for fn in filenames:
-        p = hf_hub_download(
+    local_path = Path(hf_hub_download(
+        repo_id=repo_id,
+        filename=f"onnx/model_{variant}.onnx",
+        cache_dir=cache_dir,
+        revision=revision,
+    ))
+    try:
+        # Only variants with externalized weights ship this side file; a variant
+        # packed into a single .onnx must not fail here.
+        hf_hub_download(
             repo_id=repo_id,
-            filename=fn,
+            filename=f"onnx/model_{variant}.onnx_data",
             cache_dir=cache_dir,
             revision=revision,
         )
-        if fn.endswith(".onnx"):
-            local_path = Path(p)
+    except EntryNotFoundError:
+        logger.info("Variant %s has no .onnx_data side file (single-file model)", variant)
 
-    if local_path is None:
-        raise FileNotFoundError(f"ONNX model file not found for variant '{variant}'")
     logger.info("ONNX model ready at %s", local_path)
     return local_path
 
