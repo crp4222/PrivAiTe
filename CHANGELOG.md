@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-07-02
+
 ### Fixed
 - Fuzzy de-anonymization no longer destroys formatting: it used to rebuild the
   text with split()/join(), flattening every newline and indent (markdown,

@@ -8,7 +8,7 @@ Streaming responses are restored too.
 
 ## Install
 
-1. Make `privaite` available to the LiteLLM proxy: `pip install "privaite>=0.2.9"`
+1. Make `privaite` available to the LiteLLM proxy: `pip install "privaite>=0.2.10"`
    in the same environment (or image) as LiteLLM.
 2. Put `privaite_guardrail.py` next to your `config.yaml`.
 3. Reference it by dot-notation in `config.yaml`:

@@ -93,8 +93,8 @@ Measured on 120 real documents from the open [AI4Privacy `pii-masking-200k`](htt
 
 | Solution | Recall (span) | Recall (strict) | False positives | Tool-call protection |
 |---|---|---|---|---|
-| `onnx` (default) | **84.5%** | **79.9%** | 2 / 14 | **100%** |
-| `light` (full Presidio) | 62.4% | 57.6% | 3 / 14 | **100%** |
+| `onnx` (default) | **84.5%** | **80.6%** | 2 / 14 | **100%** |
+| `light` (full Presidio) | 62.4% | 57.9% | 3 / 14 | **100%** |
 | Presidio baseline (flat-text) | 70.3% | 65.3% | 3 / 14 | 0.6% |
 
 Two recall columns: **span** credits a multi-token PII span as caught when its exact full string disappears (an upper bound); **strict** requires every token of the span to be removed. The Presidio baseline is the common flat-text approach (the engine behind most drop-in PII proxies); by design it does not touch tool-call arguments or multimodal content, which is the gap PrivAiTe closes — hence 100% tool-call protection vs 0.6%. Read the structured columns as "structured-aware vs the flat-text approach", not "vs every competitor".
