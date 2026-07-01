@@ -6,13 +6,41 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-07-01
+
+### Added
+- `pii.block_entities`: a hard policy gate. A request containing any listed PII
+  type is rejected with HTTP 400 and nothing is forwarded, instead of being
+  pseudonymized. Empty by default, so the default behavior (mask everything with a
+  placeholder) is unchanged. Enforced at the single anonymization choke point, so
+  it covers message content, multimodal text, and tool-call arguments alike. The
+  error names the blocked type(s) only, never the value.
+
+### Changed
+- Anonymization now fails closed. On an internal detector error the request is
+  blocked by default (`pii.on_error`, default `block`) rather than forwarded with
+  raw PII; set `on_error: allow` to opt back into the old behavior.
+- The `light` preset runs full Presidio instead of a pinned entity allowlist that
+  quietly capped its recall.
+- The engine warms its detectors once at startup, so the first real request does
+  not pay the model cold-start cost.
+
 ### Integrations
 - LiteLLM custom guardrail (`integrations/litellm/privaite_guardrail.py`). Mount it
   next to a LiteLLM `config.yaml` and reference it by dot-notation to anonymize
   requests and restore responses inline, including inside tool-call arguments and
-  the legacy `function_call`, plus streaming, which LiteLLM's built-in Presidio
-  guardrail does not cover. This is a repo integration, not part of the PyPI
-  package; it imports `privaite` at run time.
+  the legacy `function_call`, the Responses API, and streaming, which LiteLLM's
+  built-in Presidio guardrail does not cover. This is a repo integration, not part
+  of the PyPI package; it imports `privaite` at run time.
+- Both the LiteLLM guardrail and the Open WebUI filter honor `block_entities`: they
+  reject blocked types (an HTTP 400 for the guardrail, a raised error for the
+  filter) and fail closed if the installed `privaite` is too old to enforce the
+  gate, rather than silently forward the PII.
+
+### Documentation
+- The benchmark now cites its data source: the open AI4Privacy `pii-masking-200k`
+  dataset on Hugging Face. Because that dataset declares no explicit license, the
+  benchmark repo commits only derived labels and fetches the source text on demand.
 
 ## [0.2.8] - 2026-06-27
 
