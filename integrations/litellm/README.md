@@ -23,10 +23,21 @@ guardrails:
       preset: "onnx"                # "onnx" (full, detects secrets) or "light" (fast)
       languages: "en,fr"            # comma-separated spaCy languages
       deanonymize: true             # restore the real values in the response
+      # block_entities: ["US_SSN", "CREDIT_CARD"]  # reject these types outright (see below)
 ```
 
 If `default_on` is `false`, opt in per request by adding `"guardrails": ["privaite"]`
 to the request body.
+
+## Blocking specific PII types
+
+By default every detected PII item is pseudonymized and the request goes through.
+To make some types a hard stop, list them under `block_entities` (a YAML list or a
+comma-separated string). A request containing any listed type is rejected with a
+`400` before anything reaches the model; the error names the type(s), never the
+value. Types not listed are still masked as usual. This needs a `privaite` build
+that supports `pii.block_entities`; on an older one the guardrail refuses to start
+with block rules set, rather than silently forwarding the PII.
 
 ## Notes
 

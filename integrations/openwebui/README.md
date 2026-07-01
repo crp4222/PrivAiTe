@@ -17,6 +17,16 @@ text.
    `onnx` preset detects everything including secrets; switch to `light` for the
    fast, zero false-positive path.
 
+## Blocking specific PII types
+
+By default every detected PII item is pseudonymized and the request goes through.
+To make some types a hard stop instead, set the `block_entities` valve to a
+comma-separated list of PII types (e.g. `US_SSN,CREDIT_CARD`). A message containing
+any listed type is refused before it reaches the model, and Open WebUI shows the
+error; it names the type(s), never the value. Types not listed are still masked as
+usual. This needs a `privaite` build that supports `pii.block_entities`; on an
+older one the filter refuses the request rather than silently forwarding the PII.
+
 ## Notes
 
 - The filter runs Presidio and spaCy inside Open WebUI and downloads the spaCy

@@ -61,3 +61,41 @@ async def test_inlet_outlet_roundtrip():
 
     assert "Marie Dupont" in restored
     assert "marie.dupont@acme.com" in restored
+
+
+@pytest.mark.asyncio
+async def test_inlet_blocks_configured_type():
+    module = _load_filter()
+    flt = module.Filter()
+    flt.valves.preset = "light"
+    flt.valves.languages = "en"
+    flt.valves.block_entities = "EMAIL_ADDRESS"
+
+    meta: dict = {}
+    body = {"messages": [{"role": "user", "content": "email me at bob@example.com"}]}
+    with pytest.raises(Exception) as ei:
+        await flt.inlet(body, meta)
+
+    assert "EMAIL_ADDRESS" in str(ei.value)
+    assert "bob@example.com" not in str(ei.value)  # value never leaks
+    assert "privaite_map" not in meta  # nothing stashed, nothing forwarded
+
+
+@pytest.mark.asyncio
+async def test_inlet_ignores_types_not_present():
+    # a blocked type that is absent must not disturb a normal request.
+    module = _load_filter()
+    flt = module.Filter()
+    flt.valves.preset = "light"
+    flt.valves.languages = "en"
+    flt.valves.block_entities = "US_SSN"
+
+    meta: dict = {}
+    body = {"messages": [
+        {"role": "user", "content": "I am Marie Dupont, email marie.dupont@acme.com"}
+    ]}
+    body = await flt.inlet(body, meta)
+    anonymized = body["messages"][0]["content"]
+
+    assert "Marie Dupont" not in anonymized
+    assert "marie.dupont@acme.com" not in anonymized

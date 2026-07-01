@@ -232,3 +232,73 @@ async def test_post_call_failure_hook_pops_map():
     assert rd["metadata"]["other"] == 1
     assert await gr.async_post_call_failure_hook({}, RuntimeError("x"), None) is None
     assert await gr.async_post_call_failure_hook(None, RuntimeError("x"), None) is None
+
+
+def test_block_entities_parsed_from_string_and_list():
+    module = _load()
+    g1 = module.PrivaiteGuardrail(
+        guardrail_name="p", block_entities="US_SSN, CREDIT_CARD"
+    )
+    assert g1.block_entities == ["US_SSN", "CREDIT_CARD"]
+    g2 = module.PrivaiteGuardrail(guardrail_name="p", block_entities=["EMAIL_ADDRESS"])
+    assert g2.block_entities == ["EMAIL_ADDRESS"]
+    assert module.PrivaiteGuardrail(guardrail_name="p").block_entities == []
+
+
+@pytest.mark.asyncio
+async def test_block_entities_rejects_with_400():
+    from fastapi import HTTPException
+
+    module = _load()
+    gr = module.PrivaiteGuardrail(
+        guardrail_name="privaite", preset="light", languages="en",
+        block_entities=["EMAIL_ADDRESS"],
+    )
+    data = {"messages": [{"role": "user", "content": "reach me at bob@example.com"}]}
+    with pytest.raises(HTTPException) as ei:
+        await gr.async_pre_call_hook(None, None, data, "completion")
+
+    assert ei.value.status_code == 400
+    detail = ei.value.detail
+    msg = detail["error"] if isinstance(detail, dict) else str(detail)
+    assert "EMAIL_ADDRESS" in msg
+    assert "bob@example.com" not in msg  # the value never leaks into the error
+
+
+@pytest.mark.asyncio
+async def test_block_entities_ignores_types_not_present():
+    # a blocked type that is absent must not affect a normal request: the other
+    # PII is still masked and the request goes through.
+    module = _load()
+    gr = module.PrivaiteGuardrail(
+        guardrail_name="privaite", preset="light", languages="en",
+        block_entities=["US_SSN"],
+    )
+    data = {"messages": [
+        {"role": "user", "content": "I am Marie Dupont, email marie.dupont@acme.com"}
+    ]}
+    out = await gr.async_pre_call_hook(None, None, data, "completion")
+    serialized = json.dumps(out["messages"])
+    assert "Marie Dupont" not in serialized
+    assert "marie.dupont@acme.com" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_block_entities_fails_closed_when_privaite_too_old(monkeypatch):
+    # simulate an older privaite whose PIIConfig has no block_entities field:
+    # extra="allow" would swallow it silently, so the guardrail must refuse.
+    from privaite.config import schema
+
+    module = _load()
+    gr = module.PrivaiteGuardrail(
+        guardrail_name="privaite", preset="light", languages="en",
+        block_entities=["EMAIL_ADDRESS"],
+    )
+    reduced = {
+        k: v for k, v in schema.PIIConfig.model_fields.items() if k != "block_entities"
+    }
+    monkeypatch.setattr(schema.PIIConfig, "model_fields", reduced)
+
+    data = {"messages": [{"role": "user", "content": "bob@example.com"}]}
+    with pytest.raises(RuntimeError, match="block_entities"):
+        await gr.async_pre_call_hook(None, None, data, "completion")

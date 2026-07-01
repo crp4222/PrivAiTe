@@ -2,10 +2,10 @@
 title: PrivAiTe PII Anonymizer
 author: crp4222
 author_url: https://github.com/crp4222/PrivAiTe
-version: 0.1.2
+version: 0.1.3
 required_open_webui_version: 0.5.0
 requirements: privaite>=0.2.4
-description: Anonymize PII (text, tool calls, multimodal) before requests reach the provider.
+description: Anonymize or block PII (text, tool calls, multimodal) before it reaches the provider.
 """
 
 # Runs PrivAiTe's engine in-process inside Open WebUI. inlet() anonymizes the
@@ -41,6 +41,11 @@ class Filter:
         preset: str = Field(default="onnx", description="'onnx' (full, secrets) or 'light' (fast)")
         languages: str = Field(default="en,fr", description="Comma-separated spaCy languages.")
         deanonymize: bool = Field(default=True, description="Restore PII in the response.")
+        block_entities: str = Field(
+            default="",
+            description="Comma-separated PII TYPES to reject outright, e.g. "
+            "US_SSN,CREDIT_CARD. Empty (default) masks everything instead.",
+        )
 
     def __init__(self) -> None:
         self.valves = self.Valves()
@@ -49,6 +54,9 @@ class Filter:
 
     def _languages(self) -> list[str]:
         return [lang.strip() for lang in self.valves.languages.split(",") if lang.strip()]
+
+    def _block_entities(self) -> list[str]:
+        return [e.strip() for e in self.valves.block_entities.split(",") if e.strip()]
 
     async def _engine_for(self, languages: list[str]):
         from privaite.config.schema import (
@@ -61,9 +69,19 @@ class Filter:
         from privaite.pii.engine import PIIEngine
 
         preset = self.valves.preset if self.valves.preset in ("light", "onnx") else "light"
-        key = (preset, tuple(languages), self.valves.deanonymize)
+        block_entities = self._block_entities()
+        key = (preset, tuple(languages), self.valves.deanonymize, tuple(block_entities))
         if self._engine is not None and self._engine_key == key:
             return self._engine
+
+        if block_entities and "block_entities" not in PIIConfig.model_fields:
+            # PIIConfig uses extra="allow", so an older privaite would silently
+            # swallow block_entities and forward the PII anyway. Fail closed rather
+            # than pretend a policy gate is in force when it is not.
+            raise RuntimeError(
+                "block_entities is set but the installed privaite does not support "
+                "it; upgrade privaite to a version that enforces pii.block_entities"
+            )
 
         config = PIIConfig(
             enabled=True,
@@ -73,6 +91,7 @@ class Filter:
             ),
             anonymization=AnonymizationConfig(method="placeholder"),
             deanonymization=DeanonymizationConfig(enabled=self.valves.deanonymize),
+            block_entities=block_entities,
         )
         engine = PIIEngine(config)
         try:
@@ -97,8 +116,15 @@ class Filter:
         if not messages:
             return body
 
+        from privaite.pii.engine import PIIBlockedError
+
         engine = await self._engine_for(self._languages())
-        anonymized, mapping = await engine.process_request(messages)
+        try:
+            anonymized, mapping = await engine.process_request(messages)
+        except PIIBlockedError as exc:
+            # A blocked PII type was found: refuse the request. Open WebUI surfaces
+            # the message to the user; it names TYPES only, never the values.
+            raise Exception(str(exc)) from exc
         body["messages"] = anonymized
 
         if __metadata__ is not None and not mapping.is_empty:
