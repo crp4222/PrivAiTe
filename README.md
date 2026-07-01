@@ -89,7 +89,7 @@ Two other presets exist (`standard`, `full`) but are less useful in practice: th
 
 ## Benchmark
 
-Measured on 120 real [AI4Privacy](https://github.com/crp4222/privaite-bench) documents (458 PII items, labeled by 10 independent auditor agents and cross-checked against the dataset's own sensitive mask) across DE, EN, FR, IT, plus 14 clean documents for false positives.
+Measured on 120 real documents from the open [AI4Privacy `pii-masking-200k`](https://huggingface.co/datasets/ai4privacy/pii-masking-200k) dataset on Hugging Face (458 PII items, labeled by 10 independent auditor agents and cross-checked against the dataset's own sensitive mask) across DE, EN, FR, IT, plus 14 clean documents for false positives. The dataset declares no explicit license, so the [benchmark repo](https://github.com/crp4222/privaite-bench) commits only derived labels and fetches the source text on demand.
 
 | Solution | Recall (span) | Recall (strict) | False positives | Tool-call protection |
 |---|---|---|---|---|
