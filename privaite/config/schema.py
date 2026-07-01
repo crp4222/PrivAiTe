@@ -109,7 +109,9 @@ class AnonymizationConfig(BaseModel):
 
 class DeanonymizationConfig(BaseModel):
     enabled: bool = True
-    fuzzy_matching: bool = True
+    # Fuzzy matching catches placeholders the model re-typed imperfectly, at the
+    # cost of a small wrong-substitution risk on lookalike spans, so it is opt-in.
+    fuzzy_matching: bool = False
     fuzzy_threshold: float = 0.85
 
 
