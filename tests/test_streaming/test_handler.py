@@ -173,3 +173,147 @@ async def test_no_deanonymization_when_disabled():
     events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
 
     assert "Zorp Glax" in _collect_content(events)
+
+
+def _payloads(events: list[str]) -> list[dict]:
+    out = []
+    for event in events:
+        for line in event.splitlines():
+            if line.startswith("data: ") and line[len("data: "):].strip() != "[DONE]":
+                out.append(json.loads(line[len("data: "):]))
+    return out
+
+
+class RawChunk:
+    def __init__(self, data: dict) -> None:
+        self._data = data
+
+    def model_dump(self) -> dict:
+        return self._data
+
+
+@pytest.mark.asyncio
+async def test_multi_choice_streams_use_independent_buffers():
+    # n=2: each choice echoes a DIFFERENT placeholder split across chunks; the
+    # buffers must not mix and both must restore.
+    mapping = PIIMapping()
+    mapping.add("Marie Dupont", "<PERSON_1>", "PERSON")
+    mapping.add("Paul Martin", "<PERSON_2>", "PERSON")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    def _choice(idx, content, finish=None):
+        return {"index": idx, "delta": {"content": content}, "finish_reason": finish}
+
+    chunks = [
+        RawChunk({"model": "m", "choices": [_choice(0, "A: <PERS")]}),
+        RawChunk({"model": "m", "choices": [_choice(1, "B: <PERS")]}),
+        RawChunk({"model": "m", "choices": [_choice(0, "ON_1> ok", "stop")]}),
+        RawChunk({"model": "m", "choices": [_choice(1, "ON_2> ok", "stop")]}),
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    by_choice: dict[int, str] = {}
+    for payload in _payloads(events):
+        for choice in payload.get("choices", []):
+            content = choice.get("delta", {}).get("content")
+            if content:
+                idx = choice.get("index", 0)
+                by_choice[idx] = by_choice.get(idx, "") + content
+
+    assert by_choice[0] == "A: Marie Dupont ok"
+    assert by_choice[1] == "B: Paul Martin ok"
+
+
+@pytest.mark.asyncio
+async def test_provider_finish_chunk_survives_with_usage_and_id():
+    # The finish chunk must be forwarded, not replaced by a synthetic one: its
+    # id, usage and any other provider fields have to reach the client.
+    mapping = PIIMapping()
+    mapping.add("Marie Dupont", "<PERSON_1>", "PERSON")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [
+        RawChunk({"id": "chatcmpl-real", "model": "m", "choices": [
+            {"index": 0, "delta": {"content": "hi <PERSON_1>"}, "finish_reason": None}
+        ]}),
+        RawChunk({"id": "chatcmpl-real", "model": "m",
+                  "usage": {"total_tokens": 7},
+                  "choices": [
+                      {"index": 0, "delta": {}, "finish_reason": "stop"}
+                  ]}),
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    payloads = _payloads(events)
+
+    finish = [p for p in payloads
+              if any(c.get("finish_reason") for c in p.get("choices", []))]
+    assert len(finish) == 1  # exactly one finish chunk, never a duplicated pair
+    assert finish[0]["id"] == "chatcmpl-real"
+    assert finish[0]["usage"] == {"total_tokens": 7}
+    assert "Marie Dupont" in _collect_content(events)
+
+
+@pytest.mark.asyncio
+async def test_initial_role_chunk_is_not_swallowed():
+    mapping = PIIMapping()
+    mapping.add("Marie Dupont", "<PERSON_1>", "PERSON")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [
+        RawChunk({"model": "m", "choices": [
+            {"index": 0, "delta": {"role": "assistant", "content": ""},
+             "finish_reason": None}
+        ]}),
+        FakeChunk("hello", finish_reason="stop"),
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    roles = [
+        choice.get("delta", {}).get("role")
+        for payload in _payloads(events)
+        for choice in payload.get("choices", [])
+    ]
+    assert "assistant" in roles
+
+
+@pytest.mark.asyncio
+async def test_buffered_tail_flushed_when_stream_ends_without_finish():
+    # The provider dies before sending finish_reason: the held-back placeholder
+    # prefix must still be emitted (restored) before [DONE].
+    mapping = PIIMapping()
+    mapping.add("Marie Dupont", "<PERSON_1>", "PERSON")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [FakeChunk("bye <PERSON_1")]  # no finish chunk ever arrives
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    full = _collect_content(events)
+
+    assert full == "bye <PERSON_1"  # tail emitted verbatim, nothing dropped
+    assert events[-1] == "data: [DONE]\n\n"
+
+
+@pytest.mark.asyncio
+async def test_reasoning_content_is_restored():
+    mapping = PIIMapping()
+    mapping.add("Marie Dupont", "<PERSON_1>", "PERSON")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [
+        RawChunk({"model": "m", "choices": [
+            {"index": 0,
+             "delta": {"reasoning_content": "the user is <PERSON_1>"},
+             "finish_reason": None}
+        ]}),
+        FakeChunk("", finish_reason="stop"),
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    reasoning = "".join(
+        choice.get("delta", {}).get("reasoning_content") or ""
+        for payload in _payloads(events)
+        for choice in payload.get("choices", [])
+    )
+    assert "Marie Dupont" in reasoning
+    assert "<PERSON_1>" not in reasoning

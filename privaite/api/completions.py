@@ -6,7 +6,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
-from privaite.api.dependencies import get_config, get_pii_engine, get_provider_router
+from privaite.api.dependencies import (
+    get_config,
+    get_pii_engine,
+    get_provider_router,
+    record_pii_stats,
+)
 from privaite.config.schema import PrivAiTeConfig
 from privaite.pii.engine import PIIBlockedError, UnsupportedContentError
 from privaite.providers.router import ProviderRouter
@@ -47,6 +52,7 @@ async def completions(
                 msgs = [{"role": "user", "content": prompt}]
                 msgs, mapping = await pii_engine.process_request(msgs)
                 prompt = msgs[0]["content"]
+            record_pii_stats(request, mapping)
         except UnsupportedContentError as exc:
             return openai_error(str(exc), "invalid_request_error", 400)
         except PIIBlockedError as exc:
@@ -65,16 +71,14 @@ async def completions(
 
     try:
         if stream:
-            litellm_stream = await provider_router.streaming_completion(
-                model_alias=model,
-                messages=[{"role": "user", "content": prompt}],
-                **kwargs,
+            litellm_stream = await provider_router.streaming_text_completion(
+                model_alias=model, prompt=prompt, **kwargs
             )
 
             from privaite.streaming.handler import StreamingHandler
 
             deanon_config = config.pii.deanonymization if config.pii.enabled else None
-            generator = StreamingHandler.stream_response(
+            generator = StreamingHandler.stream_text_response(
                 litellm_stream=litellm_stream,
                 mapping=mapping,
                 deanonymizer_config=deanon_config,
@@ -90,10 +94,8 @@ async def completions(
                 },
             )
 
-        response = await provider_router.completion(
-            model_alias=model,
-            messages=[{"role": "user", "content": prompt}],
-            **kwargs,
+        response = await provider_router.text_completion(
+            model_alias=model, prompt=prompt, **kwargs
         )
     except Exception as exc:
         logger.exception("Provider error for model %s", model)

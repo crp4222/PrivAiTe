@@ -6,7 +6,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
-from privaite.api.dependencies import get_config, get_pii_engine, get_provider_router
+from privaite.api.dependencies import (
+    get_config,
+    get_pii_engine,
+    get_provider_router,
+    record_pii_stats,
+)
 from privaite.config.schema import PrivAiTeConfig
 from privaite.pii.engine import PIIBlockedError, UnsupportedContentError
 from privaite.providers.router import ProviderRouter
@@ -40,18 +45,7 @@ async def chat_completions(
     if config.pii.enabled and pii_engine is not None:
         try:
             messages, mapping = await pii_engine.process_request(messages)
-            tracker = getattr(request.app.state, "pii_tracker", None)
-            if tracker and mapping and not mapping.is_empty:
-                session_id = request.headers.get(
-                    "x-session-id",
-                    request.headers.get("authorization", "anonymous"),
-                )
-                counts: dict[str, int] = {}
-                for orig in mapping._original_to_fake:
-                    t = mapping.get_entity_type(orig)
-                    if t:
-                        counts[t] = counts.get(t, 0) + 1
-                tracker.record(session_id, counts)
+            record_pii_stats(request, mapping)
         except UnsupportedContentError as exc:
             return openai_error(str(exc), "invalid_request_error", 400)
         except PIIBlockedError as exc:

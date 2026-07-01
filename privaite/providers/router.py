@@ -14,6 +14,12 @@ class ProviderRouter:
     def __init__(self, providers: list[ProviderConfig]) -> None:
         self._model_map: dict[str, dict[str, Any]] = {}
         for p in providers:
+            if p.model_name in self._model_map:
+                # A silent last-wins overwrite routes traffic to a different
+                # provider than the operator thinks; refuse to start instead.
+                raise ValueError(
+                    f"Duplicate provider model_name alias '{p.model_name}' in config"
+                )
             params = p.litellm_params.model_dump(exclude_none=True)
             self._model_map[p.model_name] = params
             logger.info("Registered model alias: %s -> %s", p.model_name, params.get("model"))
@@ -46,6 +52,28 @@ class ProviderRouter:
         model = params.pop("model")
         return await litellm.acompletion(
             model=model, messages=messages, stream=True, **params, **kwargs
+        )
+
+    async def text_completion(
+        self, model_alias: str, prompt: str | list[str], **kwargs: Any
+    ) -> Any:
+        # atext_completion returns a real text_completion response (choices[].text)
+        # and transparently wraps chat-only models; acompletion would come back
+        # chat-shaped and the /v1/completions endpoint could never restore PII
+        # from choices[].message.content it does not read.
+        params = self.resolve_model(model_alias)
+        model = params.pop("model")
+        return await litellm.atext_completion(
+            model=model, prompt=prompt, **params, **kwargs
+        )
+
+    async def streaming_text_completion(
+        self, model_alias: str, prompt: str | list[str], **kwargs: Any
+    ) -> Any:
+        params = self.resolve_model(model_alias)
+        model = params.pop("model")
+        return await litellm.atext_completion(
+            model=model, prompt=prompt, stream=True, **params, **kwargs
         )
 
     async def embedding(

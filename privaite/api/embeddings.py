@@ -5,7 +5,12 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 
-from privaite.api.dependencies import get_config, get_pii_engine, get_provider_router
+from privaite.api.dependencies import (
+    get_config,
+    get_pii_engine,
+    get_provider_router,
+    record_pii_stats,
+)
 from privaite.config.schema import PrivAiTeConfig
 from privaite.pii.engine import PIIBlockedError, UnsupportedContentError
 from privaite.providers.router import ProviderRouter
@@ -37,14 +42,16 @@ async def embeddings(
         try:
             if isinstance(input_text, str):
                 msgs = [{"role": "user", "content": input_text}]
-                msgs, _ = await pii_engine.process_request(msgs)
+                msgs, mapping = await pii_engine.process_request(msgs)
                 input_text = msgs[0]["content"]
+                record_pii_stats(request, mapping)
             elif isinstance(input_text, list):
                 anonymized = []
                 for text in input_text:
                     msgs = [{"role": "user", "content": text}]
-                    msgs, _ = await pii_engine.process_request(msgs)
+                    msgs, mapping = await pii_engine.process_request(msgs)
                     anonymized.append(msgs[0]["content"])
+                    record_pii_stats(request, mapping)
                 input_text = anonymized
         except UnsupportedContentError as exc:
             return openai_error(str(exc), "invalid_request_error", 400)
