@@ -6,6 +6,65 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- Fuzzy de-anonymization no longer destroys formatting: it used to rebuild the
+  text with split()/join(), flattening every newline and indent (markdown,
+  code blocks) in any response that carried PII. Replacements are now spliced
+  into the original string. Fuzzy is also **opt-in now** (`fuzzy_matching`
+  defaults to `false`): it carries a small wrong-substitution risk on lookalike
+  spans, and it never rewrites an intact-but-unknown placeholder.
+- `/v1/completions` actually works against real providers: it is backed by
+  litellm's text-completion path now, so the response is a real
+  `text_completion` (not a chat object), PII restoration in `choices[].text`
+  works, batched list prompts stay a list of strings, and streaming emits
+  `text_completion` chunks instead of chat deltas.
+- The Docker `CMD` pointed at `config/privaite.yaml`, which is gitignored (it
+  is the operator's own file), so an image built from a fresh clone had no
+  config at all; it now falls back to the tracked example config. The
+  Dockerfile pre-download step also stops passing `trust_remote_code=True`.
+- Overlapping detections merge to the UNION of their spans: a short
+  higher-scored entity overlapping a longer one used to discard the longer one
+  entirely, forwarding its uncovered remainder raw to the provider.
+  `presidio_priority` overlap resolution falls back to score when neither
+  entity is from Presidio.
+- `mask` and `redact` are truly irreversible: the original no longer enters the
+  reversible map, so it is never restored into responses, and two values that
+  mask to the same string ("****") can no longer cross-restore each other's
+  PII. Detections are still counted in `/stats`.
+- Numeric JSON values in tool-call arguments are scanned: a card number sent as
+  a bare JSON number used to bypass both masking and the `block_entities` gate.
+  On a hit the leaf becomes the masked string; ordinary numbers keep their type.
+- Streaming rework: provider chunks are forwarded as-is (ids, `usage`,
+  `logprobs` and the real finish chunk survive; no more synthetic duplicate
+  finish chunk), `n>1` choices keep independent restore buffers instead of
+  sharing one, the initial role chunk is no longer swallowed, held-back text is
+  flushed even when the stream ends without a `finish_reason`, and
+  `reasoning_content` / `reasoning` deltas are restored too.
+- Misconfigurations fail fast at startup instead of silently or per-request:
+  `merge_strategy: intersection` with fewer than 2 enabled detectors (it would
+  detect nothing and forward all PII raw), duplicate provider `model_name`
+  aliases (last-wins overwrite), and a Presidio language with no spaCy model
+  mapping (it used to pass init and then crash every request).
+- JSON log lines are built with `json.dumps`, so messages containing quotes or
+  newlines no longer produce invalid JSON.
+- `/stats` now counts detections from `/v1/completions` and `/v1/embeddings`,
+  not just chat.
+
+### Security
+- Hugging Face model loading defaults to `trust_remote_code=False` (the default
+  model needs no repo code; the flag was granting an unused permission) and
+  every detector accepts a `revision` pin so a rewritten model repo cannot
+  silently swap the weights this proxy runs.
+
+### Removed
+- Dead config knobs that were accepted but never read: `logging.redact_fields`
+  and `anonymization.entity_overrides.<TYPE>.domain_preserve`.
+
+### Documentation
+- The README now states exactly which request fields are NOT scanned
+  (`messages[].name`, `user`, `metadata`, tool definitions, JSON object keys)
+  and that `passthrough.*` also bypasses `block_entities`.
+
 ## [0.2.9] - 2026-07-01
 
 ### Added
