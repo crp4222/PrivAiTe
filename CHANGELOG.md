@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-07-02
+
 ### Fixed
 - Second audit pass (a three-reviewer sweep of the 0.2.10 diff, the integrations,
   and the never-reviewed periphery), everything below reproduced by a test that
