@@ -244,7 +244,12 @@ class PrivaiteGuardrail(CustomGuardrail):
                 new_text = anon.get("content", input_value)
                 data["input"] = new_text
                 self._overwrite_snapshot_input(data, new_text)
-            elif field is None:
+                continue
+            # every non-"str" target came from the `isinstance(input_value, list)`
+            # branch above, so input_value is a list here.
+            if not isinstance(input_value, list):
+                continue
+            if field is None:
                 input_value[target] = anon  # message item: replace whole
             elif field == "__str__":
                 input_value[target] = anon.get("content", input_value[target])
