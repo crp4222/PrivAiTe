@@ -7,6 +7,10 @@
 
 **A drop-in, self-hosted LLM proxy that reversibly redacts PII before it reaches the provider, including inside tool-call arguments and multimodal content, with zero telemetry.**
 
+<p align="center">
+  <img src="docs/demo.gif" alt="PrivAiTe demo: a tool call carrying an email, name and credit card has each value replaced with a placeholder before it reaches the LLM provider, with the JSON keys left intact, then de-anonymized in the reply" width="820">
+</p>
+
 Keep personal data out of your LLM calls. PrivAiTe is a local proxy that sits between your app and the model provider. It finds names, emails, phone numbers, cards, IBANs, secrets and more, swaps them for stand-ins before anything leaves your machine, and puts the real values back in the reply. It does this across message text, **tool-call arguments, and multimodal content**, which is where most tools stop looking. Detection runs on your machine and nothing phones home. By default it runs the full ONNX suite, so it also catches **secrets and passwords**, not just the easy regex entities. Point any OpenAI-compatible client at it.
 
 ```
