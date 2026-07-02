@@ -248,6 +248,18 @@ async def test_responses_mixed_input_list_is_fully_scanned():
 
 
 @pytest.mark.asyncio
+async def test_responses_input_text_content_parts_are_scanned():
+    # A top-level list of content parts ({"type":"input_text","text":...}) is
+    # neither a role-message list nor a string; its text must still be scrubbed.
+    gr = _guardrail()
+    parts = [{"type": "input_text", "text": "Hi Marie Dupont"}]
+    data = {"input": parts}
+    data = await gr.async_pre_call_hook(None, None, data, "aresponses")
+    assert "Marie Dupont" not in data["input"][0]["text"]
+    assert data["metadata"]["privaite_map"]
+
+
+@pytest.mark.asyncio
 async def test_responses_mixed_input_list_enforces_block_gate():
     module = _load()
     gr = module.PrivaiteGuardrail(

@@ -168,10 +168,10 @@ class PrivaiteGuardrail(CustomGuardrail):
             self._engine_key = key
             return engine
 
-    # Text-bearing fields on non-message Responses input items (tool output, a
-    # streamed/echoed tool call). Scanned individually so a mixed input list is
-    # not left raw.
-    _ITEM_TEXT_FIELDS = ("output", "arguments")
+    # Text-bearing fields on non-message Responses input items: a tool output, a
+    # streamed/echoed tool call, and a bare input_text/output_text content part.
+    # Scanned individually so a mixed input list is not left raw.
+    _ITEM_TEXT_FIELDS = ("output", "arguments", "text")
 
     def _overwrite_snapshot_input(self, data: dict, new_input: Any) -> None:
         # A plain `data["input"] = ...` rebind leaks for string input: the proxy
