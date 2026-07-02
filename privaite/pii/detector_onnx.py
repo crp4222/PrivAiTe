@@ -110,7 +110,14 @@ def download_onnx_model(
     revision: str | None = None,
 ) -> Path:
     from huggingface_hub import hf_hub_download
-    from huggingface_hub.errors import EntryNotFoundError
+
+    # EntryNotFoundError moved to the top-level .errors module in hub 0.25; older
+    # versions (pyproject floors at 0.23) expose it only under .utils. Import
+    # defensively so a floor install does not crash the default onnx detector.
+    try:
+        from huggingface_hub.errors import EntryNotFoundError
+    except ImportError:  # pragma: no cover - only on hub < 0.25
+        from huggingface_hub.utils import EntryNotFoundError
 
     local_path = Path(hf_hub_download(
         repo_id=repo_id,

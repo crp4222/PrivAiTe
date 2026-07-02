@@ -124,6 +124,49 @@ async def test_tool_call_arguments_anonymized():
 
 
 @pytest.mark.asyncio
+async def test_bare_string_in_content_list_is_scanned_and_blockable():
+    # content: ["I am Marie Dupont", 42] used to pass the string through raw
+    # (it is neither a text part nor a media part), silently defeating both
+    # anonymization and block_entities. Bare strings are user text: scan them.
+    from privaite.pii.engine import PIIBlockedError
+
+    engine = _make_engine()
+    messages = [{"role": "user", "content": ["I am Marie Dupont", 42]}]
+    out, mapping = await engine.process_request(messages)
+
+    assert "Marie Dupont" not in json.dumps(out)
+    assert "<PERSON_1>" in out[0]["content"][0]
+    assert out[0]["content"][1] == 42
+    assert not mapping.is_empty
+
+    blocked = PIIConfig(
+        enabled=True,
+        detectors=DetectorsConfig(presidio=PresidioDetectorConfig(enabled=False)),
+        anonymization=AnonymizationConfig(method="placeholder"),
+        block_entities=["PERSON"],
+    )
+    engine2 = PIIEngine(blocked)
+    engine2.detectors = [FakeDetector({"Marie Dupont": "PERSON"})]
+    engine2._ready = True
+    with pytest.raises(PIIBlockedError):
+        await engine2.process_request(messages)
+
+
+@pytest.mark.asyncio
+async def test_short_numbers_keep_their_type_without_scanning():
+    # {"year": 2024} must never come back as a string: numbers under 7 digits
+    # are not scanned (no realistic numeric PII is that short).
+    engine = _make_engine()
+    args = json.dumps({"year": 2024, "qty": 3, "ratio": 0.5})
+    messages = [{"role": "assistant", "tool_calls": [
+        {"function": {"name": "f", "arguments": args}}
+    ]}]
+    out, _ = await engine.process_request(messages)
+    parsed = json.loads(out[0]["tool_calls"][0]["function"]["arguments"])
+    assert parsed == {"year": 2024, "qty": 3, "ratio": 0.5}
+
+
+@pytest.mark.asyncio
 async def test_numeric_json_value_with_pii_is_masked():
     # A card number sent as a bare JSON number must not slip past detection just
     # because it is not a string. On a hit the leaf becomes the masked string;

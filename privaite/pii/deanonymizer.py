@@ -8,8 +8,16 @@ from privaite.pii.mapping import PIIMapping
 
 # An intact-but-unknown placeholder (e.g. the model hallucinated <PERSON_3> when
 # only <PERSON_1> exists). Fuzzy-matching it to a KNOWN placeholder would inject
-# someone else's PII, so these candidates are never fuzzy-replaced.
-_PLACEHOLDER_SHAPE = re.compile(r"<[A-Z][A-Z0-9_]*_\d+>\Z")
+# someone else's PII, so these candidates are never fuzzy-replaced. Checked
+# case-insensitively on the punctuation-stripped core, so "<person_3>," is
+# protected just like "<PERSON_3>".
+_PLACEHOLDER_SHAPE = re.compile(r"<[A-Z][A-Z0-9_]*_\d+>\Z", re.IGNORECASE)
+
+# Sentence punctuation stripped from candidate edges before matching, so a
+# trailing comma neither defeats the placeholder guard nor gets swallowed by a
+# legitimate replacement. Deliberately excludes <> (placeholders) and the
+# @._+- characters that appear inside emails, phones and dates.
+_EDGE_PUNCT = ".,;:!?\"'()[]{}«»…"
 
 
 class DeAnonymizer:
@@ -63,16 +71,31 @@ class DeAnonymizer:
                 continue
 
             for i in range(len(tokens) - window + 1):
-                start = tokens[i][0]
-                end = tokens[i + window - 1][1]
-                if _overlaps(start, end):
+                raw_start = tokens[i][0]
+                raw_end = tokens[i + window - 1][1]
+
+                # Trim sentence punctuation off the edges: match and replace only
+                # the core, so "Michel Deu," keeps its comma and "<PERSON_3>." is
+                # still recognized as a placeholder shape.
+                start, end = raw_start, raw_end
+                while start < end and text[start] in _EDGE_PUNCT:
+                    start += 1
+                while end > start and text[end - 1] in _EDGE_PUNCT:
+                    end -= 1
+                if start >= end or _overlaps(start, end):
                     continue
+
                 candidate = text[start:end]
                 if candidate == original or candidate in known_fakes:
                     continue
                 if _PLACEHOLDER_SHAPE.match(candidate):
                     continue
-                ratio = SequenceMatcher(None, candidate.lower(), fake.lower()).ratio()
+                # Compare with normalized whitespace: a fake re-typed across a
+                # newline or a double space is exactly what fuzzy exists to catch,
+                # and the raw slice would otherwise pay a ratio penalty per
+                # whitespace character.
+                normalized = " ".join(candidate.split())
+                ratio = SequenceMatcher(None, normalized.lower(), fake.lower()).ratio()
                 if ratio >= self.config.fuzzy_threshold:
                     replacements.append((start, end, original))
 

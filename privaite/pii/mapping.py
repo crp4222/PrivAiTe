@@ -20,9 +20,12 @@ class PIIMapping:
         # Record a detection for stats/counting WITHOUT a reversible substitution.
         # Used by lossy methods (mask, redact): they must never be restored, and
         # two different originals that mask to the same string ("****") must not
-        # collide in the reverse map and cross-restore each other's PII.
+        # collide in the reverse map and cross-restore each other's PII. Counts
+        # once per unique original, matching add()'s semantics, so /stats does not
+        # inflate when the same value is masked at several positions.
+        if original not in self._entity_types:
+            self._type_counters[entity_type] = self._type_counters.get(entity_type, 0) + 1
         self._entity_types[original] = entity_type
-        self._type_counters[entity_type] = self._type_counters.get(entity_type, 0) + 1
 
     def next_index(self, entity_type: str) -> int:
         return self._type_counters.get(entity_type, 0) + 1

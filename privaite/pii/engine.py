@@ -86,6 +86,15 @@ class PIIEngine:
             self.detectors.append(detector)
             logger.info("ONNX privacy-filter detector initialized")
 
+        if self.config.enabled and not self.detectors:
+            # pii.enabled=true with every detector switched off would serve every
+            # request with detection silently doing nothing. Refuse to start; an
+            # operator who wants passthrough must set pii.enabled=false explicitly.
+            raise ValueError(
+                "pii.enabled is true but no detector is enabled: detection would "
+                "be silently off. Enable a detector or set pii.enabled: false"
+            )
+
         if self.config.merge_strategy == "intersection" and len(self.detectors) < 2:
             # Intersection keeps only spans confirmed by >=2 detectors. With fewer
             # detectors NOTHING can ever be confirmed, so every request would be
@@ -184,7 +193,12 @@ class PIIEngine:
         if isinstance(content, list):
             new_parts: list[Any] = []
             for part in content:
-                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                if isinstance(part, str):
+                    # A bare string inside a content list is user text: scan it.
+                    # Skipping it let PII (and blocked types) through whenever a
+                    # client sent content as a plain string list.
+                    new_parts.append(await self._anonymize_text(part, mapping, language))
+                elif isinstance(part, dict) and isinstance(part.get("text"), str):
                     new_part = dict(part)
                     new_part["text"] = await self._anonymize_text(
                         part["text"], mapping, language
@@ -270,8 +284,14 @@ class PIIEngine:
             # detection AND the block gate entirely. Scan the digits; only if PII is
             # actually found does the leaf become a (masked) string, so ordinary
             # numbers keep their type. The block gate still fires inside
-            # _anonymize_text for a blocked type.
+            # _anonymize_text for a blocked type. Numbers with fewer than 7 digits
+            # are skipped outright: the shortest realistic numeric PII (phone
+            # fragments, SSN, cards) is longer, and scanning every count/year/
+            # coordinate would run the full detector stack per leaf and risk
+            # rewriting schema-typed numbers on a false positive.
             as_text = str(value)
+            if sum(ch.isdigit() for ch in as_text) < 7:
+                return value
             anonymized = await self._anonymize_text(as_text, mapping, language)
             return anonymized if anonymized != as_text else value
         if isinstance(value, dict):

@@ -112,9 +112,31 @@ def test_merge_adjacent_no_overlap():
     assert len(result) == 2
 
 
+def test_intersection_requires_two_distinct_sources():
+    # two overlapping spans from the SAME detector (e.g. chunk-window duplicates)
+    # must not self-confirm under intersection.
+    same = [
+        _entity(start=0, end=10, score=0.9, source="bert_ner"),
+        _entity(start=2, end=12, score=0.8, source="bert_ner"),
+    ]
+    assert merge_entities(same, strategy="intersection") == []
+
+    cross = [
+        _entity(start=0, end=10, score=0.9, source="bert_ner"),
+        _entity(start=2, end=12, score=0.8, source="presidio"),
+    ]
+    result = merge_entities(cross, strategy="intersection")
+    assert len(result) == 1
+    # both members survive as a UNION span: the longer remainder is not dropped
+    assert result[0].start == 0
+    assert result[0].end == 12
+
+
 def test_intersection_with_single_detector_refused_at_startup():
     # intersection + <2 detectors would detect NOTHING and forward all PII raw;
     # the engine must refuse to initialize instead of failing silently open.
+    # (With zero detectors the broader no-detector guard fires first; both are
+    # startup refusals, either message is a correct outcome here.)
     import asyncio
 
     import pytest
@@ -133,7 +155,9 @@ def test_intersection_with_single_detector_refused_at_startup():
         detectors=DetectorsConfig(presidio=PresidioDetectorConfig(enabled=False)),
     )
     engine = PIIEngine(config)
-    with pytest.raises(ValueError, match="intersection"):
-        asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
-            engine.initialize()
-        )
+    loop = asyncio.new_event_loop()
+    try:
+        with pytest.raises(ValueError, match="intersection|no detector"):
+            loop.run_until_complete(engine.initialize())
+    finally:
+        loop.close()

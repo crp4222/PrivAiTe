@@ -103,7 +103,9 @@ def test_deanonymize_fuzzy_no_match_leaves_text_untouched():
 
 def test_deanonymize_fuzzy_never_rewrites_unknown_placeholders():
     # The model hallucinated <PERSON_3>; only <PERSON_1> is mapped. Fuzzy must
-    # not inject person 1's PII into a placeholder that never existed.
+    # not inject person 1's PII into a placeholder that never existed, and the
+    # guard must hold with attached punctuation, different case, or parentheses
+    # (the raw token is not the placeholder, its punctuation-stripped core is).
     config = DeanonymizationConfig(
         enabled=True, fuzzy_matching=True, fuzzy_threshold=0.85
     )
@@ -112,5 +114,40 @@ def test_deanonymize_fuzzy_never_rewrites_unknown_placeholders():
     mapping = PIIMapping()
     mapping.add("Marie Dupont", "<PERSON_1>", "PERSON")
 
-    text = "Contact <PERSON_3> tomorrow"
-    assert deanon.deanonymize(text, mapping) == text
+    for text in [
+        "Contact <PERSON_3> tomorrow",
+        "Contact <PERSON_3>, tomorrow",
+        "Contact <PERSON_3>.",
+        "Contact <person_3> tomorrow",
+        "(<PERSON_9>)",
+    ]:
+        assert deanon.deanonymize(text, mapping) == text
+
+
+def test_deanonymize_fuzzy_replaces_core_and_keeps_punctuation():
+    # A legitimate near-match with a trailing comma: the comma must survive.
+    config = DeanonymizationConfig(
+        enabled=True, fuzzy_matching=True, fuzzy_threshold=0.85
+    )
+    deanon = DeAnonymizer(config)
+
+    mapping = PIIMapping()
+    mapping.add("Jean Eude", "Michel Deus", "PERSON")
+
+    result = deanon.deanonymize("I met Michel Deu, then left.", mapping)
+    assert result == "I met Jean Eude, then left."
+
+
+def test_deanonymize_fuzzy_catches_fake_retyped_across_whitespace():
+    # The exact use case fuzzy exists for: the model re-typed the fake across a
+    # newline or a double space. The ratio is computed whitespace-normalized.
+    config = DeanonymizationConfig(
+        enabled=True, fuzzy_matching=True, fuzzy_threshold=0.85
+    )
+    deanon = DeAnonymizer(config)
+
+    mapping = PIIMapping()
+    mapping.add("Jean Eude", "Michel Deus", "PERSON")
+
+    assert deanon.deanonymize("Hello Michel\r\nDeus bye", mapping) == "Hello Jean Eude bye"
+    assert deanon.deanonymize("Hello Michel   Deus bye", mapping) == "Hello Jean Eude bye"

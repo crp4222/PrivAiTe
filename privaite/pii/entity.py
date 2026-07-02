@@ -90,14 +90,29 @@ def _merge_intersection(
     if len(entities) < 2:
         return []
 
-    result: list[PIIEntity] = []
+    # Confirmation means two DIFFERENT detectors agree: two chunk-window
+    # duplicates from one detector must not self-confirm. Keep BOTH members of
+    # a confirmed pair; the union merge below widens them into one span, so the
+    # longer detection's remainder is never dropped by a shorter partner.
+    confirmed: list[PIIEntity] = []
+    seen: set[int] = set()
     for i, e1 in enumerate(entities):
-        for e2 in entities[i + 1 :]:
+        for j in range(i + 1, len(entities)):
+            e2 = entities[j]
+            if e1.source == e2.source:
+                continue
             if e1.start < e2.end and e2.start < e1.end:
-                result.append(e1 if e1.score >= e2.score else e2)
-                break
+                if i not in seen:
+                    seen.add(i)
+                    confirmed.append(e1)
+                if j not in seen:
+                    seen.add(j)
+                    confirmed.append(e2)
 
-    return _merge_union(result, "highest_score", source_text) if result else []
+    if not confirmed:
+        return []
+    confirmed.sort(key=lambda e: (e.start, -e.length))
+    return _merge_union(confirmed, "highest_score", source_text)
 
 
 def _resolve_overlap(
