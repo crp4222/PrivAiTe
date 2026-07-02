@@ -87,7 +87,12 @@ class StreamingHandler:
                     continue
                 call = present.get(t_idx)
                 if call is not None:
-                    fn = call.setdefault("function", {})
+                    # function may be present-but-None on nonstandard chunks;
+                    # setdefault would hand back the None and crash.
+                    fn = call.get("function")
+                    if not isinstance(fn, dict):
+                        fn = {}
+                        call["function"] = fn
                     fn["arguments"] = (fn.get("arguments") or "") + remaining
                 else:
                     pre_events.append(create_delta_chunk(
@@ -159,18 +164,33 @@ class StreamingHandler:
                         _flush_into_delta(idx, delta, pre_events)
 
                     # Suppress only the pure hold-back case: this choice HAD text,
-                    # all of it is buffered, and the delta carries nothing else.
+                    # all of it is buffered, and NOTHING else rides on the choice
+                    # (no other delta field, no logprobs or any other choice-level
+                    # payload). Anything else present means the chunk must reach
+                    # the client even with its text held back.
+                    delta_extra = any(
+                        value not in (None, "", [])
+                        for key, value in delta.items()
+                        if key != "content"
+                    )
+                    choice_extra = any(
+                        value is not None
+                        for key, value in choice.items()
+                        if key not in ("index", "delta", "finish_reason")
+                    )
                     held_back = (
                         bool(content)
                         and not delta.get("content")
                         and not finish_reason
-                        and not delta.get("role")
-                        and not delta.get("tool_calls")
-                        and not delta.get("function_call")
-                        and not any(delta.get(f) for f in _REASONING_FIELDS)
+                        and not delta_extra
+                        and not choice_extra
                     )
                     if not held_back:
                         visible = True
+
+                # A held-back chunk that carries usage must still go out.
+                if not visible and chunk_dict.get("usage") is not None:
+                    visible = True
 
                 for event in pre_events:
                     yield format_sse_event(json.dumps(event))
@@ -250,6 +270,8 @@ class StreamingHandler:
 
                 if do_deanon and mapping:
                     for choice in chunk_dict.get("choices") or []:
+                        if not isinstance(choice, dict):
+                            continue
                         idx = choice.get("index", 0) or 0
                         buf = buffers.get(idx)
                         if buf is None:
@@ -258,8 +280,12 @@ class StreamingHandler:
                         if text:
                             choice["text"] = buf.feed(text)
                         if choice.get("finish_reason"):
-                            choice["text"] = (choice.get("text") or "") + buf.flush()
                             flushed.add(idx)
+                            remaining = buf.flush()
+                            if remaining:
+                                # only rewrite when there is something to append,
+                                # so a finish chunk's text: null stays null.
+                                choice["text"] = (choice.get("text") or "") + remaining
 
                 yield format_sse_event(json.dumps(chunk_dict))
 

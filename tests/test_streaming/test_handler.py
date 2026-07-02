@@ -295,6 +295,82 @@ async def test_buffered_tail_flushed_when_stream_ends_without_finish():
 
 
 @pytest.mark.asyncio
+async def test_held_back_chunk_with_logprobs_or_refusal_still_emitted():
+    # A chunk whose text is fully held back may still carry logprobs (choice
+    # level) or a refusal (delta level); suppressing it dropped that payload.
+    mapping = PIIMapping()
+    mapping.add("Marie Dupont", "<PERSON_1>", "PERSON")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [
+        RawChunk({"model": "m", "choices": [
+            {"index": 0, "delta": {"content": "<PERSON"},
+             "logprobs": {"content": [{"token": "x"}]}, "finish_reason": None}
+        ]}),
+        RawChunk({"model": "m", "choices": [
+            {"index": 0, "delta": {"content": "<PERS", "refusal": "no"},
+             "finish_reason": None}
+        ]}),
+        FakeChunk("ON_1> ok", finish_reason="stop"),
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    payloads = _payloads(events)
+
+    logprobs = [c.get("logprobs") for p in payloads for c in p.get("choices", [])
+                if c.get("logprobs") is not None]
+    refusals = [c.get("delta", {}).get("refusal") for p in payloads
+                for c in p.get("choices", []) if c.get("delta", {}).get("refusal")]
+    assert len(logprobs) == 1
+    assert refusals == ["no"]
+
+
+@pytest.mark.asyncio
+async def test_held_back_chunk_with_usage_still_emitted():
+    mapping = PIIMapping()
+    mapping.add("Marie Dupont", "<PERSON_1>", "PERSON")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [
+        RawChunk({"model": "m", "usage": {"total_tokens": 5}, "choices": [
+            {"index": 0, "delta": {"content": "<PERSON"}, "finish_reason": None}
+        ]}),
+        FakeChunk("_1>", finish_reason="stop"),
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    usages = [p.get("usage") for p in _payloads(events) if p.get("usage") is not None]
+    assert usages == [{"total_tokens": 5}]
+
+
+@pytest.mark.asyncio
+async def test_finish_chunk_with_function_none_does_not_crash():
+    # nonstandard finish chunk: tool_calls slot present with function: None while
+    # a tail is still buffered for that index; must append, not crash.
+    mapping = PIIMapping()
+    mapping.add("marie@acme.com", "<EMAIL_ADDRESS_1>", "EMAIL_ADDRESS")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [
+        RawChunk({"model": "m", "choices": [
+            {"index": 0, "delta": {"tool_calls": [
+                {"index": 0, "function": {"arguments": '{"to": "<EMAIL_ADDRES'}}
+            ]}, "finish_reason": None}
+        ]}),
+        RawChunk({"model": "m", "choices": [
+            {"index": 0, "delta": {"tool_calls": [{"index": 0, "function": None}]},
+             "finish_reason": "tool_calls"}
+        ]}),
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    args = _collect_tool_args(events)
+    # the held tail is flushed onto the finish chunk instead of being lost
+    assert args[0] == '{"to": "<EMAIL_ADDRES'
+    assert events[-1] == "data: [DONE]\n\n"
+
+
+@pytest.mark.asyncio
 async def test_reasoning_content_is_restored():
     mapping = PIIMapping()
     mapping.add("Marie Dupont", "<PERSON_1>", "PERSON")

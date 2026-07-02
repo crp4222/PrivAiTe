@@ -31,6 +31,38 @@ def _app(max_bytes: int):
 
 
 @pytest.mark.asyncio
+async def test_auth_rejects_before_body_is_buffered(monkeypatch):
+    # Auth must be the OUTER middleware: an unauthenticated oversized request
+    # gets 401 from the headers alone, never a 413 that proves the size limiter
+    # (and its full-body buffering) ran first for an anonymous caller.
+    monkeypatch.setenv("PRIVAITE_API_KEYS", "goodkey")
+    config = PrivAiTeConfig(
+        server=ServerConfig(host="127.0.0.1", port=8400, max_request_bytes=100),
+        auth=AuthConfig(enabled=True),
+        providers=[],
+        pii=PIIConfig(enabled=False),
+        logging=LoggingConfig(format="text", level="debug"),
+    )
+    app = create_app(config)
+    app.state.pii_engine = None
+    app.state.pii_tracker = None
+    app.state.provider_router = ProviderRouter([])
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.post(
+            "/v1/chat/completions",
+            content="x" * 500,
+            headers={
+                "content-type": "application/json",
+                "authorization": "Bearer wrongkey",
+            },
+        )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
 async def test_oversized_request_is_rejected():
     app = _app(max_bytes=100)
     async with AsyncClient(

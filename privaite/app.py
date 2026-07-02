@@ -79,19 +79,24 @@ def create_app(config: PrivAiTeConfig | None = None) -> FastAPI:
 
     setup_logging(level=config.logging.level, fmt=config.logging.format)
 
+    from privaite import __version__
+
     app = FastAPI(
         title="PrivAiTe",
         description="Privacy-first LLM proxy with transparent PII anonymization",
-        version="0.2.8",
+        version=__version__,
         lifespan=lifespan,
     )
 
     app.state.config = config
 
-    app.add_middleware(AuthMiddleware)
+    # Starlette runs the LAST added middleware first. Auth must be outermost:
+    # it only reads headers, so an unauthenticated request is rejected before
+    # the size limiter buffers up to max_request_bytes of body for it.
     app.add_middleware(
         RequestSizeLimitMiddleware, max_bytes=config.server.max_request_bytes
     )
+    app.add_middleware(AuthMiddleware)
     app.include_router(api_router)
 
     return app

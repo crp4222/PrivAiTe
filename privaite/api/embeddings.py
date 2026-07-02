@@ -9,6 +9,7 @@ from privaite.api.dependencies import (
     get_config,
     get_pii_engine,
     get_provider_router,
+    record_pii_counts,
     record_pii_stats,
 )
 from privaite.config.schema import PrivAiTeConfig
@@ -47,12 +48,17 @@ async def embeddings(
                 record_pii_stats(request, mapping)
             elif isinstance(input_text, list):
                 anonymized = []
+                # Merge per-item counts and record ONCE: the tracker also counts
+                # requests, and a 10-item batch is one request, not ten.
+                batch_counts: dict[str, int] = {}
                 for text in input_text:
                     msgs = [{"role": "user", "content": text}]
                     msgs, mapping = await pii_engine.process_request(msgs)
                     anonymized.append(msgs[0]["content"])
-                    record_pii_stats(request, mapping)
+                    for etype, count in mapping.entity_type_counts().items():
+                        batch_counts[etype] = batch_counts.get(etype, 0) + count
                 input_text = anonymized
+                record_pii_counts(request, batch_counts)
         except UnsupportedContentError as exc:
             return openai_error(str(exc), "invalid_request_error", 400)
         except PIIBlockedError as exc:

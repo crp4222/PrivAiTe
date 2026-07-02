@@ -107,6 +107,12 @@ async def chat_completions(
             content = msg.get("content")
             if content:
                 msg["content"] = await pii_engine.process_response(content, mapping)
+            # Reasoning models echo placeholders in their traces too; the
+            # streaming path restores these, keep parity here.
+            for field in ("reasoning_content", "reasoning"):
+                value = msg.get(field)
+                if isinstance(value, str) and value:
+                    msg[field] = await pii_engine.process_response(value, mapping)
             tool_calls = msg.get("tool_calls")
             if tool_calls:
                 msg["tool_calls"] = await pii_engine.process_response_tool_calls(
