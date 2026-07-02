@@ -17,11 +17,13 @@ MONTHS_DE = (
 
 MONTHS_ALL = f"{MONTHS_FR}|{MONTHS_DE}"
 
+# Word boundaries on both edges: without the trailing \b, "3 maintenant" used to
+# match "3 mai" and "1 marseillais" matched "1 mars", splitting ordinary words.
 PATTERNS = [
-    rf"(?P<date>\d{{1,2}}\.?\s+(?:{MONTHS_ALL})\s+\d{{4}})",
-    rf"(?P<date>(?:{MONTHS_ALL})\s+\d{{4}})",
-    rf"(?P<date>\d{{1,2}}\.?\s+(?:{MONTHS_ALL}))",
-    r"(?P<date>(?:née?|born|geboren)\s+(?:le\s+|am\s+)?\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4})",
+    rf"(?P<date>(?<!\d)\d{{1,2}}\.?\s+(?:{MONTHS_ALL})\s+\d{{4}}(?!\d))",
+    rf"\b(?P<date>(?:{MONTHS_ALL})\s+\d{{4}}(?!\d))",
+    rf"(?P<date>(?<!\d)\d{{1,2}}\.?\s+(?:{MONTHS_ALL}))\b",
+    r"(?P<date>(?:née?|born|geboren)\s+(?:le\s+|am\s+)?\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4})(?!\d)",
 ]
 
 COMPILED = [re.compile(p, re.IGNORECASE | re.UNICODE) for p in PATTERNS]

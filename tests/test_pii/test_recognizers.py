@@ -51,6 +51,14 @@ class TestContextualNameRecognizer:
         assert len(results) == 1
         assert text[results[0].start : results[0].end] == "jean michel"
 
+    def test_double_space_in_name_keeps_exact_offsets(self):
+        # a split/rejoin used to shorten the span by one char per extra space,
+        # leaving the final character of the real name unmasked.
+        text = "je m'appelle Jean  Dupont"
+        results = self.rec.analyze(text, ["PERSON"], None)
+        assert len(results) == 1
+        assert text[results[0].start : results[0].end] == "Jean  Dupont"
+
 
 class TestFrenchDateRecognizer:
     def setup_method(self):
@@ -78,3 +86,9 @@ class TestFrenchDateRecognizer:
     def test_accented_months(self):
         results = self.rec.analyze("le 1 février 2020", ["DATE_TIME"], None)
         assert len(results) >= 1
+
+    def test_month_prefix_words_are_not_dates(self):
+        # "mai(ntenant)" and "mars(eillais)" used to match through the missing
+        # right boundary and split ordinary words.
+        for text in ("il y en a 3 maintenant", "environ 1 marseillais", "2 maisons"):
+            assert self.rec.analyze(text, ["DATE_TIME"], None) == []

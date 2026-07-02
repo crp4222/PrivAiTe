@@ -45,7 +45,8 @@ python -m ruff check privaite/ tests/
 
 ## Code style
 
-- No comments in code (use descriptive names instead)
-- No docstrings (keep functions small and self-explanatory)
+- Comments explain WHY (a constraint, a trap, a privacy invariant), never what
+  the next line does. Look at `privaite/pii/engine.py` for the house style.
+- Docstrings on non-obvious public behavior; skip them on self-explanatory code.
 - Run `ruff check --fix` before committing
 - Python 3.11+ features are fine

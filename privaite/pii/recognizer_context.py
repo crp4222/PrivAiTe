@@ -58,13 +58,16 @@ _APOSTROPHES = {ord(c): "'" for c in "’‘ʼ＇´`"}
 
 
 def _trim_name(name: str) -> str:
-    words = name.split()
-    trimmed = []
-    for w in words:
-        if w.lower() in STOP_WORDS:
+    """Cut the match at the first stop word, returning the kept prefix VERBATIM
+    (original spacing included). A split/rejoin here once shortened "Jean  Dupont"
+    (double space) by one character, and `end = start + len(name)` then left the
+    final character of the real name unmasked."""
+    kept_end = 0
+    for match in re.finditer(r"\S+", name):
+        if match.group().lower() in STOP_WORDS:
             break
-        trimmed.append(w)
-    return " ".join(trimmed)
+        kept_end = match.end()
+    return name[:kept_end]
 
 
 class ContextualNameRecognizer(EntityRecognizer):

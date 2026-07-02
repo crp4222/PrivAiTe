@@ -18,15 +18,18 @@ providers:
       model: "ollama/ministral-3:8b"
       api_base: "http://host.docker.internal:11434"
 
-  - model_name: "gpt-5.4-mini"
-    litellm_params:
-      model: "openai/gpt-5.4-mini"
-      api_key: "${OPENAI_API_KEY}"
-
-  - model_name: "gpt-4o-mini"
-    litellm_params:
-      model: "openai/gpt-4o-mini"
-      api_key: "${OPENAI_API_KEY}"
+  # Cloud providers need their key in the environment. They are commented out
+  # so this file boots as-is (it is the Docker fallback config): a ${VAR} whose
+  # variable is unset fails startup on purpose.
+  # - model_name: "gpt-5.4-mini"
+  #   litellm_params:
+  #     model: "openai/gpt-5.4-mini"
+  #     api_key: "${OPENAI_API_KEY}"
+  #
+  # - model_name: "gpt-4o-mini"
+  #   litellm_params:
+  #     model: "openai/gpt-4o-mini"
+  #     api_key: "${OPENAI_API_KEY}"
 
   - model_name: "kimi-k2"
     litellm_params:

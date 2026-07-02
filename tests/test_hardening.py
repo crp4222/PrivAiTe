@@ -31,6 +31,22 @@ def test_unique_aliases_register_fine():
 
 
 @pytest.mark.asyncio
+async def test_pii_enabled_with_zero_detectors_refused_at_startup():
+    # pii.enabled=true with every detector off would serve with detection
+    # silently doing nothing; passthrough must be an explicit enabled=false.
+    from privaite.config.schema import DetectorsConfig, PIIConfig
+    from privaite.pii.engine import PIIEngine
+
+    config = PIIConfig(
+        enabled=True,
+        preset=None,
+        detectors=DetectorsConfig(presidio=PresidioDetectorConfig(enabled=False)),
+    )
+    with pytest.raises(ValueError, match="no detector"):
+        await PIIEngine(config).initialize()
+
+
+@pytest.mark.asyncio
 async def test_unknown_presidio_language_fails_at_init_not_per_request():
     # An unmapped language used to be dropped silently at init and then crash
     # EVERY request when detect() looped over config.languages.
