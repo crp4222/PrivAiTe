@@ -72,18 +72,22 @@ Neither is perfect alone:
 |--------|-----------|----------|-----------------|---------|---------|
 | `onnx` (default) | Presidio + Privacy Filter | **84.5%** | 2 / 14 | ~0.5s | **yes** |
 | `light` | Presidio only | 62.4% | 3 / 14 | ~60ms | no |
+| `max` | onnx + GLiNER | higher OOD\*\* | more | ~0.7s | **yes** |
 
 \*Recall on the independent 120-document AI4Privacy benchmark (span-level; strict token-level ~80% / ~58%). Latency is hardware-dependent. See [Benchmark](#benchmark).
+
+\*\*`max` adds GLiNER, a PII model trained on data independent of AI4Privacy. On an out-of-distribution corpus it raises recall from ~84% to ~89% where the default already generalizes well, at the cost of more false positives and a torch dependency. It is opt-in; `onnx` stays the default. Numbers: the OOD cross-check ([`OOD_COMPARISON.md`](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md)).
 
 ```yaml
 pii:
   preset: "onnx"    # Default. Detects everything including secrets. Downloads the model on first run.
   # preset: "light" # Faster, Presidio-only, classic PII only.
+  # preset: "max"   # onnx + GLiNER: higher out-of-distribution recall. Needs: pip install 'privaite[gliner]'
 ```
 
 > **Footgun:** do not pin `detectors.presidio.entities` to a short allowlist on the `light` path. It restricts detection to only those types and roughly halves recall (to ~35%). Leave `entities` unset; the proxy logs a warning at startup if it detects a low-recall configuration.
 
-The default install already includes onnxruntime and the tokenizer, so the `onnx` preset works out of the box. The model is downloaded the first time the proxy starts. The `ml` extra (the `standard` and `full` BERT presets) is the only one that adds torch.
+The default install already includes onnxruntime and the tokenizer, so the `onnx` preset works out of the box. The model is downloaded the first time the proxy starts. Two optional extras add torch: `ml` (the `standard`/`full` BERT presets) and `gliner` (the `max` preset). With `max` selected but `privaite[gliner]` not installed, the proxy fails to start with an install hint rather than running with detection silently reduced.
 
 **When to use `onnx` (default):** You want maximum coverage. Secrets, passwords, API keys, account numbers, unusual names. Accept occasional false positives on technical identifiers.
 

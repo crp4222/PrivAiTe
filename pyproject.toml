@@ -1,6 +1,6 @@
 [project]
 name = "privaite"
-version = "0.2.11"
+version = "0.2.12"
 description = "Drop-in self-hosted LLM proxy that reversibly redacts PII before LLM calls, including tool-call arguments and multimodal content"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -51,6 +51,13 @@ dependencies = [
 # BERT NER detector (the `standard`/`full` presets). This is the only path that
 # needs torch; the default `onnx` preset runs on onnxruntime (a core dependency).
 ml = [
+    "torch>=2.0",
+]
+# GLiNER detector (the `max` preset): an independent, non-AI4Privacy PII model that
+# raises out-of-distribution recall. Needs torch + the gliner package; not part of
+# the onnxruntime floor.
+gliner = [
+    "gliner>=0.2.13",
     "torch>=2.0",
 ]
 dev = [

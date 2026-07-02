@@ -9,7 +9,7 @@ yet implemented).
 
 ## Install
 
-1. Make `privaite` available to the LiteLLM proxy: `pip install "privaite>=0.2.11"`
+1. Make `privaite` available to the LiteLLM proxy: `pip install "privaite>=0.2.12"`
    in the same environment (or image) as LiteLLM.
 2. Put `privaite_guardrail.py` next to your `config.yaml`.
 3. Reference it by dot-notation in `config.yaml`:

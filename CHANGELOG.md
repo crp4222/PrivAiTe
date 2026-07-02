@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-07-02
+
+### Added
+- **`max` preset**: the onnx suite (Presidio + `openai/privacy-filter`) plus a
+  GLiNER detector (`urchade/gliner_multi_pii-v1`), an independent PII model trained
+  on non-AI4Privacy data. It raises out-of-distribution recall at the cost of more
+  false positives, so it is opt-in and never the default (`onnx` stays the default).
+  GLiNER needs torch + the `gliner` package, installed via the new optional extra
+  `pip install 'privaite[gliner]'`; with the `max` preset selected but the package
+  absent, startup fails loudly with an install hint (fail closed, not silently off).
+  Rationale and off-distribution numbers: the OOD cross-check in privaite-bench
+  (`OOD_COMPARISON.md`).
+
 ## [0.2.11] - 2026-07-02
 
 ### Fixed

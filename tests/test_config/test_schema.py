@@ -24,11 +24,27 @@ def test_preset_full():
     assert config.detectors.mlmodel.enabled is True
 
 
+def test_preset_max_enables_gliner_on_top_of_onnx():
+    config = PIIConfig(preset="max")
+    assert config.detectors.presidio.enabled is True
+    assert config.detectors.onnx.enabled is True
+    assert config.detectors.gliner.enabled is True
+    assert config.detectors.bert_ner.enabled is False
+    assert config.detectors.mlmodel.enabled is False
+    # mirrors the onnx preset's Presidio allowlist
+    assert config.detectors.presidio.entities == [
+        "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD",
+        "IBAN_CODE", "IP_ADDRESS", "DATE_TIME", "US_SSN", "UK_NHS",
+    ]
+
+
 def test_default_preset_is_onnx():
     config = PIIConfig()
     assert config.preset == "onnx"
     assert config.detectors.onnx.enabled is True
     assert config.detectors.presidio.enabled is True
+    # gliner stays off unless the max preset is chosen
+    assert config.detectors.gliner.enabled is False
 
 
 def test_preset_none_uses_defaults():

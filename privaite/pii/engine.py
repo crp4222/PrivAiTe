@@ -86,6 +86,14 @@ class PIIEngine:
             self.detectors.append(detector)
             logger.info("ONNX privacy-filter detector initialized")
 
+        if self.config.detectors.gliner.enabled:
+            from privaite.pii.detector_gliner import GlinerDetector
+
+            detector = GlinerDetector(self.config.detectors.gliner)
+            await detector.initialize()
+            self.detectors.append(detector)
+            logger.info("GLiNER detector initialized")
+
         if self.config.enabled and not self.detectors:
             # pii.enabled=true with every detector switched off would serve every
             # request with detection silently doing nothing. Refuse to start; an

@@ -4,7 +4,7 @@ author: crp4222
 author_url: https://github.com/crp4222/PrivAiTe
 version: 0.1.5
 required_open_webui_version: 0.5.0
-requirements: privaite>=0.2.11
+requirements: privaite>=0.2.12
 description: Anonymize or block PII (text, tool calls, multimodal) before it reaches the provider.
 """
 

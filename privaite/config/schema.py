@@ -101,11 +101,41 @@ class BertNERDetectorConfig(BaseModel):
     })
 
 
+class GlinerDetectorConfig(BaseModel):
+    enabled: bool = False
+    # GLiNER trained on independent (non-AI4Privacy) synthetic data. Adding it to
+    # the onnx suite (the `max` preset) raises out-of-distribution recall; see the
+    # OOD cross-check in privaite-bench. Needs torch + the gliner package
+    # (pip install 'privaite[gliner]'); it is not part of the onnxruntime floor.
+    model_name: str = "urchade/gliner_multi_pii-v1"
+    # Pin a Hugging Face revision (tag or commit sha); None = latest.
+    revision: str | None = None
+    device: str = "auto"
+    score_threshold: float = 0.5
+    # GLiNER is label-conditioned: it only returns the labels asked for here.
+    labels: list[str] = Field(default_factory=lambda: [
+        "person", "first name", "last name", "email", "phone number", "address",
+        "social security number", "iban", "swift bic code", "credit card number",
+        "date of birth", "password", "ip address", "passport number",
+    ])
+    # Map each requested GLiNER label to a canonical PrivAiTe entity type.
+    label_mapping: dict[str, str] = Field(default_factory=lambda: {
+        "person": "PERSON", "first name": "PERSON", "last name": "PERSON",
+        "email": "EMAIL_ADDRESS", "phone number": "PHONE_NUMBER",
+        "address": "LOCATION", "social security number": "US_SSN",
+        "iban": "IBAN_CODE", "swift bic code": "FINANCIAL",
+        "credit card number": "CREDIT_CARD", "date of birth": "DATE_TIME",
+        "password": "SECRET", "ip address": "IP_ADDRESS",
+        "passport number": "US_PASSPORT",
+    })
+
+
 class DetectorsConfig(BaseModel):
     presidio: PresidioDetectorConfig = Field(default_factory=PresidioDetectorConfig)
     mlmodel: MLModelDetectorConfig = Field(default_factory=MLModelDetectorConfig)
     onnx: OnnxDetectorConfig = Field(default_factory=OnnxDetectorConfig)
     bert_ner: BertNERDetectorConfig = Field(default_factory=BertNERDetectorConfig)
+    gliner: GlinerDetectorConfig = Field(default_factory=GlinerDetectorConfig)
 
 
 class EntityOverride(BaseModel):
@@ -136,6 +166,14 @@ class CustomPatternConfig(BaseModel):
 class PassthroughConfig(BaseModel):
     system_messages: bool = False
     tool_calls: bool = False
+
+
+# Presidio entity allowlist for the onnx/max presets: the checksummed/structured
+# types Presidio is strong at, leaving names/addresses/secrets to the ML model.
+_ONNX_PRESIDIO_ENTITIES = [
+    "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD",
+    "IBAN_CODE", "IP_ADDRESS", "DATE_TIME", "US_SSN", "UK_NHS",
+]
 
 
 class PIIConfig(BaseModel):
@@ -186,17 +224,25 @@ class PIIConfig(BaseModel):
         elif self.preset == "onnx":
             self.detectors.presidio.enabled = True
             if not self.detectors.presidio.entities:
-                self.detectors.presidio.entities = [
-                    "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD",
-                    "IBAN_CODE", "IP_ADDRESS", "DATE_TIME", "US_SSN", "UK_NHS",
-                ]
+                self.detectors.presidio.entities = list(_ONNX_PRESIDIO_ENTITIES)
             self.detectors.bert_ner.enabled = False
             self.detectors.mlmodel.enabled = False
             self.detectors.onnx.enabled = True
+        elif self.preset == "max":
+            # onnx suite + GLiNER (an independent, non-AI4Privacy model). Higher
+            # out-of-distribution recall at the cost of more false positives and a
+            # torch dependency; opt-in, never the default.
+            self.detectors.presidio.enabled = True
+            if not self.detectors.presidio.entities:
+                self.detectors.presidio.entities = list(_ONNX_PRESIDIO_ENTITIES)
+            self.detectors.bert_ner.enabled = False
+            self.detectors.mlmodel.enabled = False
+            self.detectors.onnx.enabled = True
+            self.detectors.gliner.enabled = True
         else:
             raise ValueError(
                 f"Unknown PII preset '{self.preset}'. "
-                "Valid presets: light, standard, full, onnx"
+                "Valid presets: light, standard, full, onnx, max"
             )
 
 
