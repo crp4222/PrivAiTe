@@ -4,7 +4,8 @@
 in-process inside the LiteLLM proxy: it anonymizes PII in the outgoing request and
 restores it in the response, including inside **tool-call arguments and the legacy
 function_call**, which LiteLLM's built-in Presidio guardrail does not touch.
-Streaming responses are restored too.
+Chat streaming responses are restored too (Responses API streaming restore is not
+yet implemented).
 
 ## Install
 

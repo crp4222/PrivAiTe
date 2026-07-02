@@ -87,7 +87,8 @@ The benchmark is public and reproducible. Run it yourself.
   when you want one place to protect every model and client.
 - **Open WebUI filter.** Drop the filter into Open WebUI and it runs in process,
   no separate service.
-- **LiteLLM guardrail.** Coming, for teams already running the LiteLLM proxy.
+- **LiteLLM guardrail.** A custom guardrail for teams already running the
+  LiteLLM proxy: it runs the engine in process, no separate service.
 
 ---
 

@@ -2,7 +2,7 @@
 title: PrivAiTe PII Anonymizer
 author: crp4222
 author_url: https://github.com/crp4222/PrivAiTe
-version: 0.1.4
+version: 0.1.5
 required_open_webui_version: 0.5.0
 requirements: privaite>=0.2.10
 description: Anonymize or block PII (text, tool calls, multimodal) before it reaches the provider.
@@ -51,6 +51,7 @@ class Filter:
         self.valves = self.Valves()
         self._engine: Any = None
         self._engine_key: Any = None
+        self._lock: Any = None
 
     def _languages(self) -> list[str]:
         return [lang.strip() for lang in self.valves.languages.split(",") if lang.strip()]
@@ -59,6 +60,8 @@ class Filter:
         return [e.strip() for e in self.valves.block_entities.split(",") if e.strip()]
 
     async def _engine_for(self, languages: list[str]):
+        import asyncio
+
         from privaite.config.schema import (
             AnonymizationConfig,
             DeanonymizationConfig,
@@ -74,44 +77,62 @@ class Filter:
         if self._engine is not None and self._engine_key == key:
             return self._engine
 
-        if block_entities and "block_entities" not in PIIConfig.model_fields:
-            # PIIConfig uses extra="allow", so an older privaite would silently
-            # swallow block_entities and forward the PII anyway. Fail closed rather
-            # than pretend a policy gate is in force when it is not.
-            raise RuntimeError(
-                "block_entities is set but the installed privaite does not support "
-                "it; upgrade privaite to a version that enforces pii.block_entities"
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        async with self._lock:
+            # Two concurrent first requests must not both build engines (and
+            # both trigger the model download below).
+            if self._engine is not None and self._engine_key == key:
+                return self._engine
+
+            if block_entities and "block_entities" not in PIIConfig.model_fields:
+                # PIIConfig uses extra="allow", so an older privaite would silently
+                # swallow block_entities and forward the PII anyway. Fail closed
+                # rather than pretend a policy gate is in force when it is not.
+                raise RuntimeError(
+                    "block_entities is set but the installed privaite does not "
+                    "support it; upgrade privaite to a version that enforces "
+                    "pii.block_entities"
+                )
+
+            config = PIIConfig(
+                enabled=True,
+                preset=preset,
+                detectors=DetectorsConfig(
+                    presidio=PresidioDetectorConfig(enabled=True, languages=languages or ["en"])
+                ),
+                anonymization=AnonymizationConfig(method="placeholder"),
+                deanonymization=DeanonymizationConfig(enabled=self.valves.deanonymize),
+                block_entities=block_entities,
             )
-
-        config = PIIConfig(
-            enabled=True,
-            preset=preset,
-            detectors=DetectorsConfig(
-                presidio=PresidioDetectorConfig(enabled=True, languages=languages or ["en"])
-            ),
-            anonymization=AnonymizationConfig(method="placeholder"),
-            deanonymization=DeanonymizationConfig(enabled=self.valves.deanonymize),
-            block_entities=block_entities,
-        )
-        engine = PIIEngine(config)
-        try:
-            await engine.initialize()
-        except OSError:
-            # spaCy models not present yet: download them once, then retry.
-            from spacy.cli import download
-
-            for lang in languages or ["en"]:
-                model = _LANG_MODELS.get(lang)
-                if model:
-                    download(model)
             engine = PIIEngine(config)
-            await engine.initialize()
+            try:
+                await engine.initialize()
+            except OSError:
+                # spaCy models not present yet: download them once, then retry.
+                # The download is synchronous pip machinery pulling hundreds of
+                # MB; run it off the event loop or every request in the process
+                # stalls behind it.
+                from spacy.cli import download
 
-        self._engine = engine
-        self._engine_key = key
-        return engine
+                for lang in languages or ["en"]:
+                    model = _LANG_MODELS.get(lang)
+                    if model:
+                        await asyncio.to_thread(download, model)
+                engine = PIIEngine(config)
+                await engine.initialize()
+
+            self._engine = engine
+            self._engine_key = key
+            return engine
 
     async def inlet(self, body: dict, __metadata__: dict | None = None) -> dict:
+        # Metadata may round-trip through Open WebUI's storage and back from the
+        # client, so never trust an incoming privaite_map (it could rewrite the
+        # reply to attacker-chosen text) and never assume it is ephemeral.
+        if __metadata__ is not None:
+            __metadata__.pop("privaite_map", None)
+
         messages = body.get("messages")
         if not messages:
             return body
@@ -127,16 +148,19 @@ class Filter:
             raise Exception(str(exc)) from exc
         body["messages"] = anonymized
 
-        if __metadata__ is not None and not mapping.is_empty:
-            # Stash a plain fake->original dict; it survives to outlet on the same request.
+        # Only stash when outlet will consume (and pop) it: with restore off the
+        # originals would sit in metadata forever for nothing.
+        if __metadata__ is not None and self.valves.deanonymize and not mapping.is_empty:
             __metadata__["privaite_map"] = dict(mapping.get_all_fakes())
         return body
 
     async def outlet(self, body: dict, __metadata__: dict | None = None) -> dict:
-        if not self.valves.deanonymize or __metadata__ is None:
+        if __metadata__ is None:
             return body
-        fakes = __metadata__.get("privaite_map")
-        if not fakes:
+        # pop (not get): Open WebUI may persist message metadata, and the map
+        # holds the ORIGINAL values. Consume it so it cannot reach storage.
+        fakes = __metadata__.pop("privaite_map", None)
+        if not self.valves.deanonymize or not fakes:
             return body
 
         from privaite.pii.mapping import PIIMapping
@@ -152,6 +176,17 @@ class Filter:
             content = message.get("content")
             if isinstance(content, str):
                 message["content"] = await engine.process_response(content, mapping)
+            elif isinstance(content, list):
+                # Multimodal replies: restore each text part.
+                for part in content:
+                    if isinstance(part, dict) and isinstance(part.get("text"), str):
+                        part["text"] = await engine.process_response(
+                            part["text"], mapping
+                        )
+            for field in ("reasoning_content", "reasoning"):
+                value = message.get(field)
+                if isinstance(value, str) and value:
+                    message[field] = await engine.process_response(value, mapping)
             tool_calls = message.get("tool_calls")
             if tool_calls:
                 message["tool_calls"] = await engine.process_response_tool_calls(

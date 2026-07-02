@@ -64,6 +64,80 @@ async def test_inlet_outlet_roundtrip():
 
 
 @pytest.mark.asyncio
+async def test_outlet_pops_map_so_originals_cannot_persist():
+    # Open WebUI may persist message metadata; the fake->original map must be
+    # consumed by outlet, never left behind.
+    module = _load_filter()
+    flt = module.Filter()
+    flt.valves.preset = "light"
+    flt.valves.languages = "en"
+
+    meta: dict = {}
+    await flt.inlet(
+        {"messages": [{"role": "user", "content": "I am Marie Dupont"}]}, meta
+    )
+    assert "privaite_map" in meta
+
+    reply = {"messages": [{"role": "assistant", "content": "ok"}]}
+    await flt.outlet(reply, meta)
+    assert "privaite_map" not in meta
+
+
+@pytest.mark.asyncio
+async def test_inlet_never_stashes_when_restore_disabled():
+    # with deanonymize off, outlet never consumes the map: stashing it would
+    # park the ORIGINAL values in metadata for nothing.
+    module = _load_filter()
+    flt = module.Filter()
+    flt.valves.preset = "light"
+    flt.valves.languages = "en"
+    flt.valves.deanonymize = False
+
+    meta: dict = {}
+    await flt.inlet(
+        {"messages": [{"role": "user", "content": "I am Marie Dupont"}]}, meta
+    )
+    assert "privaite_map" not in meta
+
+
+@pytest.mark.asyncio
+async def test_inlet_clears_attacker_supplied_map():
+    # a client-injected map must not drive outlet restoration to attacker text.
+    module = _load_filter()
+    flt = module.Filter()
+    flt.valves.preset = "light"
+    flt.valves.languages = "en"
+
+    meta: dict = {"privaite_map": {"the report": "ATTACKER CONTROLLED"}}
+    await flt.inlet({"messages": [{"role": "user", "content": "summarize"}]}, meta)
+
+    reply = {"messages": [{"role": "assistant", "content": "here is the report"}]}
+    out = await flt.outlet(reply, meta)
+    assert "ATTACKER CONTROLLED" not in out["messages"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_outlet_restores_multimodal_text_parts():
+    module = _load_filter()
+    flt = module.Filter()
+    flt.valves.preset = "light"
+    flt.valves.languages = "en"
+
+    meta: dict = {}
+    body = await flt.inlet(
+        {"messages": [{"role": "user", "content": "I am Marie Dupont"}]}, meta
+    )
+    placeholder = body["messages"][0]["content"].replace("I am ", "")
+
+    reply = {"messages": [{
+        "role": "assistant",
+        "content": [{"type": "text", "text": f"Hello {placeholder}"}],
+    }]}
+    out = await flt.outlet(reply, meta)
+    assert out["messages"][0]["content"][0]["text"] == "Hello Marie Dupont"
+
+
+@pytest.mark.asyncio
 async def test_inlet_blocks_configured_type():
     module = _load_filter()
     flt = module.Filter()

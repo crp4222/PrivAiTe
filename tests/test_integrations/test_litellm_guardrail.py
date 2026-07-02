@@ -224,6 +224,110 @@ async def test_responses_both_messages_and_input_are_anonymized():
 
 
 @pytest.mark.asyncio
+async def test_responses_mixed_input_list_is_fully_scanned():
+    # An agentic Responses turn: a role message + a function_call_output + a bare
+    # string. The old homogeneity check wrapped the whole list as one content and
+    # left the non-message items (and their PII) raw. Every item must be scanned.
+    gr = _guardrail()
+    data = {"input": [
+        {"role": "user", "content": "I am Marie Dupont"},
+        {"type": "function_call_output", "call_id": "c1",
+         "output": "tool says carol.smith@example.net"},
+        "also reach paul@acme.org",
+    ]}
+    data = await gr.async_pre_call_hook(None, None, data, "aresponses")
+    serialized = json.dumps(data["input"])
+
+    assert "Marie Dupont" not in serialized
+    assert "carol.smith@example.net" not in serialized
+    assert "paul@acme.org" not in serialized
+    assert data["metadata"]["privaite_map"]
+    # structure preserved: the tool item keeps its type and call_id
+    assert data["input"][1]["type"] == "function_call_output"
+    assert data["input"][1]["call_id"] == "c1"
+
+
+@pytest.mark.asyncio
+async def test_responses_mixed_input_list_enforces_block_gate():
+    module = _load()
+    gr = module.PrivaiteGuardrail(
+        guardrail_name="privaite", preset="light", languages="en",
+        block_entities=["EMAIL_ADDRESS"],
+    )
+    from fastapi import HTTPException
+
+    data = {"input": [{"type": "function_call_output", "output": "bob@leak.com"}]}
+    with pytest.raises(HTTPException) as ei:
+        await gr.async_pre_call_hook(None, None, data, "aresponses")
+    assert ei.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_streaming_restores_reasoning_content():
+    gr = _guardrail()
+    data = {"messages": [{"role": "user", "content": "email marie.dupont@acme.com"}]}
+    data = await gr.async_pre_call_hook(None, None, data, "completion")
+    fakes = data["metadata"]["privaite_map"]
+    email = next(f for f, o in fakes.items() if o == "marie.dupont@acme.com")
+
+    def _chunk(reasoning, finish=None):
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(
+            index=0,
+            delta=types.SimpleNamespace(
+                content=None, tool_calls=None, function_call=None,
+                reasoning_content=reasoning),
+            finish_reason=finish)])
+
+    async def _source():
+        yield _chunk("the user is " + email)
+        yield _chunk(None, finish="stop")
+
+    out = []
+    async for chunk in gr.async_post_call_streaming_iterator_hook(None, _source(), data):
+        for choice in chunk.choices:
+            rc = getattr(choice.delta, "reasoning_content", None)
+            if rc:
+                out.append(rc)
+    joined = "".join(out)
+    assert "marie.dupont@acme.com" in joined
+    assert email not in joined
+
+
+@pytest.mark.asyncio
+async def test_streaming_flushes_tool_tail_on_same_finish_chunk():
+    gr = _guardrail()
+    data = {"messages": [{"role": "user", "content": "email marie.dupont@acme.com"}]}
+    data = await gr.async_pre_call_hook(None, None, data, "completion")
+    fakes = data["metadata"]["privaite_map"]
+    email = next(f for f, o in fakes.items() if o == "marie.dupont@acme.com")
+    mid = len(email) // 2
+
+    def _chunk(args, finish=None):
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(
+            index=0,
+            delta=types.SimpleNamespace(
+                content=None,
+                tool_calls=[types.SimpleNamespace(
+                    index=0, function=types.SimpleNamespace(arguments=args))],
+                function_call=None),
+            finish_reason=finish)])
+
+    async def _source():
+        yield _chunk('{"e": "' + email[:mid])
+        # last fragment rides on the finish chunk: the held tail must flush
+        yield _chunk(email[mid:] + '"}', finish="tool_calls")
+
+    out = ""
+    async for chunk in gr.async_post_call_streaming_iterator_hook(None, _source(), data):
+        for choice in chunk.choices:
+            for tc in (choice.delta.tool_calls or []):
+                if tc.function and tc.function.arguments:
+                    out += tc.function.arguments
+    assert "marie.dupont@acme.com" in out
+    assert email not in out
+
+
+@pytest.mark.asyncio
 async def test_post_call_failure_hook_pops_map():
     gr = _guardrail()
     rd = {"metadata": {"privaite_map": {"<PERSON_1>": "X"}, "other": 1}}

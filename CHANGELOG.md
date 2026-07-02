@@ -6,6 +6,57 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- Second audit pass (a three-reviewer sweep of the 0.2.10 diff, the integrations,
+  and the never-reviewed periphery), everything below reproduced by a test that
+  failed first:
+  - **Fuzzy de-anonymization no longer injects the wrong person's PII.** A
+    hallucinated placeholder with attached punctuation or different case
+    (`<PERSON_3>,`, `<person_3>`) defeated the guard and got rewritten to a known
+    identity; matching now runs on the punctuation-stripped core, skips any
+    angle-bracketed token case-insensitively, replaces only the core (so
+    punctuation survives), and compares whitespace-normalized so a fake re-typed
+    across a newline is still caught.
+  - **Bare strings inside a `content` list are scanned.** `content: ["...", 42]`
+    (and a mixed `/v1/completions` prompt list) forwarded the string raw and
+    skipped the block gate.
+  - **LiteLLM guardrail: Responses `input` is scanned item by item.** A mixed
+    agentic turn (a message plus a `function_call_output`/tool call, or a bare
+    string) bypassed detection AND the block gate; every text-bearing item is now
+    scanned through the shared mapping.
+  - **Open WebUI filter: original PII no longer lingers in metadata.** `outlet`
+    now pops the reversible map (Open WebUI may persist message metadata), the map
+    is only stashed when restore is on, an incoming client-supplied map is
+    cleared, and list/reasoning assistant content is restored. Adds a build lock
+    and moves the first-use spaCy download off the event loop.
+  - **`huggingface_hub` import floor.** `EntryNotFoundError` was imported from a
+    module that only exists in hub >= 0.25 while pyproject floors at 0.23;
+    imported defensively now.
+  - **Streaming: a fully-held-back chunk carrying `logprobs`, `refusal`, `usage`
+    or any other payload is emitted** instead of suppressed; a nonstandard finish
+    chunk with `function: None` no longer crashes the stream.
+  - **Auth runs before the size limiter**, so an unauthenticated request is
+    rejected on its headers instead of having up to `max_request_bytes` buffered
+    first.
+  - **Contextual name recognizer** keeps exact offsets on names with a double
+    space (the last character used to leak); **French date recognizer** no longer
+    matches month-prefix words (`3 maintenant`, `1 marseillais`).
+  - **Config loader** raises on an explicitly requested missing file (a `--config`
+    typo used to start an empty proxy) and never echoes interpolated secret values
+    in a validation error.
+  - `pii.enabled: true` with zero detectors is refused at startup; the numeric
+    tool-argument scan is gated to values with >= 7 digits (ordinary
+    counts/years/coordinates keep their type); `intersection` merge requires two
+    DIFFERENT detectors to confirm a span; non-streaming chat restores the
+    reasoning trace; batch `/v1/embeddings` counts one request in `/stats`, not
+    one per item.
+
+### Changed
+- The example config (also the Docker fallback) comments out the cloud providers
+  that need `${OPENAI_API_KEY}`, so the image boots as-is; `docker-compose` marks
+  `.env` optional; `CONTRIBUTING.md` code-style matches the actual (commented,
+  docstringed) codebase; the FastAPI app version tracks `__version__`.
+
 ## [0.2.10] - 2026-07-02
 
 ### Fixed
