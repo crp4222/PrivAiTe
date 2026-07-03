@@ -67,9 +67,7 @@ carries any payload other than fully-held-back content.
 - Release: `gh release create vX.Y.Z` triggers `publish.yml` → PyPI (trusted
   publisher; its Environment field must stay empty). A PyPI version can never be
   reused, so verify green CI first.
-- Commit as **crp4222** (the global git identity is "Test User", so fresh clones
-  commit wrong — set it locally). Never attribute commits to an AI. No em-dashes or
-  " - " connectors anywhere in output.
+- Commit as the real git user, not claude
 
 ## Integrations must stay in sync with the core
 
