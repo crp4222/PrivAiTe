@@ -12,10 +12,14 @@ from privaite.api.dependencies import (
     record_pii_counts,
     record_pii_stats,
 )
+from privaite.api.pipeline import (
+    anonymize_or_error,
+    call_provider,
+    dump_response,
+    validate_model,
+)
 from privaite.config.schema import PrivAiTeConfig
-from privaite.pii.engine import PIIBlockedError, UnsupportedContentError
 from privaite.providers.router import ProviderRouter
-from privaite.utils.errors import openai_error, provider_error_response
 
 logger = logging.getLogger("privaite.api.embeddings")
 
@@ -33,20 +37,19 @@ async def embeddings(
     model = body.get("model")
     input_text = body.get("input", "")
 
-    if not model:
-        return openai_error("model is required", "invalid_request_error", 400)
-
-    if not provider_router.has_model(model):
-        return openai_error(f"Model '{model}' not found", "not_found_error", 404)
+    error = validate_model(body, provider_router)
+    if error is not None:
+        return error
 
     if config.pii.enabled and pii_engine is not None:
-        try:
+
+        async def _anonymize() -> Any:
             if isinstance(input_text, str):
                 msgs = [{"role": "user", "content": input_text}]
                 msgs, mapping = await pii_engine.process_request(msgs)
-                input_text = msgs[0]["content"]
                 record_pii_stats(request, mapping)
-            elif isinstance(input_text, list):
+                return msgs[0]["content"]
+            if isinstance(input_text, list):
                 anonymized = []
                 # Merge per-item counts and record ONCE: the tracker also counts
                 # requests, and a 10-item batch is one request, not ten.
@@ -57,32 +60,25 @@ async def embeddings(
                     anonymized.append(msgs[0]["content"])
                     for etype, count in mapping.entity_type_counts().items():
                         batch_counts[etype] = batch_counts.get(etype, 0) + count
-                input_text = anonymized
                 record_pii_counts(request, batch_counts)
-        except UnsupportedContentError as exc:
-            return openai_error(str(exc), "invalid_request_error", 400)
-        except PIIBlockedError as exc:
-            # Policy gate: a blocked PII type was found -> reject hard, forward
-            # nothing. Independent of on_error. The message names TYPES, not values.
-            return openai_error(str(exc), "invalid_request_error", 400, "pii_blocked")
-        except Exception:
-            logger.exception("PII processing failed")
-            if config.pii.on_error != "allow":  # fail closed unless explicit opt-out
-                return openai_error(
-                    "PII anonymization failed. Request blocked for privacy.",
-                    "server_error", 500, "pii_error",
-                )
+                return anonymized
+            # Tokenized (integer-array) input carries no scannable text; pass
+            # through unchanged (documented limitation).
+            return input_text
+
+        result, error = await anonymize_or_error(_anonymize, config, logger)
+        if error is not None:
+            return error
+        if result is not None:
+            input_text = result
 
     kwargs = {k: v for k, v in body.items() if k not in ("model", "input")}
 
-    try:
-        response = await provider_router.embedding(
-            model_alias=model, input_text=input_text, **kwargs
-        )
-    except Exception as exc:
-        logger.exception("Provider error for model %s", model)
-        return provider_error_response(exc)
+    response, error = await call_provider(
+        lambda: provider_router.embedding(model_alias=model, input_text=input_text, **kwargs),
+        model, logger,
+    )
+    if error is not None:
+        return error
 
-    if hasattr(response, "model_dump"):
-        return response.model_dump()
-    return dict(response)
+    return dump_response(response)
