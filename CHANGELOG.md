@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.2.12] - 2026-07-02
+## [0.2.12] - 2026-07-03
 
 ### Added
 - **`max` preset**: the onnx suite (Presidio + `openai/privacy-filter`) plus a
