@@ -1,6 +1,6 @@
 # PrivAiTe vs Presidio, LLM Guard, and LiteLLM PII masking
 
-PrivAiTe is a drop-in, self-hosted LLM proxy that redacts PII before it reaches the provider and restores it in the reply. Unlike Microsoft Presidio (a library you assemble), Protect AI LLM Guard, or LiteLLM's built-in Presidio guardrail, it also redacts PII inside **tool-call arguments and multimodal content**, the part flat-text scrubbers miss, with zero telemetry.
+PrivAiTe is a drop-in, self-hosted LLM proxy that redacts PII before it reaches the provider and restores it in the reply. Unlike Microsoft Presidio (a library you assemble), Protect AI LLM Guard, or LiteLLM's built-in Presidio guardrail, it also redacts PII inside **tool-call arguments** (the part every tested competitor misses, ~99% measured leak) and multimodal content, reversibly and with zero telemetry.
 
 This is local pseudonymization, not anonymization, and detection is best-effort. You remain the data controller. See the [threat model](../README.md#threat-model).
 
@@ -12,7 +12,7 @@ This is local pseudonymization, not anonymization, and detection is best-effort.
 | Setup | Point your client at it | Assemble it yourself | Assemble it yourself | Config in the LiteLLM proxy |
 | Reversible (restore on reply) | Yes | Manual | Yes (anonymize/deanonymize) | Limited |
 | Redacts PII in tool-call arguments | Yes | No | No | No |
-| Redacts PII in multimodal text | Yes | OCR only | No | No |
+| Redacts PII in multimodal text | Yes | OCR only | No | Yes (text parts) |
 | Streaming de-anonymization | Yes | n/a | n/a | n/a |
 | Secrets and passwords | Yes (ONNX preset) | No | Yes | Partial |
 | Detection engine | Presidio + local ONNX model | Presidio | Own scanners | Presidio |
@@ -22,7 +22,17 @@ Presidio is excellent and PrivAiTe builds on it. The point of this table is not 
 
 ## The tool-call gap, measured
 
-The [reproducible benchmark](https://github.com/crp4222/privaite-bench) places the same PII inside a tool-call argument and measures how much survives. A vanilla Presidio setup, which is the engine behind LiteLLM's guardrail and most flat-text tools, leaves about **99%** of it exposed, because it only scans message text. PrivAiTe removes everything it detects from the tool call. On plain-text recall over 120 real documents labeled by independent auditors, the full PrivAiTe preset leads the field (about 84% recall vs about 70% for the Presidio baseline), and its tool-call protection is **100% vs 0.6%**.
+The [reproducible benchmark](https://github.com/crp4222/privaite-bench) runs the REAL competitor integrations, configured at their genuine best, and places the same PII inside a tool-call argument and a multimodal text part. Measured results on 120 real documents labeled by independent auditors:
+
+| | Recall (flat text) | Tool-call leak | Multimodal leak |
+|---|---|---|---|
+| PrivAiTe `onnx` (default) | **84.5%** | **15.5%** | **15.5%** |
+| LLM Guard (Anonymize) | 76.9% | 99.1% | 100% |
+| LiteLLM Presidio guardrail | 70.3% | 99.1% | 29.7% |
+
+LiteLLM's guardrail does scrub multimodal text parts (hence its low multimodal leak), and LLM Guard's DeBERTa model actually out-recalls it on flat text. But neither parses tool-call JSON, so about **99%** of the same PII survives inside a tool-call argument; PrivAiTe removes everything it detects from the tool call (**100% vs 0.6%** tool-call protection).
+
+Contamination note, in the competitors' favor and still insufficient: LLM Guard's detection model is fine-tuned on the exact dataset family behind this corpus, so its 76.9% is an optimistic upper bound, while PrivAiTe's default model did not train on it. On an out-of-distribution corpus (non-AI4Privacy), the PrivAiTe onnx stack holds ~84% recall while the AI4Privacy-tuned model drops to ~62%: see [OOD_COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md).
 
 ## When to pick which
 

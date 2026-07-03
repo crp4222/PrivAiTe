@@ -146,13 +146,16 @@ Measured on 120 real documents from the open [AI4Privacy `pii-masking-200k`](htt
 |---|---|---|---|---|
 | `onnx` (default) | **84.5%** | **80.6%** | 2 / 14 | **100%** |
 | `light` (full Presidio) | 62.4% | 57.9% | 3 / 14 | **100%** |
-| Presidio baseline (flat-text) | 70.3% | 65.3% | 3 / 14 | 0.6% |
+| LiteLLM Presidio guardrail | 70.3% | 65.3% | 3 / 14 | 0.6% |
+| LLM Guard (Anonymize) | 76.9% | 74.9% | 5 / 14 | 0.6% |
 
-Two recall columns: **span** credits a multi-token PII span as caught when its exact full string disappears (an upper bound); **strict** requires every token of the span to be removed. The Presidio baseline is the common flat-text approach (the engine behind most drop-in PII proxies); by design it does not touch tool-call arguments or multimodal content, which is the gap PrivAiTe closes — hence 100% tool-call protection vs 0.6%. Read the structured columns as "structured-aware vs the flat-text approach", not "vs every competitor".
+Two recall columns: **span** credits a multi-token PII span as caught when its exact full string disappears (an upper bound); **strict** requires every token of the span to be removed. The competitor rows are the REAL integrations at their genuine best (per-document language and full entity set for LiteLLM's guardrail; expanded entity coverage for LLM Guard), not a strawman baseline. Both scan message text (LiteLLM's guardrail also scrubs multimodal text parts) but neither parses tool-call JSON, so about 99% of the same PII survives inside a tool-call argument: 0.6% tool-call protection vs 100%.
 
-Per-language and per-entity tables, the methodology, and how to reproduce: [privaite-bench](https://github.com/crp4222/privaite-bench). Head-to-head feature comparison with Presidio, LLM Guard, and LiteLLM PII masking: [docs/comparison.md](docs/comparison.md).
+Two honesty notes, both favoring caution. LLM Guard's detection model is fine-tuned on the exact dataset behind this corpus, so its recall here is optimistic; PrivAiTe's default model is not (OpenAI's model card states it did not train on it). An out-of-distribution cross-check on a non-AI4Privacy corpus confirms it: the PrivAiTe onnx stack holds ~84% while the AI4Privacy-tuned model drops to ~62% ([OOD_COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md)).
 
-(An earlier, smaller curated set of 61 partly-synthetic documents scores higher — `light` ~97%, `onnx` ~100% — because that data is easier; the AI4Privacy figures above are the realistic, independent numbers.)
+Per-language and per-entity tables, competitor configs, the methodology, and how to reproduce: [privaite-bench](https://github.com/crp4222/privaite-bench). Head-to-head feature comparison: [docs/comparison.md](docs/comparison.md).
+
+(An earlier, smaller curated set of 61 partly-synthetic documents scores higher, `light` ~97% and `onnx` ~100%, because that data is easier; the AI4Privacy figures above are the realistic, independent numbers.)
 
 ## What's NOT detected by default
 
