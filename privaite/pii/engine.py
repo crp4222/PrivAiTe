@@ -311,6 +311,19 @@ class PIIEngine:
             return [await self._walk_anonymize(item, mapping, language) for item in value]
         return value
 
+    async def inspect_text(self, text: str) -> list[PIIEntity]:
+        """Detections for one text, exactly as the request path would see them.
+
+        Returns the MERGED entity list (same merge strategy and overlap
+        resolution as `_anonymize_text`), so the result corresponds 1:1 with
+        what would be replaced. Read-only: nothing is anonymized, no mapping is
+        created, the block gate is not raised (callers report would-block types
+        instead). Powers the dry-run /v1/pii/inspect endpoint.
+        """
+        if not text or not isinstance(text, str):
+            return []
+        return await self._detect_all(text, self._language())
+
     async def process_response(self, content: str, mapping: PIIMapping) -> str:
         if not self.config.deanonymization.enabled:
             return content

@@ -66,6 +66,12 @@ def test_preset_light_does_not_pin_entities():
     assert config.detectors.presidio.entities is None
 
 
+def test_inspect_endpoint_disabled_by_default():
+    # The dry-run inspect endpoint returns detections for caller text; exposing
+    # it must be an explicit operator decision, never the default posture.
+    assert PIIConfig().inspect.enabled is False
+
+
 def test_on_error_defaults_to_block_and_accepts_allow():
     assert PIIConfig().on_error == "block"
     assert PIIConfig(on_error="allow").on_error == "allow"

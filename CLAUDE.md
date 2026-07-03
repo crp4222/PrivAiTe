@@ -45,6 +45,12 @@ NOT scanned (documented limitation, keep it documented if you change it):
 `messages[].name`, top-level `user`/`metadata`, `tools`/`functions` definitions,
 JSON object keys, and tokenized (integer-array) inputs.
 
+`POST /v1/pii/inspect` (off by default, `pii.inspect.enabled`) is a dry run: it
+returns the caller's own detections + anonymized preview and forwards NOTHING.
+It is the one deliberate exception to "never echo values" (the caller sent the
+text; invariant #5 still fully applies to logs, errors and /stats, and the
+endpoint module deliberately has no logger). Keep it excluded from /stats.
+
 ## Streaming handler (`privaite/streaming/handler.py`)
 
 Forward the provider's own chunks (preserve `id`, `usage`, `logprobs`, and the real

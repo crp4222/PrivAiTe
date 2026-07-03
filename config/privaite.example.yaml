@@ -108,6 +108,12 @@ pii:
     fuzzy_matching: false
     fuzzy_threshold: 0.85
 
+  # Dry-run inspection endpoint (POST /v1/pii/inspect): returns the detections
+  # for a text you submit, without forwarding anything to any provider and
+  # without logging any value. For testing what gets redacted. Off by default.
+  inspect:
+    enabled: false
+
   passthrough:
     system_messages: false
     tool_calls: false

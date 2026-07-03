@@ -157,6 +157,15 @@ class DeanonymizationConfig(BaseModel):
     fuzzy_threshold: float = 0.85
 
 
+class InspectConfig(BaseModel):
+    # Dry-run inspection endpoint (POST /v1/pii/inspect): returns the detections
+    # for a caller-supplied text WITHOUT forwarding anything to any provider and
+    # without logging any value. The caller already knows the text it sent, so
+    # echoing its own detections back leaks nothing; it exists so operators can
+    # verify what gets redacted before trusting the proxy. Off by default.
+    enabled: bool = False
+
+
 class CustomPatternConfig(BaseModel):
     pattern: str
     entity_type: str
@@ -202,6 +211,7 @@ class PIIConfig(BaseModel):
     anonymization: AnonymizationConfig = Field(default_factory=AnonymizationConfig)
     deanonymization: DeanonymizationConfig = Field(default_factory=DeanonymizationConfig)
     passthrough: PassthroughConfig = Field(default_factory=PassthroughConfig)
+    inspect: InspectConfig = Field(default_factory=InspectConfig)
 
     def model_post_init(self, __context: object) -> None:
         if self.preset is None:

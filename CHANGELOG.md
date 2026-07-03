@@ -6,6 +6,30 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-07-03
+
+### Added
+- **Dry-run inspection endpoint** `POST /v1/pii/inspect` (off by default,
+  `pii.inspect.enabled: true` to expose it): submit a text, get back the
+  detections (type, exact span, score, source detector), the anonymized preview
+  exactly as the provider would have received it, and `would_block` (the types
+  your `block_entities` policy would reject). Nothing is forwarded to any
+  provider, nothing is logged, nothing is counted in `/stats`, and no mapping
+  outlives the request. The caller already knows the text it submitted, so
+  returning its own detections leaks nothing. Built for "how do I check what
+  was redacted?" (asked in discussion #1). README gained a "Verify what gets
+  redacted" section covering this and the `deanonymization.enabled: false`
+  recipe.
+
+### Changed
+- The chat, completions and embeddings endpoints now share one request
+  pipeline (`privaite/api/pipeline.py`) for the policy-sensitive plumbing:
+  model validation, the fail-closed anonymization error policy, provider error
+  mapping, SSE headers and response serialization. Previously three
+  near-identical copies; a security fix could land in one and miss the others
+  (the bare-string content scan fix had to be applied more than once). No
+  behavior change: the whole pre-existing test suite passes unchanged.
+
 ## [0.2.12] - 2026-07-03
 
 ### Added
