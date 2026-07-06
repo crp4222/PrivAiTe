@@ -2,7 +2,7 @@
 title: PrivAiTe PII Anonymizer
 author: crp4222
 author_url: https://github.com/crp4222/PrivAiTe
-version: 0.1.5
+version: 0.1.6
 required_open_webui_version: 0.5.0
 requirements: privaite>=0.2.12
 description: Anonymize or block PII (text, tool calls, multimodal) before it reaches the provider.
@@ -197,4 +197,44 @@ class Filter:
                 message["function_call"] = await engine.process_response_function_call(
                     function_call, mapping
                 )
+            # Open WebUI >= 0.10 stores the reply as structured `output` items
+            # ({"type": "message"|"reasoning", "content": [{"type": "output_text",
+            # "text": ...}]}) and leaves message["content"] empty, so the branches
+            # above are a no-op and the user would see placeholders. Restore the
+            # text inside those items too. Older Open WebUI has no "output" key, so
+            # this simply does not fire and the "content" path above handles it.
+            output = message.get("output")
+            if isinstance(output, list):
+                restored_output = await self._restore_output_items(output, engine, mapping)
+                if restored_output is not None:
+                    message["output"] = restored_output
         return body
+
+    async def _restore_output_items(
+        self, output: list[Any], engine: Any, mapping: Any
+    ) -> list[Any] | None:
+        # Return a NEW output list when a value changed and None otherwise: Open
+        # WebUI decides whether to persist/emit the restored reply by comparing
+        # the output object against the stored one, so an in-place edit would be
+        # seen as unchanged and dropped. Only text parts are rewritten; every
+        # other node is carried over by reference.
+        changed = False
+        new_output: list[Any] = []
+        for item in output:
+            if not isinstance(item, dict) or not isinstance(item.get("content"), list):
+                new_output.append(item)
+                continue
+            new_parts: list[Any] = []
+            item_changed = False
+            for part in item["content"]:
+                if isinstance(part, dict) and isinstance(part.get("text"), str) and part["text"]:
+                    restored = await engine.process_response(part["text"], mapping)
+                    if restored != part["text"]:
+                        part = {**part, "text": restored}
+                        item_changed = True
+                new_parts.append(part)
+            if item_changed:
+                item = {**item, "content": new_parts}
+                changed = True
+            new_output.append(item)
+        return new_output if changed else None

@@ -138,6 +138,67 @@ async def test_outlet_restores_multimodal_text_parts():
 
 
 @pytest.mark.asyncio
+async def test_outlet_restores_structured_output_items():
+    # Open WebUI >= 0.10 stores the reply as structured `output` items and leaves
+    # message["content"] empty; restoring only "content" would be a no-op and the
+    # user would see placeholders. The message AND reasoning output_text parts
+    # must be restored, and a NEW output object must be returned (Open WebUI only
+    # persists the restored reply if the output object changed).
+    module = _load_filter()
+    flt = module.Filter()
+    flt.valves.preset = "light"
+    flt.valves.languages = "en"
+
+    meta: dict = {}
+    body = await flt.inlet(
+        {"messages": [{"role": "user", "content": "I am Marie Dupont"}]}, meta
+    )
+    placeholder = body["messages"][0]["content"].replace("I am ", "")
+
+    original_output = [
+        {
+            "type": "reasoning",
+            "content": [{"type": "output_text", "text": f"Thinking about {placeholder}"}],
+        },
+        {
+            "type": "message",
+            "content": [{"type": "output_text", "text": f"Hello {placeholder}"}],
+        },
+    ]
+    reply = {"messages": [{"role": "assistant", "content": "", "output": original_output}]}
+    out = await flt.outlet(reply, meta)
+
+    restored = out["messages"][0]["output"]
+    assert restored[0]["content"][0]["text"] == "Thinking about Marie Dupont"
+    assert restored[1]["content"][0]["text"] == "Hello Marie Dupont"
+    # A new object is returned so Open WebUI detects the change and persists it.
+    assert restored is not original_output
+    assert original_output[1]["content"][0]["text"] == f"Hello {placeholder}"
+
+
+@pytest.mark.asyncio
+async def test_outlet_leaves_output_untouched_when_no_pii():
+    # A clean reply (nothing to restore) must not be rewritten: outlet returns the
+    # SAME output object so Open WebUI treats it as unchanged and skips persisting.
+    module = _load_filter()
+    flt = module.Filter()
+    flt.valves.preset = "light"
+    flt.valves.languages = "en"
+
+    meta: dict = {}
+    await flt.inlet(
+        {"messages": [{"role": "user", "content": "I am Marie Dupont"}]}, meta
+    )
+
+    original_output = [
+        {"type": "message", "content": [{"type": "output_text", "text": "no pii here"}]}
+    ]
+    reply = {"messages": [{"role": "assistant", "content": "", "output": original_output}]}
+    out = await flt.outlet(reply, meta)
+    assert out["messages"][0]["output"] is original_output
+
+
+@pytest.mark.asyncio
 async def test_inlet_blocks_configured_type():
     module = _load_filter()
     flt = module.Filter()
