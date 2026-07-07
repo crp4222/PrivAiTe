@@ -1,17 +1,20 @@
 # PrivAiTe
 
+Self-hosted PII redaction proxy for LLM APIs.
+
 [![CI](https://github.com/crp4222/PrivAiTe/actions/workflows/ci.yml/badge.svg)](https://github.com/crp4222/PrivAiTe/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-green.svg)](LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/privaite.svg)](https://pypi.org/project/privaite/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/privaite.svg)](https://pypi.org/project/privaite/)
 
-**A drop-in, self-hosted LLM proxy that reversibly redacts PII before it reaches the provider, including inside tool-call arguments and multimodal content, with zero telemetry.**
+**A drop-in LLM proxy that reversibly replaces PII before it reaches the provider, including inside tool-call arguments and multimodal content, with zero telemetry.**
 
 <p align="center">
   <img src="docs/demo.gif" alt="PrivAiTe demo: a tool call carrying an email, name and credit card has each value replaced with a placeholder before it reaches the LLM provider, with the JSON keys left intact, then de-anonymized in the reply" width="820">
 </p>
 
-Keep personal data out of your LLM calls. PrivAiTe is a local proxy that sits between your app and the model provider. It finds names, emails, phone numbers, cards, IBANs, secrets and more, swaps them for stand-ins before anything leaves your machine, and puts the real values back in the reply. It does this across message text, **tool-call arguments, and multimodal content**, which is where most tools stop looking. Detection runs on your machine and nothing phones home. By default it runs the full ONNX suite, so it also catches **secrets and passwords**, not just the easy regex entities. Point any OpenAI-compatible client at it.
+Keep personal data out of your LLM calls. PrivAiTe is a local proxy that sits between your app and the model provider. It finds names, emails, phone numbers, cards, IBANs, secrets and more, swaps them for stand-ins before anything leaves your machine, and puts the real values back in the reply. Most tools scan only the plain message text and miss the rest, which is the gap PrivAiTe closes. Detection runs on your machine and nothing phones home. By default it runs the full ONNX suite, so it also catches **secrets and passwords**, not just the easy regex entities. It exposes an OpenAI-compatible API you can point any existing client at, and the same engine runs three ways: as a standalone proxy, an Open WebUI filter, or a LiteLLM guardrail.
 
 ```
 You type: "Je m'appelle Marie Dupont, email marie@acme.com"
