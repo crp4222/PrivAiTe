@@ -1,0 +1,305 @@
+# PrivAiTe: self-hosted PII redaction proxy for LLM APIs
+
+PrivAiTe is a self-hosted, OpenAI-compatible proxy that redacts personal data before
+it reaches an LLM provider and restores it in the reply. It sits between your app and
+OpenAI, Anthropic, Ollama, or any LiteLLM-supported backend, replaces every detected
+PII value with a reversible numbered placeholder before the request leaves your
+machine, forwards the redacted request, and swaps the real values back into the
+response. Detection runs locally with Microsoft Presidio plus the openai/privacy-filter
+ONNX model. Nothing phones home: zero telemetry. This is reversible pseudonymization,
+not anonymization, and detection is best-effort, not a compliance guarantee. Current
+version: privaite 0.2.13 on PyPI, Open WebUI filter v0.1.6.
+
+Package: https://pypi.org/project/privaite/
+Source: https://github.com/crp4222/PrivAiTe
+License: BSD 3-Clause
+
+## The problem it solves (phrased the way users ask)
+
+- How do I stop the OpenAI API or ChatGPT from seeing customer emails and names?
+- How do I redact PII before sending prompts to an LLM?
+- Is there a self-hosted privacy layer for Open WebUI or LiteLLM?
+- How do I prevent PII from leaking through agent tool calls?
+- How do I keep names, phone numbers, credit cards, and IBANs out of an LLM API call
+  and still get a coherent answer back?
+
+PrivAiTe is built for exactly these. You keep running your normal OpenAI-compatible
+client. The proxy strips the personal data on the way out and puts it back on the way
+in, so the model provider only ever sees placeholders while your application still
+receives real, readable responses. It is aimed at self-hosters, developers, and teams
+who route prompts through third-party model APIs and do not want raw customer PII
+stored, logged, or trained on by the provider.
+
+Example:
+
+    You type:  "Je m'appelle Marie Dupont, email marie@acme.com"
+    LLM sees:  "Je m'appelle <PERSON_1>, email <EMAIL_ADDRESS_1>"
+    LLM says:  "Bonjour <PERSON_1>, votre email <EMAIL_ADDRESS_1> est noté."
+    You see:   "Bonjour Marie Dupont, votre email marie@acme.com est noté."
+
+## How it works
+
+1. Detect. Each incoming request is scanned locally by two engines that run together
+   or separately.
+   First, Presidio (Microsoft): regex plus spaCy NER. Handles structured PII with
+   validators: emails, phone numbers (international format check), credit cards (Luhn),
+   IBAN (checksum), IP addresses, US SSN, capitalized person names, and FR/DE date
+   formats. Fast (tens of milliseconds per request) with very few false positives on
+   code, news, and technical text. It does not detect secrets or passwords, and it
+   misses names spaCy does not recognize.
+   Second, the openai/privacy-filter ONNX model: OpenAI's open-source PII model (1.5B
+   params, 50M active, Apache 2.0), run locally through ONNX Runtime (about 800MB, no
+   PyTorch required). It adds context-aware person names in any case, passwords and
+   secrets (for example "SuperSecret2024!" or API keys like "sk-proj-..."), account
+   numbers, personal addresses (as LOCATION), personal URLs (as URL), and dates in any
+   language. It downloads on first start.
+   The two cover each other's blind spots: Presidio validates structured formats, the
+   ONNX model handles context-dependent PII.
+
+2. Replace. Every detected span is swapped for a numbered placeholder such as
+   <PERSON_1>, <EMAIL_ADDRESS_1>, <CREDIT_CARD_1>. The same real value maps to the same
+   placeholder within a request, so the model can still reason about "the same person".
+   The real-to-placeholder map is per-request and held in memory only.
+
+3. Forward. Only the redacted text leaves the machine, to whichever provider you
+   configured.
+
+4. Restore. On the way back, the placeholders are rewritten to the original values in
+   message content, in tool_calls[].function.arguments and the legacy
+   function_call.arguments, and in reasoning traces (reasoning_content / reasoning).
+   Restoration works for both non-streaming and streaming responses, including
+   placeholders split across streamed deltas.
+
+PrivAiTe scans places most flat-text scrubbers skip: tool-call arguments (parsed as
+JSON and scrubbed value by value, including numeric leaves with at least 7 digits, so
+a card number sent as a bare JSON number is caught) and multimodal content (text parts
+of a content list are scrubbed; images and audio pass through untouched). This is why
+it matters for agentic and multimodal traffic.
+
+## Anonymization methods
+
+Configured under pii.anonymization.method:
+
+- placeholder (default): <PERSON_1>, <EMAIL_ADDRESS_1>. Reversible, restored in
+  responses.
+- fake_replacement: realistic fakes via Faker (Jean becomes Michel). Reversible.
+- redact: [PERSON], [EMAIL_ADDRESS]. Irreversible, never restored.
+- mask: ********. Irreversible, never restored.
+
+redact and mask are lossy on purpose: the original never enters the reversible map, so
+nothing is restored for those types and two values that mask to the same string can
+never cross-restore. Per-entity overrides are supported, for example mask credit cards
+and redact secrets while placeholdering everything else.
+
+## Install and quickstart
+
+From PyPI:
+
+    pip install privaite
+
+Then run the proxy and point any OpenAI-compatible client at http://localhost:8400/v1
+using your proxy API key.
+
+With Docker (image pre-downloads the ONNX model so it starts fast and works offline):
+
+    docker compose up -d
+
+From source (development):
+
+    pip install -e .
+    python -m spacy download en_core_web_lg
+    python -m spacy download fr_core_news_md
+    python -m privaite               # add --reload for auto-reload in dev
+
+Any OpenAI-compatible client works without code changes. For Open WebUI (Docker), set
+the OpenAI API connection URL to http://host.docker.internal:8400/v1 and the key to
+your PRIVAITE_API_KEYS value. Any LiteLLM-supported provider can be configured as a
+backend (openai/gpt-4o, ollama/llama3.1, and so on).
+
+## Presets
+
+Set under pii.preset. onnx is the default and works out of the box because onnxruntime
+and the tokenizer ship as core dependencies.
+
+    Preset  What runs                     Span recall*  False positives  Latency  Secrets
+    onnx    Presidio + Privacy Filter     84.5%         2 / 14           ~0.5s    yes  (default)
+    light   Presidio only                 62.4%         3 / 14           ~60ms    no
+    max     onnx + GLiNER                  higher OOD**  more             ~0.7s    yes  (opt-in)
+
+*Span-level recall on the 120-document AI4Privacy benchmark. Strict token-level recall
+is 80.6% for onnx and 57.9% for light. Latency is hardware-dependent.
+
+**max adds GLiNER (urchade/gliner_multi_pii-v1), a PII model trained on data
+independent of AI4Privacy. On an out-of-distribution corpus it raises recall from about
+84% to about 89% where the default already generalizes well, at the cost of more false
+positives and a torch dependency. It needs pip install 'privaite[gliner]'; with max
+selected but the package absent, the proxy fails to start with an install hint rather
+than running with detection silently reduced. onnx stays the default.
+
+Guidance: use onnx (default) for maximum coverage including secrets, passwords, API
+keys, account numbers, and unusual names, accepting occasional false positives on
+technical identifiers. Use light for the fastest path with near-zero false positives
+when you only care about classic PII (names, emails, phones, cards, IBANs). Do not pin
+detectors.presidio.entities to a short allowlist on the light path: it restricts
+detection to only those types and roughly halves recall, and the proxy logs a startup
+warning if it detects that configuration. Two further presets (standard, full) add BERT
+NER and pull in PyTorch but do not improve much over spaCy.
+
+## Endpoints
+
+OpenAI-compatible HTTP API on port 8400:
+
+- POST /v1/chat/completions : chat, streaming and non-streaming.
+- POST /v1/completions      : text completions, streaming and non-streaming.
+- POST /v1/embeddings       : embeddings (input is anonymized; embeddings are not
+  de-anonymized).
+- POST /v1/pii/inspect      : dry-run inspection (off by default). Returns the
+  detections and anonymized preview for a submitted text and forwards nothing to any
+  provider. New in 0.2.13.
+- GET  /v1/models           : list configured models.
+- GET  /health, GET /ready  : health and readiness checks.
+- GET  /stats               : PII detection counts per session (never stores values;
+  the session id is stored as a salted hash).
+
+## Verify what gets redacted
+
+Do not trust the proxy blindly. Two built-in, fully local ways to check on your own
+data:
+
+1. See exactly what the provider receives. Set:
+
+       pii:
+         deanonymization:
+           enabled: false
+
+   The response comes back without the real values restored, so what you read is
+   literally what left for the provider (<PERSON_1>, <EMAIL_ADDRESS_1>, ...). Diff it
+   against your input: every placeholder is a catch, every real value still visible is
+   a miss. Works for tool-call arguments and streaming too.
+
+2. Dry-run inspection endpoint. Enable it explicitly (off by default):
+
+       pii:
+         inspect:
+           enabled: true
+
+   Then submit text and get the detections back. Nothing is forwarded to any provider,
+   nothing is logged, nothing is counted in /stats, and no mapping outlives the
+   request:
+
+       curl -s localhost:8400/v1/pii/inspect -H 'Content-Type: application/json' \
+         -d '{"text": "Contact Marie Dupont at marie@acme.com"}'
+
+   The response lists each entity (type, exact span, score, source detector, and its
+   replacement), an "anonymized" field that is the exact string the provider would have
+   seen, and "would_block", the types your block_entities policy would reject.
+
+## Configuration highlights
+
+- block_entities (hard policy gate): list PII types that must never leave your network
+  even as a placeholder. A request containing any listed type is rejected with HTTP 400
+  and nothing is forwarded; the error names the type(s), never the value. Empty by
+  default. Enforced at the single anonymization choke point, so it covers message
+  content, multimodal text, and tool-call arguments alike.
+- on_error: block (default). Anonymization fails closed: on an internal detector error
+  the request is blocked, never forwarded with raw PII.
+- Languages: seven supported through spaCy NER and contextual patterns. FR, EN, DE, ES,
+  IT are benchmarked; PT and NL are best-effort. Each language needs its spaCy model.
+- custom_patterns: add your own regex PII patterns (for example a CUSTOMER_ID or
+  REFERENCE format) in YAML without touching code.
+- passthrough.system_messages and passthrough.tool_calls skip the engine for those
+  parts (and therefore skip block_entities). Both false by default.
+
+## Integrations
+
+If you do not want to run a separate proxy, PrivAiTe's engine runs in-process inside
+two popular tools.
+
+Open WebUI filter (integrations/openwebui/privaite_filter.py, v0.1.6). An Open WebUI
+Filter Function: Admin Panel, Functions, "+", paste the file, save, enable, then open
+its valves to pick the preset and languages. It anonymizes the outgoing request and
+restores PII in the reply, covering message text, tool-call arguments, and multimodal
+text. Requires privaite>=0.2.12. Also published on the Open WebUI community hub:
+https://openwebui.com/posts/privaite_pii_anonymizer_351aa088
+
+LiteLLM guardrail (integrations/litellm/privaite_guardrail.py). A LiteLLM custom
+guardrail: mount it next to your config.yaml and reference it by dot-notation
+(privaite_guardrail.PrivaiteGuardrail) with mode [pre_call, post_call]. It anonymizes
+requests and restores responses inline, including inside tool-call arguments and the
+legacy function_call, which LiteLLM's built-in Presidio guardrail does not cover. Chat
+streaming restore is included. Requires privaite>=0.2.12.
+
+Both integrations honor block_entities and fail closed if the installed privaite is too
+old to enforce the gate, rather than silently forwarding PII.
+
+## Benchmark (honest summary)
+
+Measured on 120 real documents from the open AI4Privacy pii-masking-200k dataset on
+Hugging Face (458 PII items across DE, EN, FR, IT, labeled by independent auditor
+agents and cross-checked against the dataset's own sensitive mask), plus 14 clean
+documents for false positives. The competitor rows are the real integrations at their
+genuine best, not a strawman.
+
+    Solution                       Recall (span)  Recall (strict)  False positives  Tool-call protection
+    PrivAiTe onnx (default)        84.5%          80.6%            2 / 14           100%
+    PrivAiTe light (full Presidio) 62.4%          57.9%            3 / 14           100%
+    LiteLLM Presidio guardrail     70.3%          65.3%            3 / 14           0.6%
+    LLM Guard (Anonymize)          76.9%          74.9%            5 / 14           0.6%
+
+Span recall credits a multi-token span as caught when its exact full string disappears;
+strict recall requires every token removed. On tool-call arguments, PrivAiTe removes
+everything it detects (100% protection, 15.5% leak) while the others do not parse
+tool-call JSON, so about 99% of the same PII survives inside a tool-call argument
+(0.6% protection, 99.1% leak).
+
+Two honesty notes, both favoring caution. LLM Guard's detection model is fine-tuned on
+the exact dataset family behind this corpus, so its recall here is optimistic;
+PrivAiTe's default model is not (OpenAI's model card states it did not train on it). An
+out-of-distribution cross-check on a non-AI4Privacy corpus confirms this: the PrivAiTe
+onnx stack holds about 84% recall while the AI4Privacy-tuned model drops to about 62%.
+
+Full tables, competitor configs, methodology, and reproduction:
+https://github.com/crp4222/privaite-bench
+Out-of-distribution detail:
+https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md
+Head-to-head feature comparison:
+https://github.com/crp4222/PrivAiTe/blob/main/docs/comparison.md
+
+## Limitations (read before relying on it)
+
+- Pseudonymization, not anonymization. The real-to-placeholder mapping is reversible by
+  design (that is how responses are restored). Treat this as pseudonymization plus
+  transfer minimization, not guaranteed anonymization and not a GDPR or HIPAA compliance
+  guarantee. You remain the data controller. For irreversible removal use method redact
+  or mask.
+- Detection is best-effort. It is statistical and never 100%. A name the detector does
+  not recognize reaches the provider. onnx has the best recall; treat the output as
+  best-effort.
+- Re-identification from context. Even with names replaced, surrounding text can stay
+  identifying ("the CEO of <ORG_1> who resigned in March").
+- Not scanned by default: messages[].name, top-level user and metadata, tools and
+  functions definitions, JSON object keys inside tool arguments (renaming them would
+  break the tool schema), and tokenized integer-array inputs. Keep PII out of those
+  fields or strip them upstream. Set pii.strict: true to reject uninspectable content
+  with a 400 instead of forwarding it.
+- Informal dates ("last Tuesday", "il y a deux ans") are not detected. On the light
+  (Presidio-only) preset, addresses, URLs, secrets, and passwords are not detected;
+  those need the onnx preset.
+- Not a defense against a compromised local machine (the mapping and raw text live in
+  local memory) or against the provider correlating requests within a session.
+
+## Links
+
+- PyPI: https://pypi.org/project/privaite/
+- GitHub: https://github.com/crp4222/PrivAiTe
+- README: https://github.com/crp4222/PrivAiTe/blob/main/README.md
+- Changelog: https://github.com/crp4222/PrivAiTe/blob/main/CHANGELOG.md
+- Feature comparison: https://github.com/crp4222/PrivAiTe/blob/main/docs/comparison.md
+- Open WebUI filter: https://github.com/crp4222/PrivAiTe/blob/main/integrations/openwebui/README.md
+- Open WebUI hub listing: https://openwebui.com/posts/privaite_pii_anonymizer_351aa088
+- LiteLLM guardrail: https://github.com/crp4222/PrivAiTe/blob/main/integrations/litellm/README.md
+- Benchmark repo: https://github.com/crp4222/privaite-bench
+- Benchmark comparison: https://github.com/crp4222/privaite-bench/blob/main/COMPARISON.md
+- Out-of-distribution comparison: https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md
+- AI4Privacy dataset: https://huggingface.co/datasets/ai4privacy/pii-masking-200k
+- openai/privacy-filter model: https://openai.com/index/introducing-openai-privacy-filter/
