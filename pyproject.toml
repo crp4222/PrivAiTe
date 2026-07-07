@@ -76,6 +76,8 @@ privaite = "privaite.cli:main"
 [project.urls]
 Homepage = "https://github.com/crp4222/PrivAiTe"
 Repository = "https://github.com/crp4222/PrivAiTe"
+Documentation = "https://github.com/crp4222/PrivAiTe#readme"
+Issues = "https://github.com/crp4222/PrivAiTe/issues"
 Changelog = "https://github.com/crp4222/PrivAiTe/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
