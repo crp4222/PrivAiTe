@@ -1,4 +1,4 @@
-# PrivAiTe — guide for AI agents (read this before changing code)
+# PrivAiTe, guide for AI agents (read this before changing code)
 
 PrivAiTe is a self-hosted, OpenAI-compatible proxy that **detects PII, replaces it
 with reversible placeholders before forwarding to the LLM provider, and restores
@@ -14,7 +14,7 @@ them as invariants, not suggestions.
    error. Startup refuses unsafe configs (see #6).
 2. **One choke point.** Every piece of user text reaches the provider only through
    `PIIEngine._anonymize_text`. The `block_entities` gate lives there. If you add a
-   new field/path that carries user text, route it through the engine — never
+   new field/path that carries user text, route it through the engine, never
    forward it directly.
 3. **Restore parity.** Whatever is anonymized must be restored on the way back, in
    **both streaming and non-streaming**: `content`, `tool_calls[].function.arguments`,
@@ -30,7 +30,7 @@ them as invariants, not suggestions.
    with 0 detectors, `merge_strategy: intersection` with <2 detectors, a Presidio
    language with no spaCy model, and duplicate provider `model_name` aliases all
    raise at boot.
-7. **Config defaults are the safety posture — do not flip them casually.**
+7. **Config defaults are the safety posture, do not flip them casually.**
    `preset: onnx` (~84.5% recall), `on_error: block`, `deanonymization.fuzzy_matching: false`
    (fuzzy can mis-substitute), detector `trust_remote_code: false`, `block_entities: []`.
 
@@ -54,7 +54,7 @@ endpoint module deliberately has no logger). Keep it excluded from /stats.
 ## Streaming handler (`privaite/streaming/handler.py`)
 
 Forward the provider's own chunks (preserve `id`, `usage`, `logprobs`, and the real
-finish chunk — do not synthesize a duplicate finish). One restore buffer **per
+finish chunk: do not synthesize a duplicate finish). One restore buffer **per
 choice index** (n>1 must not share). Flush held-back text onto the finish chunk and
 again after the stream ends without a `finish_reason`. Never suppress a chunk that
 carries any payload other than fully-held-back content.
@@ -64,7 +64,7 @@ carries any payload other than fully-held-back content.
 - Run in the repo venv (`.venv`): `pytest`, `ruff check`, `ruff format --check`,
   and **`mypy privaite/ integrations/openwebui/privaite_filter.py integrations/litellm/privaite_guardrail.py`**.
   The publish workflow type-checks the integrations even though the push CI does
-  not — skipping them once broke a release.
+  not: skipping them once broke a release.
 - Version: bump **both** `pyproject.toml` and `privaite/__init__.py`; date the
   `CHANGELOG.md` section; bump the integration pins (`privaite>=X`).
 - Benchmark: if you touched detection, re-run `privaite-bench`
@@ -73,7 +73,6 @@ carries any payload other than fully-held-back content.
 - Release: `gh release create vX.Y.Z` triggers `publish.yml` → PyPI (trusted
   publisher; its Environment field must stay empty). A PyPI version can never be
   reused, so verify green CI first.
-- Commit as the real git user, not claude
 
 ## Integrations must stay in sync with the core
 

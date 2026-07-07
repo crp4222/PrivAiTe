@@ -29,3 +29,6 @@ Thumbs.db
 
 .claude/
 docs/.posts.md
+
+# Agent guide local (personnel, non versionné); AGENTS.md est la version publique
+CLAUDE.md
