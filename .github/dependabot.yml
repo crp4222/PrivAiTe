@@ -1,0 +1,38 @@
+# Dependabot keeps dependencies current with small, regular PRs.
+# Minor and patch bumps are grouped into a single PR to keep the noise low;
+# majors are left as individual PRs so breaking changes get reviewed one at a time.
+# Docs: https://docs.github.com/code-security/dependabot/dependabot-version-updates
+version: 2
+updates:
+  # Python dependencies declared in pyproject.toml (repo root).
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # Every minor + patch bump rides in one PR; majors stay individual.
+      python-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions pinned in the CI and publish workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      # One PR for every action bump (majors included).
+      github-actions:
+        patterns:
+          - "*"
