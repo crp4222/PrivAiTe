@@ -6,7 +6,6 @@ Self-hosted PII redaction proxy for LLM APIs.
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-green.svg)](LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/privaite.svg)](https://pypi.org/project/privaite/)
-[![PyPI downloads](https://img.shields.io/pypi/dm/privaite.svg)](https://pypi.org/project/privaite/)
 
 **A drop-in LLM proxy that reversibly replaces PII before it reaches the provider, including inside tool-call arguments and multimodal content, with zero telemetry.**
 
@@ -236,9 +235,47 @@ WebUI filter (see [Open WebUI filter](#open-webui-filter) below).
 
 ## Docker
 
+Pull and run, no build needed. The detection model is baked into the image, so it
+runs offline from the first request.
+
+Proxying OpenAI, just set your key:
+
 ```bash
-docker compose up -d
+docker run -d -p 8400:8400 \
+  -e PRIVAITE_API_KEYS=change-me \
+  -e OPENAI_API_KEY=sk-... \
+  ghcr.io/crp4222/privaite
 ```
+
+That exposes `gpt-4o-mini` and `gpt-4o`. For any other provider (Ollama, Azure, a
+self-hosted endpoint, or your own LiteLLM proxy), mount a config instead:
+
+```bash
+docker run -d -p 8400:8400 \
+  -e PRIVAITE_API_KEYS=change-me \
+  -v $PWD/privaite.yaml:/app/config/privaite.yaml:ro \
+  ghcr.io/crp4222/privaite
+```
+
+A minimal `privaite.yaml`:
+
+```yaml
+providers:
+  - model_name: my-model
+    litellm_params:
+      model: openai/gpt-4o-mini   # any litellm model string, e.g. ollama/llama3
+      api_base: https://api.openai.com/v1
+      api_key: ${OPENAI_API_KEY}
+pii:
+  enabled: true
+  preset: onnx
+```
+
+Auth is on by default, so `PRIVAITE_API_KEYS` is required. From a clone you can also
+`docker compose up -d`; put the key in a `.env` file to keep it off the command line.
+
+Then point any OpenAI-compatible client (or Open WebUI) at `http://localhost:8400/v1`
+with the key `change-me`.
 
 ## Open WebUI filter
 
