@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import re
 
-from presidio_analyzer import EntityRecognizer, RecognizerResult
-from presidio_analyzer.nlp_engine import NlpArtifacts
+from privaite.pii.recognizer_base import RegexSpanRecognizer
 
 MONTHS_FR = (
     "janvier|février|fevrier|mars|avril|mai|juin|"
@@ -29,34 +28,11 @@ PATTERNS = [
 COMPILED = [re.compile(p, re.IGNORECASE | re.UNICODE) for p in PATTERNS]
 
 
-class FrenchDateRecognizer(EntityRecognizer):
+class FrenchDateRecognizer(RegexSpanRecognizer):
     def __init__(self, supported_language: str = "fr") -> None:
         super().__init__(
             supported_entities=["DATE_TIME"],
             supported_language=supported_language,
             name="FrenchDateRecognizer",
         )
-
-    def load(self) -> None:
-        pass
-
-    def analyze(
-        self, text: str, entities: list[str], nlp_artifacts: NlpArtifacts | None = None
-    ) -> list[RecognizerResult]:
-        results = []
-
-        for pattern in COMPILED:
-            for match in pattern.finditer(text):
-                start = match.start("date")
-                end = match.end("date")
-
-                results.append(
-                    RecognizerResult(
-                        entity_type="DATE_TIME",
-                        start=start,
-                        end=end,
-                        score=0.85,
-                    )
-                )
-
-        return results
+        self._specs = [(c, "DATE_TIME", 0.85, "date") for c in COMPILED]

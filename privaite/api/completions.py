@@ -12,10 +12,10 @@ from privaite.api.dependencies import (
     record_pii_stats,
 )
 from privaite.api.pipeline import (
-    anonymize_or_error,
     call_provider,
     dump_response,
-    sse_response,
+    resolve_input,
+    stream_or_error,
     validate_model,
 )
 from privaite.config.schema import PrivAiTeConfig
@@ -42,49 +42,38 @@ async def completions(
     if error is not None:
         return error
 
-    mapping = None
+    async def _anonymize() -> tuple[Any, Any]:
+        if isinstance(prompt, list) and all(isinstance(p, str) for p in prompt):
+            msgs = [{"role": "user", "content": p} for p in prompt]
+            msgs, mapping = await pii_engine.process_request(msgs)
+            anon_prompt: Any = [m["content"] for m in msgs]
+        else:
+            msgs = [{"role": "user", "content": prompt}]
+            msgs, mapping = await pii_engine.process_request(msgs)
+            anon_prompt = msgs[0]["content"]
+        record_pii_stats(request, mapping)
+        return anon_prompt, mapping
 
-    if config.pii.enabled and pii_engine is not None:
-
-        async def _anonymize() -> tuple[Any, Any]:
-            if isinstance(prompt, list) and all(isinstance(p, str) for p in prompt):
-                msgs = [{"role": "user", "content": p} for p in prompt]
-                msgs, mapping = await pii_engine.process_request(msgs)
-                anon_prompt: Any = [m["content"] for m in msgs]
-            else:
-                msgs = [{"role": "user", "content": prompt}]
-                msgs, mapping = await pii_engine.process_request(msgs)
-                anon_prompt = msgs[0]["content"]
-            record_pii_stats(request, mapping)
-            return anon_prompt, mapping
-
-        result, error = await anonymize_or_error(_anonymize, config, logger)
-        if error is not None:
-            return error
-        if result is not None:
-            prompt, mapping = result
+    prompt, mapping, error = await resolve_input(
+        config.pii.enabled and pii_engine is not None, prompt, _anonymize, config, logger
+    )
+    if error is not None:
+        return error
 
     kwargs = {k: v for k, v in body.items() if k not in ("model", "prompt", "stream")}
 
     if stream:
-        litellm_stream, error = await call_provider(
-            lambda: provider_router.streaming_text_completion(
-                model_alias=model, prompt=prompt, **kwargs
-            ),
-            model, logger,
-        )
-        if error is not None:
-            return error
-
         from privaite.streaming.handler import StreamingHandler
 
         deanon_config = config.pii.deanonymization if config.pii.enabled else None
-        return sse_response(
-            StreamingHandler.stream_text_response(
-                litellm_stream=litellm_stream,
-                mapping=mapping,
-                deanonymizer_config=deanon_config,
-            )
+        return await stream_or_error(
+            lambda: provider_router.streaming_text_completion(
+                model_alias=model, prompt=prompt, **kwargs
+            ),
+            lambda s: StreamingHandler.stream_text_response(
+                litellm_stream=s, mapping=mapping, deanonymizer_config=deanon_config
+            ),
+            model, logger,
         )
 
     response, error = await call_provider(

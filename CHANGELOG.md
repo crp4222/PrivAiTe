@@ -6,17 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Fixed
-- **Open WebUI filter: restore PII on Open WebUI >= 0.10** (filter bumped to
-  0.1.6). Since 0.10 the assistant reply is stored as structured `output` items
-  (`{type, content: [{type: "output_text", text}]}`) with `message["content"]`
-  empty, so the filter's `outlet` restore was a silent no-op and users saw
-  placeholders (`<PERSON_1>`) in the reply. `outlet` now also restores the text
-  of `output` items (message and reasoning), returning a new object only when a
-  value changed so Open WebUI persists it. The older `content` path still works
-  for Open WebUI < 0.10. Standalone proxy, CLI and the LiteLLM guardrail were
-  never affected (they never see the `output`-items shape). Hub listing needs a
-  manual republish to ship 0.1.6.
+## [0.3.0] - 2026-07-09
+
+### Added
+- Official Docker image at `ghcr.io/crp4222/privaite` (multi-arch, detection model
+  baked in, runs offline). Drop-in for OpenAI:
+  `docker run -e PRIVAITE_API_KEYS=change-me -e OPENAI_API_KEY=sk-... ghcr.io/crp4222/privaite`.
+
+### Changed
+- Internal refactoring for a cleaner, less-duplicated codebase. No change in
+  behavior or detection.
+- Clearer Open WebUI / Docker connection docs (which URL, which key).
 
 ## [0.2.13] - 2026-07-03
 

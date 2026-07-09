@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any
 
 from privaite.config.schema import DeanonymizationConfig
@@ -19,6 +19,24 @@ logger = logging.getLogger("privaite.streaming.handler")
 
 
 _REASONING_FIELDS = ("reasoning_content", "reasoning")
+
+
+def _drain(
+    buffers: dict[Any, Any],
+    finished: set[int],
+    make_chunk: Callable[[Any, str], dict],
+) -> Iterator[str]:
+    """After the stream ends, emit whatever each buffer still holds so no restored
+    text is silently dropped, skipping choices that already got a finish chunk. The
+    buffer key is the choice index, or a tuple whose first element is it;
+    ``make_chunk(key, remaining)`` builds the chunk dict to send."""
+    for key, buf in buffers.items():
+        idx = key[0] if isinstance(key, tuple) else key
+        if idx in finished:
+            continue
+        remaining = buf.flush()
+        if remaining:
+            yield format_sse_event(json.dumps(make_chunk(key, remaining)))
 
 
 class StreamingHandler:
@@ -197,44 +215,38 @@ class StreamingHandler:
                 if visible:
                     yield format_sse_event(json.dumps(chunk_dict))
 
-            # Stream ended without a finish chunk for some choice: emit whatever
-            # the buffers still hold so no restored text is silently dropped.
-            for idx, buf in content_bufs.items():
-                if idx in finished:
-                    continue
-                remaining = buf.flush()
-                if remaining:
-                    yield format_sse_event(json.dumps(create_chunk_dict(
-                        content=remaining, model=model_name, index=idx
-                    )))
-            for (idx, field), buf in reasoning_bufs.items():
-                if idx in finished:
-                    continue
-                remaining = buf.flush()
-                if remaining:
-                    yield format_sse_event(json.dumps(create_delta_chunk(
-                        {field: remaining}, model=model_name, index=idx
-                    )))
-            for (idx, t_idx), buf in tool_bufs.items():
-                if idx in finished:
-                    continue
-                remaining = buf.flush()
-                if remaining:
-                    yield format_sse_event(json.dumps(create_delta_chunk(
-                        {"tool_calls": [
-                            {"index": t_idx, "function": {"arguments": remaining}}
-                        ]},
-                        model=model_name, index=idx,
-                    )))
-            for idx, buf in func_bufs.items():
-                if idx in finished:
-                    continue
-                remaining = buf.flush()
-                if remaining:
-                    yield format_sse_event(json.dumps(create_delta_chunk(
-                        {"function_call": {"arguments": remaining}},
-                        model=model_name, index=idx,
-                    )))
+            # Stream ended without a finish chunk for some choice: emit whatever the
+            # buffers still hold so no restored text is silently dropped.
+            for sse in _drain(
+                content_bufs,
+                finished,
+                lambda idx, r: create_chunk_dict(content=r, model=model_name, index=idx),
+            ):
+                yield sse
+            for sse in _drain(
+                reasoning_bufs,
+                finished,
+                lambda key, r: create_delta_chunk({key[1]: r}, model=model_name, index=key[0]),
+            ):
+                yield sse
+            for sse in _drain(
+                tool_bufs,
+                finished,
+                lambda key, r: create_delta_chunk(
+                    {"tool_calls": [{"index": key[1], "function": {"arguments": r}}]},
+                    model=model_name,
+                    index=key[0],
+                ),
+            ):
+                yield sse
+            for sse in _drain(
+                func_bufs,
+                finished,
+                lambda idx, r: create_delta_chunk(
+                    {"function_call": {"arguments": r}}, model=model_name, index=idx
+                ),
+            ):
+                yield sse
 
         except Exception:
             logger.exception("Error during streaming")
@@ -289,20 +301,18 @@ class StreamingHandler:
 
                 yield format_sse_event(json.dumps(chunk_dict))
 
-            # Stream ended without a finish chunk for some choice: emit whatever
-            # the buffers still hold so no restored text is silently dropped.
-            for idx, buf in buffers.items():
-                if idx in flushed:
-                    continue
-                remaining = buf.flush()
-                if remaining:
-                    yield format_sse_event(json.dumps({
-                        "object": "text_completion",
-                        "model": model_name,
-                        "choices": [
-                            {"index": idx, "text": remaining, "finish_reason": None}
-                        ],
-                    }))
+            # Stream ended without a finish chunk for some choice: emit whatever the
+            # buffers still hold so no restored text is silently dropped.
+            for sse in _drain(
+                buffers,
+                flushed,
+                lambda idx, r: {
+                    "object": "text_completion",
+                    "model": model_name,
+                    "choices": [{"index": idx, "text": r, "finish_reason": None}],
+                },
+            ):
+                yield sse
 
         except Exception:
             logger.exception("Error during text-completion streaming")

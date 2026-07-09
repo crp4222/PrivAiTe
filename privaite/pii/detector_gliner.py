@@ -5,10 +5,21 @@ import logging
 from typing import Any
 
 from privaite.config.schema import GlinerDetectorConfig
-from privaite.pii.detector_base import PIIDetector, chunk_text
+from privaite.pii.detector_base import (
+    NerResult,
+    PIIDetector,
+    resolve_torch_device,
+    windowed_ner_detect,
+)
 from privaite.pii.entity import PIIEntity
 
 logger = logging.getLogger("privaite.pii.detector_gliner")
+
+
+def _gliner_extract(result: dict, chunk: str) -> NerResult:
+    start = int(result.get("start", 0))
+    end = int(result.get("end", 0))
+    return (result.get("label", ""), result.get("score", 0.0), start, end, chunk[start:end])
 
 
 class GlinerDetector(PIIDetector):
@@ -42,7 +53,7 @@ class GlinerDetector(PIIDetector):
             model = GLiNER.from_pretrained(
                 self.config.model_name, revision=self.config.revision
             )
-            device = _resolve_device(self.config.device)
+            device = resolve_torch_device(self.config.device)
             self._model = model.to(device)
 
         logger.info("Loading GLiNER model: %s ...", self.config.model_name)
@@ -53,58 +64,22 @@ class GlinerDetector(PIIDetector):
         if self._model is None:
             raise RuntimeError("GlinerDetector not initialized")
 
+        # GLiNER truncates long inputs (~384 tokens); windowing (max_chars=1200)
+        # keeps PII past that point visible. It filters by threshold itself, and the
+        # shared loop re-checks it and dedupes overlapping-window hits.
         labels = self.config.labels
         threshold = self.config.score_threshold
-        pii_entities: list[PIIEntity] = []
-        seen: set[tuple[int, int, str]] = set()
-
-        # GLiNER truncates long inputs (~384 tokens); run overlapping windows so PII
-        # past that point is still seen, and offset spans back to the full text.
-        for offset, chunk in chunk_text(text, max_chars=1200):
-            results = await asyncio.to_thread(
-                self._model.predict_entities, chunk, labels, threshold=threshold
-            )
-            for result in results:
-                score = result.get("score", 0.0)
-                if score < threshold:
-                    continue
-
-                mapped_type = self.config.label_mapping.get(result.get("label", ""))
-                if not mapped_type:
-                    continue
-
-                start = int(result.get("start", 0)) + offset
-                end = int(result.get("end", 0)) + offset
-
-                key = (start, end, mapped_type)
-                if key in seen:
-                    continue
-                seen.add(key)
-
-                pii_entities.append(
-                    PIIEntity(
-                        entity_type=mapped_type,
-                        text=text[start:end],
-                        start=start,
-                        end=end,
-                        score=float(score),
-                        source="gliner",
-                    )
-                )
-
-        return pii_entities
+        return await windowed_ner_detect(
+            text,
+            predict=lambda chunk: self._model.predict_entities(
+                chunk, labels, threshold=threshold
+            ),
+            extract=_gliner_extract,
+            label_mapping=self.config.label_mapping,
+            score_threshold=threshold,
+            source="gliner",
+            max_chars=1200,
+        )
 
     async def shutdown(self) -> None:
         self._model = None
-
-
-def _resolve_device(device_str: str) -> str:
-    if device_str == "auto":
-        import torch
-
-        if torch.backends.mps.is_available():
-            return "mps"
-        if torch.cuda.is_available():
-            return "cuda"
-        return "cpu"
-    return device_str

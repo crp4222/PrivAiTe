@@ -71,35 +71,47 @@ class DeAnonymizer:
                 continue
 
             for i in range(len(tokens) - window + 1):
-                raw_start = tokens[i][0]
-                raw_end = tokens[i + window - 1][1]
-
-                # Trim sentence punctuation off the edges: match and replace only
-                # the core, so "Michel Deu," keeps its comma and "<PERSON_3>." is
-                # still recognized as a placeholder shape.
-                start, end = raw_start, raw_end
-                while start < end and text[start] in _EDGE_PUNCT:
-                    start += 1
-                while end > start and text[end - 1] in _EDGE_PUNCT:
-                    end -= 1
-                if start >= end or _overlaps(start, end):
-                    continue
-
-                candidate = text[start:end]
-                if candidate == original or candidate in known_fakes:
-                    continue
-                if _PLACEHOLDER_SHAPE.match(candidate):
-                    continue
-                # Compare with normalized whitespace: a fake re-typed across a
-                # newline or a double space is exactly what fuzzy exists to catch,
-                # and the raw slice would otherwise pay a ratio penalty per
-                # whitespace character.
-                normalized = " ".join(candidate.split())
-                ratio = SequenceMatcher(None, normalized.lower(), fake.lower()).ratio()
-                if ratio >= self.config.fuzzy_threshold:
-                    replacements.append((start, end, original))
+                span = self._fuzzy_edge_match(
+                    text, tokens[i][0], tokens[i + window - 1][1], fake, original, known_fakes
+                )
+                if span is not None and not _overlaps(*span):
+                    replacements.append((span[0], span[1], original))
 
         for start, end, original in sorted(replacements, reverse=True):
             text = text[:start] + original + text[end:]
 
         return text
+
+    def _fuzzy_edge_match(
+        self,
+        text: str,
+        raw_start: int,
+        raw_end: int,
+        fake: str,
+        original: str,
+        known_fakes: set[str],
+    ) -> tuple[int, int] | None:
+        """Trim sentence punctuation off a token window and, if the core slice
+        fuzzily matches ``fake`` over the threshold, return its (start, end); else
+        None. The core is skipped when it is the real value, an exact fake, or a
+        placeholder shape ("Michel Deu," keeps its comma; "<PERSON_3>." stays a
+        placeholder). Whitespace is normalized before scoring so a fake re-typed
+        across a newline or double space still matches instead of paying a ratio
+        penalty per whitespace char."""
+        start, end = raw_start, raw_end
+        while start < end and text[start] in _EDGE_PUNCT:
+            start += 1
+        while end > start and text[end - 1] in _EDGE_PUNCT:
+            end -= 1
+        if start >= end:
+            return None
+        candidate = text[start:end]
+        if candidate == original or candidate in known_fakes:
+            return None
+        if _PLACEHOLDER_SHAPE.match(candidate):
+            return None
+        normalized = " ".join(candidate.split())
+        ratio = SequenceMatcher(None, normalized.lower(), fake.lower()).ratio()
+        if ratio >= self.config.fuzzy_threshold:
+            return (start, end)
+        return None

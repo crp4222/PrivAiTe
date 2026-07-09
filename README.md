@@ -224,11 +224,11 @@ python -m privaite --reload
 
 ### 4. Connect
 
-Point any OpenAI-compatible client to `http://localhost:8400/v1` with your proxy API key. Ready-to-run client snippets (curl, Python, Node) are in [`examples/`](examples/).
+Point any OpenAI-compatible client at `http://localhost:8400/v1` and authenticate with your `PRIVAITE_API_KEYS` value (not your provider key). Ready-to-run client snippets (curl, Python, Node) are in [`examples/`](examples/).
 
-**OpenWebUI (Docker):** Admin → Settings → Connections → OpenAI API:
-- URL: `http://host.docker.internal:8400/v1`
-- Key: your `PRIVAITE_API_KEYS` value
+**Open WebUI → Admin → Settings → Connections → OpenAI API:**
+- URL: `http://localhost:8400/v1`, or `http://host.docker.internal:8400/v1` if Open WebUI itself runs in Docker
+- Key: your `PRIVAITE_API_KEYS` value. Your real OpenAI key never goes here; it stays in the PrivAiTe container (see [Docker](#docker)).
 
 If you would rather not run a separate proxy, there is also an in-process Open
 WebUI filter (see [Open WebUI filter](#open-webui-filter) below).
@@ -246,6 +246,11 @@ docker run -d -p 8400:8400 \
   -e OPENAI_API_KEY=sk-... \
   ghcr.io/crp4222/privaite
 ```
+
+Two keys, two roles, like any proxy: `PRIVAITE_API_KEYS` is what your client (Open
+WebUI, your app) sends to PrivAiTe; `OPENAI_API_KEY` is your real OpenAI key that
+PrivAiTe uses upstream. The provider key stays in the container and never reaches
+your client, which is the whole point.
 
 That exposes `gpt-4o-mini` and `gpt-4o`. For any other provider (Ollama, Azure, a
 self-hosted endpoint, or your own LiteLLM proxy), mount a config instead:

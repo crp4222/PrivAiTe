@@ -149,3 +149,71 @@ async def test_body_within_limit_is_replayed_intact():
     await mw({"type": "http", "headers": []}, receive, send)
 
     assert bytes(received) == b"hello world"
+
+
+@pytest.mark.asyncio
+async def test_non_http_scope_passes_through():
+    """A non-http scope (websocket, lifespan) bypasses the size check untouched."""
+    seen = {}
+
+    async def downstream(scope, receive, send):
+        seen["type"] = scope["type"]
+
+    mw = RequestSizeLimitMiddleware(downstream, max_bytes=10)
+
+    await mw({"type": "lifespan"}, None, None)
+
+    assert seen["type"] == "lifespan"
+
+
+@pytest.mark.asyncio
+async def test_non_integer_content_length_is_ignored():
+    """A malformed Content-Length header does not crash; the body is still counted."""
+    received = bytearray()
+
+    async def downstream(scope, receive, send):
+        while True:
+            message = await receive()
+            received.extend(message.get("body", b""))
+            if not message.get("more_body", False):
+                break
+
+    mw = RequestSizeLimitMiddleware(downstream, max_bytes=1000)
+    chunks = [{"type": "http.request", "body": b"hi", "more_body": False}]
+
+    async def receive():
+        return chunks.pop(0)
+
+    async def send(message):
+        pass
+
+    await mw(
+        {"type": "http", "headers": [(b"content-length", b"not-a-number")]},
+        receive,
+        send,
+    )
+
+    assert bytes(received) == b"hi"
+
+
+@pytest.mark.asyncio
+async def test_control_message_is_replayed_to_app():
+    """An http.disconnect arriving before the body is replayed to the downstream app."""
+    seen = []
+
+    async def downstream(scope, receive, send):
+        message = await receive()
+        seen.append(message["type"])
+
+    mw = RequestSizeLimitMiddleware(downstream, max_bytes=1000)
+    chunks = [{"type": "http.disconnect"}]
+
+    async def receive():
+        return chunks.pop(0)
+
+    async def send(message):
+        pass
+
+    await mw({"type": "http", "headers": []}, receive, send)
+
+    assert seen == ["http.disconnect"]

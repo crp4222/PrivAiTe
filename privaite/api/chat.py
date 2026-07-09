@@ -12,10 +12,10 @@ from privaite.api.dependencies import (
     record_pii_stats,
 )
 from privaite.api.pipeline import (
-    anonymize_or_error,
     call_provider,
     dump_response,
-    sse_response,
+    resolve_input,
+    stream_or_error,
     validate_model,
 )
 from privaite.config.schema import PrivAiTeConfig
@@ -66,42 +66,31 @@ async def chat_completions(
     if error is not None:
         return error
 
-    mapping = None
+    async def _anonymize() -> tuple[list, Any]:
+        anon, mapping = await pii_engine.process_request(messages)
+        record_pii_stats(request, mapping)
+        return anon, mapping
 
-    if config.pii.enabled and pii_engine is not None:
-
-        async def _anonymize() -> tuple[list, Any]:
-            anon, mapping = await pii_engine.process_request(messages)
-            record_pii_stats(request, mapping)
-            return anon, mapping
-
-        result, error = await anonymize_or_error(_anonymize, config, logger)
-        if error is not None:
-            return error
-        if result is not None:
-            messages, mapping = result
+    messages, mapping, error = await resolve_input(
+        config.pii.enabled and pii_engine is not None, messages, _anonymize, config, logger
+    )
+    if error is not None:
+        return error
 
     kwargs = {k: v for k, v in body.items() if k not in ("model", "messages", "stream")}
 
     if stream:
-        litellm_stream, error = await call_provider(
-            lambda: provider_router.streaming_completion(
-                model_alias=model, messages=messages, **kwargs
-            ),
-            model, logger,
-        )
-        if error is not None:
-            return error
-
         from privaite.streaming.handler import StreamingHandler
 
         deanon_config = config.pii.deanonymization if config.pii.enabled else None
-        return sse_response(
-            StreamingHandler.stream_response(
-                litellm_stream=litellm_stream,
-                mapping=mapping,
-                deanonymizer_config=deanon_config,
-            )
+        return await stream_or_error(
+            lambda: provider_router.streaming_completion(
+                model_alias=model, messages=messages, **kwargs
+            ),
+            lambda s: StreamingHandler.stream_response(
+                litellm_stream=s, mapping=mapping, deanonymizer_config=deanon_config
+            ),
+            model, logger,
         )
 
     response, error = await call_provider(
