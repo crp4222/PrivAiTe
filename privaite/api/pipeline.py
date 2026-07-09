@@ -83,10 +83,47 @@ async def call_provider(
         return None, provider_error_response(exc)
 
 
+async def resolve_input(
+    pii_enabled: bool,
+    raw: T,
+    anonymize: Callable[[], Awaitable[tuple[T, Any]]],
+    config: PrivAiTeConfig,
+    log: logging.Logger,
+) -> tuple[T, Any, JSONResponse | None]:
+    """Anonymize an endpoint's input under the fail-closed policy, returning
+    (input_to_forward, mapping, error). The input is the ``raw`` payload unchanged
+    when PII is off, when ``on_error: allow`` opts out, or on error (unused then);
+    otherwise it is the anonymized payload with its reversible mapping.
+    """
+    if not pii_enabled:
+        return raw, None, None
+    result, error = await anonymize_or_error(anonymize, config, log)
+    if error is not None:
+        return raw, None, error
+    if result is None:
+        return raw, None, None
+    payload, mapping = result
+    return payload, mapping, None
+
+
 def sse_response(generator: AsyncIterator[str]) -> StreamingResponse:
     return StreamingResponse(
         generator, media_type="text/event-stream", headers=dict(SSE_HEADERS)
     )
+
+
+async def stream_or_error(
+    provider_call: Callable[[], Awaitable[Any]],
+    make_stream: Callable[[Any], AsyncIterator[str]],
+    model: str,
+    log: logging.Logger,
+) -> StreamingResponse | JSONResponse:
+    """Open a provider stream (mapping any failure to the OpenAI error shape) and
+    wrap the restored generator as an SSE response."""
+    litellm_stream, error = await call_provider(provider_call, model, log)
+    if error is not None:
+        return error
+    return sse_response(make_stream(litellm_stream))
 
 
 def dump_response(response: Any) -> dict:
