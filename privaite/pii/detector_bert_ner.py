@@ -5,13 +5,12 @@ import logging
 from typing import Any
 
 from privaite.config.schema import BertNERDetectorConfig
-from privaite.pii.detector_base import PIIDetector, chunk_text
-from privaite.pii.entity import PIIEntity
+from privaite.pii.detector_base import HFPipelineDetector, resolve_torch_device
 
 logger = logging.getLogger("privaite.pii.detector_bert_ner")
 
 
-class BertNERDetector(PIIDetector):
+class BertNERDetector(HFPipelineDetector):
     def __init__(self, config: BertNERDetectorConfig) -> None:
         self.config = config
         self._classifier: Any = None
@@ -37,67 +36,12 @@ class BertNERDetector(PIIDetector):
         await asyncio.to_thread(_load)
         logger.info("BERT NER model loaded")
 
-    async def detect(self, text: str, language: str = "en") -> list[PIIEntity]:
-        if self._classifier is None:
-            raise RuntimeError("BertNERDetector not initialized")
-
-        # The HF pipeline silently truncates at model_max_length (~512 tokens),
-        # making PII past that point invisible; run overlapping windows instead.
-        pii_entities: list[PIIEntity] = []
-        seen: set[tuple[int, int, str]] = set()
-        for offset, chunk in chunk_text(text):
-            results = await asyncio.to_thread(self._classifier, chunk)
-
-            for result in results:
-                entity_group = result.get("entity_group", "")
-                score = result.get("score", 0.0)
-
-                if score < self.config.score_threshold:
-                    continue
-
-                mapped_type = self.config.label_mapping.get(entity_group)
-                if not mapped_type:
-                    continue
-
-                start = result.get("start", 0) + offset
-                end = result.get("end", 0) + offset
-                word = result.get("word", text[start:end])
-
-                key = (start, end, mapped_type)
-                if key in seen:
-                    continue
-                seen.add(key)
-
-                pii_entities.append(
-                    PIIEntity(
-                        entity_type=mapped_type,
-                        text=word.strip(),
-                        start=start,
-                        end=end,
-                        score=score,
-                        source="bert_ner",
-                    )
-                )
-
-        return pii_entities
-
     async def shutdown(self) -> None:
         self._classifier = None
 
 
 def _resolve_device(device_str: str) -> int | str:
-    if device_str == "auto":
-        import torch
-
-        if torch.backends.mps.is_available():
-            return "mps"
-        if torch.cuda.is_available():
-            return 0
-        return -1
-    if device_str == "cpu":
-        return -1
-    if device_str == "mps":
-        return "mps"
-    if device_str == "cuda":
-        return 0
-    return -1
+    # HF pipelines want a device index (-1 cpu, 0 cuda) or the "mps" string; map the
+    # shared torch device name onto that format.
+    pipeline_device: dict[str, int | str] = {"cpu": -1, "cuda": 0, "mps": "mps"}
+    return pipeline_device.get(resolve_torch_device(device_str), -1)

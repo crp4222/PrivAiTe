@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import re
 
-from presidio_analyzer import EntityRecognizer, RecognizerResult
-from presidio_analyzer.nlp_engine import NlpArtifacts
+from privaite.pii.recognizer_base import RegexSpanRecognizer
 
 _LOC_GROUP = r"(?P<loc>[A-ZÀ-Ÿ][A-ZÀ-Ÿa-zà-ÿ\-]+(?:[\s\-]+[A-ZÀ-Ÿa-zà-ÿ\-]+){0,3})"
 
@@ -28,31 +27,11 @@ COMPILED = [
 ]
 
 
-class ContextualLocationRecognizer(EntityRecognizer):
+class ContextualLocationRecognizer(RegexSpanRecognizer):
     def __init__(self, supported_language: str = "fr") -> None:
         super().__init__(
             supported_entities=["LOCATION"],
             supported_language=supported_language,
             name="ContextualLocationRecognizer",
         )
-
-    def load(self) -> None:
-        pass
-
-    def analyze(
-        self, text: str, entities: list[str], nlp_artifacts: NlpArtifacts | None = None
-    ) -> list[RecognizerResult]:
-        results = []
-        for pattern in COMPILED:
-            for match in pattern.finditer(text):
-                start = match.start("loc")
-                end = match.end("loc")
-                results.append(
-                    RecognizerResult(
-                        entity_type="LOCATION",
-                        start=start,
-                        end=end,
-                        score=0.95,
-                    )
-                )
-        return results
+        self._specs = [(c, "LOCATION", 0.95, "loc") for c in COMPILED]

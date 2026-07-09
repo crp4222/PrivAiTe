@@ -37,54 +37,47 @@ class PresidioDetectorConfig(BaseModel):
     entities: list[str] | None = None
 
 
-class MLModelDetectorConfig(BaseModel):
+# The openai/privacy-filter model's label set, shared by its ONNX and torch backends.
+_PRIVACY_FILTER_LABELS = {
+    "private_person": "PERSON",
+    "private_email": "EMAIL_ADDRESS",
+    "private_phone": "PHONE_NUMBER",
+    "private_address": "LOCATION",
+    "private_date": "DATE_TIME",
+    "private_url": "URL",
+    "account_number": "FINANCIAL",
+    "secret": "SECRET",
+}
+
+
+class _PrivacyFilterDetectorConfig(BaseModel):
+    """Shared config for the two openai/privacy-filter backends; they differ only in
+    runtime knobs (ONNX variant vs torch dtype/cache)."""
+
     enabled: bool = False
     model_name: str = "openai/privacy-filter"
     # Pin a Hugging Face revision (tag or commit sha) so a rewritten model repo
     # cannot silently swap the weights this proxy runs. None = latest.
     revision: str | None = None
-    # Off by default: a PII proxy must not execute code shipped inside a model
-    # repo unless the operator explicitly opts in for a custom-code model.
+    # Off by default: a PII proxy must not execute code shipped inside a model repo
+    # unless the operator explicitly opts in for a custom-code model.
     trust_remote_code: bool = False
     device: str = "auto"
+    score_threshold: float = 0.5
+    label_mapping: dict[str, str] = Field(
+        default_factory=lambda: dict(_PRIVACY_FILTER_LABELS)
+    )
+
+
+class MLModelDetectorConfig(_PrivacyFilterDetectorConfig):
     torch_dtype: str = "float16"
-    score_threshold: float = 0.5
     batch_size: int = 1
-    label_mapping: dict[str, str] = Field(default_factory=lambda: {
-        "private_person": "PERSON",
-        "private_email": "EMAIL_ADDRESS",
-        "private_phone": "PHONE_NUMBER",
-        "private_address": "LOCATION",
-        "private_date": "DATE_TIME",
-        "private_url": "URL",
-        "account_number": "FINANCIAL",
-        "secret": "SECRET",
-    })
 
 
-class OnnxDetectorConfig(BaseModel):
-    enabled: bool = False
-    model_name: str = "openai/privacy-filter"
-    # Pin a Hugging Face revision (tag or commit sha); None = latest.
-    revision: str | None = None
-    # Off by default; only the tokenizer loads from the repo and the default
-    # model needs no repo code.
-    trust_remote_code: bool = False
+class OnnxDetectorConfig(_PrivacyFilterDetectorConfig):
     onnx_variant: str = "q4f16"
-    device: str = "auto"
-    score_threshold: float = 0.5
     max_length: int = 128000
     cache_dir: str | None = None
-    label_mapping: dict[str, str] = Field(default_factory=lambda: {
-        "private_person": "PERSON",
-        "private_email": "EMAIL_ADDRESS",
-        "private_phone": "PHONE_NUMBER",
-        "private_date": "DATE_TIME",
-        "private_address": "LOCATION",
-        "private_url": "URL",
-        "account_number": "FINANCIAL",
-        "secret": "SECRET",
-    })
 
 
 class BertNERDetectorConfig(BaseModel):
