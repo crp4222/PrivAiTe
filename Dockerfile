@@ -25,6 +25,8 @@ EXPOSE 8400
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD curl -f http://localhost:8400/health || exit 1
 
-# config/privaite.yaml is the operator's own file (gitignored); a fresh clone
-# only has the example. Fall back to it so the image runs out of the box.
-CMD ["sh", "-c", "python -m privaite --config \"$([ -f /app/config/privaite.yaml ] && echo /app/config/privaite.yaml || echo /app/config/privaite.example.yaml)\""]
+# Config selection, in order: a mounted config/privaite.yaml wins; otherwise, if
+# OPENAI_API_KEY is set, the drop-in OpenAI config is used (docker run -e
+# OPENAI_API_KEY=... just works); otherwise the local Ollama example config, so
+# the image still boots out of the box.
+CMD ["sh", "-c", "if [ -f /app/config/privaite.yaml ]; then CFG=/app/config/privaite.yaml; elif [ -n \"$OPENAI_API_KEY\" ]; then CFG=/app/config/privaite.openai.yaml; else CFG=/app/config/privaite.example.yaml; fi; exec python -m privaite --config \"$CFG\""]
