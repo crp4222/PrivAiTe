@@ -47,6 +47,9 @@ docker run -d -p 8400:8400 \
   ghcr.io/crp4222/privaite
 ```
 
+The image is published to both `ghcr.io/crp4222/privaite` and Docker Hub
+(`crp4222/privaite`); either works in the commands above.
+
 A minimal `privaite.yaml`:
 
 ```yaml

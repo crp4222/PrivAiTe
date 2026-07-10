@@ -117,6 +117,8 @@ docker run -d -p 8400:8400 \
   ghcr.io/crp4222/privaite
 ```
 
+Also on Docker Hub as `crp4222/privaite`.
+
 Or pip:
 
 ```bash

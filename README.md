@@ -35,6 +35,8 @@ docker run -d -p 8400:8400 \
   ghcr.io/crp4222/privaite
 ```
 
+The same image is on Docker Hub too: swap the last line for `crp4222/privaite` if you prefer pulling from there.
+
 Two keys, two roles: `PRIVAITE_API_KEYS` is the key your client sends to PrivAiTe (pick any value); `OPENAI_API_KEY` is your real provider key, which stays in the container and never reaches your client. This exposes `gpt-4o-mini` and `gpt-4o`; for any other provider (Ollama, Azure, anything LiteLLM supports), mount a config: [configuration](docs/configuration.md#docker-with-a-custom-config).
 
 **pip:**
