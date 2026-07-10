@@ -1,12 +1,4 @@
-# PrivAiTe landing copy
-
-Draft copy for the project website. Plain language on purpose. No compliance
-promises, no "anonymized" claims, because the output is pseudonymized and that
-distinction matters legally.
-
----
-
-## Hero
+# PrivAiTe
 
 **Keep personal data out of your LLM calls.**
 
@@ -17,6 +9,13 @@ message text, tool-call arguments, and multimodal content, which is where most
 tools stop looking. Nothing phones home.
 
 [Get started](#install) | [See the benchmark](https://github.com/crp4222/privaite-bench) | [GitHub](https://github.com/crp4222/PrivAiTe)
+
+```
+You type: "Je m'appelle Marie Dupont, email marie@acme.com"
+LLM sees: "Je m'appelle <PERSON_1>, email <EMAIL_ADDRESS_1>"
+LLM says: "Bonjour <PERSON_1>, votre email <EMAIL_ADDRESS_1> est noté."
+You  see: "Bonjour Marie Dupont, votre email marie@acme.com est noté."
+```
 
 ---
 
@@ -44,8 +43,11 @@ variables where secrets live. That is the gap PrivAiTe was built for.
 3. On the way back, it restores the real values in the response, including inside
    tool-call arguments, so your application receives what it expected.
 
-The model only ever sees the stand-ins. You can prove it: PrivAiTe ships a
-benchmark and the engine is open source, so you can read exactly what it sends.
+The model only ever sees the stand-ins. You can prove it on your own machine in
+90 seconds: a [runnable demo](https://github.com/crp4222/PrivAiTe/blob/main/examples/demo_tool_call_leak.py)
+starts a fake provider that records what it receives, then sends the same
+agent request without and with PrivAiTe. The engine is open source, so you can
+also read exactly what it sends.
 
 ---
 
@@ -71,11 +73,13 @@ We built a comparison on real documents, not toy examples. The corpus is 120 rea
 documents whose personal data was labeled independently, then cross-checked. Each
 solution runs on the same data.
 
-The headline: on the same personal data placed inside a tool-call argument, a
-vanilla Presidio setup (the engine behind several drop-in tools) leaves about 99
-percent of it exposed, because it never looks there. PrivAiTe removes everything
-it detects from the tool call. On plain text recall, the full PrivAiTe preset
-leads the field.
+The headline: on the same personal data placed inside a tool-call argument, the
+text-only guardrails measured (LiteLLM's built-in Presidio guardrail, LLM Guard)
+leave 100 percent of it exposed, because they never look there, even for values
+they detect and scrub in plain text. PrivAiTe removes everything it detects from
+the tool call; end to end its tool-call leak equals its detection misses (about
+15 percent on this corpus), the same misses plain text has. On plain-text recall,
+the full PrivAiTe preset leads the field.
 
 The benchmark is public and reproducible. Run it yourself.
 
@@ -95,22 +99,34 @@ The benchmark is public and reproducible. Run it yourself.
 ## Presets
 
 - **onnx (default).** The full suite. Detects classic personal data plus secrets
-  and passwords. Downloads a small model on first run.
-- **light.** Faster, zero false positives, classic personal data only. Good when
-  you want the lowest latency and no model download.
+  and passwords. Downloads a small model on first run (baked into the Docker
+  image).
+- **light.** Faster, very few false positives, classic personal data only. Good
+  when you want the lowest latency and no model download.
 
 ---
 
 ## Install
 
+Docker, model baked in, runs offline:
+
+```bash
+docker run -d -p 8400:8400 \
+  -e PRIVAITE_API_KEYS=change-me \
+  -e OPENAI_API_KEY=sk-... \
+  ghcr.io/crp4222/privaite
+```
+
+Or pip:
+
 ```bash
 pip install privaite
 python -m spacy download en_core_web_lg
-python -m privaite
 ```
 
-Then point your client at `http://localhost:8400/v1`. Docker and a full config
-reference are in the README.
+Then point your client at `http://localhost:8400/v1` with the key you chose. The
+full quickstart, config reference, and threat model are in the
+[README](https://github.com/crp4222/PrivAiTe#readme).
 
 ---
 
