@@ -1,0 +1,33 @@
+# Weekly dependency audit: install the package (all extras) at the newest
+# versions the pyproject floors allow, then check that resolution against the
+# OSV/PyPI advisory databases with pip-audit. A red run means a floor lets pip
+# resolve a version with a known CVE: raise the floor past the fixed release
+# (see pyproject.toml comments for the ones already raised). This is the
+# deliberate counterpart to Dependabot: it signals, a human bumps.
+name: Dependency audit
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Monday 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  pip-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install package with all extras (freshest allowed resolution)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[ml,gliner,dev]"
+
+      - name: Audit resolved environment
+        run: |
+          pip install pip-audit
+          pip-audit --skip-editable
