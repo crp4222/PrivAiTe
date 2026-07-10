@@ -36,3 +36,13 @@ updates:
       github-actions:
         patterns:
           - "*"
+
+  # Docker base image digest in the Dockerfile.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "chore(deps)"

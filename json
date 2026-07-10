@@ -1,0 +1,310 @@
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ SkillSpector Security Report                                                 │
+╰────────────────────────────────── v2.3.11 ───────────────────────────────────╯
+
+Skill: unknown
+Source: /Users/elie/GIT/PrivAiTe
+Scanned: 2026-07-10 13:00:40 UTC
+
+
+        Risk Assessment         
+ Score           100/100        
+ Severity        CRITICAL       
+ Recommendation  DO NOT INSTALL 
+
+
+                               Components (164)                               
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━┓
+┃ File                                      ┃ Type     ┃  Lines ┃ Executable ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━┩
+│ .claude/settings.local.json               │ json     │     19 │ No         │
+│ .github/ISSUE_TEMPLATE/bug_report.md      │ markdown │     33 │ No         │
+│ .github/ISSUE_TEMPLATE/config.yml         │ yaml     │      5 │ No         │
+│ .github/ISSUE_TEMPLATE/feature_request.md │ markdown │     15 │ No         │
+│ .github/ISSUE_TEMPLATE/report_a_leak.md   │ markdown │     28 │ No         │
+│ .github/dependabot.yml                    │ yaml     │     38 │ No         │
+│ .github/workflows/ci.yml                  │ yaml     │     72 │ No         │
+│ .github/workflows/docker-publish.yml      │ yaml     │     49 │ No         │
+│ .github/workflows/publish.yml             │ yaml     │     47 │ No         │
+│ .mypy_cache/3.12/cache.0.db               │ other    │ 141218 │ No         │
+│ .mypy_cache/3.12/cache.1.db               │ other    │ 141101 │ No         │
+│ .mypy_cache/3.12/cache.10.db              │ other    │ 139828 │ No         │
+│ .mypy_cache/3.12/cache.11.db              │ other    │ 158596 │ No         │
+│ .mypy_cache/3.12/cache.12.db              │ other    │ 146365 │ No         │
+│ .mypy_cache/3.12/cache.13.db              │ other    │ 127203 │ No         │
+│ ... and 149 more                          │          │        │            │
+└───────────────────────────────────────────┴──────────┴────────┴────────────┘
+
+
+Issues (42)
+
+  MEDIUM: AST4 - subprocess module call...
+    Location: examples/demo_tool_call_leak.py:226–232
+    Confidence: 70%
+    Remediation: Use subprocess.run() with shell=False and an explicit argument 
+list. Validate all inputs and avoid passing user-controlled data to commands....
+
+  LOW: AST7 - Dynamic attribute access via getattr()...
+    Location: integrations/litellm/privaite_guardrail.py:46
+    Confidence: 50%
+    Remediation: Replace dynamic getattr() with explicit attribute access or a 
+dictionary lookup with an allowlist of permitted attributes....
+
+  LOW: AST7 - Dynamic attribute access via getattr()...
+    Location: integrations/litellm/privaite_guardrail.py:301
+    Confidence: 50%
+    Remediation: Replace dynamic getattr() with explicit attribute access or a 
+dictionary lookup with an allowlist of permitted attributes....
+
+  LOW: AST7 - Dynamic attribute access via getattr()...
+    Location: integrations/litellm/privaite_guardrail.py:364
+    Confidence: 50%
+    Remediation: Replace dynamic getattr() with explicit attribute access or a 
+dictionary lookup with an allowlist of permitted attributes....
+
+  LOW: AST7 - Dynamic attribute access via getattr()...
+    Location: privaite/utils/logging.py:44
+    Confidence: 50%
+    Remediation: Replace dynamic getattr() with explicit attribute access or a 
+dictionary lookup with an allowlist of permitted attributes....
+
+  MEDIUM: RP1 - Docker image referenced without tag or digest: 'docker run -...
+    Location: CHANGELOG.md:32
+    Confidence: 75%
+    Remediation: Pin the image: image:tag or image@sha256:abc123...
+
+  MEDIUM: RP1 - Docker image referenced without tag or digest: 'docker run -...
+    Location: Dockerfile:29
+    Confidence: 75%
+    Remediation: Pin the image: image:tag or image@sha256:abc123...
+
+  MEDIUM: RP1 - Docker image referenced without tag or digest: 'docker run -...
+    Location: README.md:32
+    Confidence: 75%
+    Remediation: Pin the image: image:tag or image@sha256:abc123...
+
+  MEDIUM: RP1 - Docker image referenced without tag or digest: 'docker run -...
+    Location: docs/configuration.md:34
+    Confidence: 75%
+    Remediation: Pin the image: image:tag or image@sha256:abc123...
+
+  MEDIUM: RP1 - Docker image referenced without tag or digest: 'docker run -...
+    Location: docs/index.md:114
+    Confidence: 75%
+    Remediation: Pin the image: image:tag or image@sha256:abc123...
+
+  MEDIUM: RP1 - Docker image referenced without tag or digest: 'docker run g...
+    Location: llms.txt:5
+    Confidence: 75%
+    Remediation: Pin the image: image:tag or image@sha256:abc123...
+
+  MEDIUM: RP1 - Docker image referenced without tag or digest: 'Docker
+
+Pull...
+    Location: privaite.egg-info/PKG-INFO:296
+    Confidence: 75%
+    Remediation: Pin the image: image:tag or image@sha256:abc123...
+
+  MEDIUM: RP1 - Docker image referenced without tag or digest: 'docker run -...
+    Location: privaite.egg-info/PKG-INFO:304
+    Confidence: 75%
+    Remediation: Pin the image: image:tag or image@sha256:abc123...
+
+  MEDIUM: RP1 - Docker image referenced without tag or digest: 'docker run -...
+    Location: privaite.egg-info/PKG-INFO:319
+    Confidence: 75%
+    Remediation: Pin the image: image:tag or image@sha256:abc123...
+
+  MEDIUM: E1 - External Transmission...
+    Location: examples/curl_test.sh:17
+    Confidence: 70%
+    Remediation: Verify the destination URL is trusted and necessary. Remove or 
+replace with documented APIs. Ensure no secrets, tokens, or PII are 
+transmitted....
+
+  MEDIUM: E1 - External Transmission...
+    Location: examples/curl_test.sh:29
+    Confidence: 70%
+    Remediation: Verify the destination URL is trusted and necessary. Remove or 
+replace with documented APIs. Ensure no secrets, tokens, or PII are 
+transmitted....
+
+  MEDIUM: E1 - External Transmission...
+    Location: llms-full.txt:190
+    Confidence: 60%
+    Remediation: Verify the destination URL is trusted and necessary. Remove or 
+replace with documented APIs. Ensure no secrets, tokens, or PII are 
+transmitted....
+
+  HIGH: E2 - Env Variable Harvesting...
+    Location: privaite/utils/security.py:8
+    Confidence: 70%
+    Remediation: Avoid reading sensitive env vars (API keys, tokens) unless 
+strictly required. Use secrets managers or secure config. Never log or transmit 
+credentials...
+
+  HIGH: E2 - Env Variable Harvesting...
+    Location: tests/test_api/test_auth.py:42
+    Confidence: 80%
+    Remediation: Avoid reading sensitive env vars (API keys, tokens) unless 
+strictly required. Use secrets managers or secure config. Never log or transmit 
+credentials...
+
+  HIGH: E2 - Env Variable Harvesting...
+    Location: tests/test_config/test_loader.py:76
+    Confidence: 80%
+    Remediation: Avoid reading sensitive env vars (API keys, tokens) unless 
+strictly required. Use secrets managers or secure config. Never log or transmit 
+credentials...
+
+  HIGH: E2 - Env Variable Harvesting...
+    Location: tests/test_config/test_loader.py:100
+    Confidence: 80%
+    Remediation: Avoid reading sensitive env vars (API keys, tokens) unless 
+strictly required. Use secrets managers or secure config. Never log or transmit 
+credentials...
+
+  HIGH: E2 - Env Variable Harvesting...
+    Location: tests/test_pii/test_integration.py:6
+    Confidence: 80%
+    Remediation: Avoid reading sensitive env vars (API keys, tokens) unless 
+strictly required. Use secrets managers or secure config. Never log or transmit 
+credentials...
+
+  LOW: EA3 - Scope Creep...
+    Location: LICENSE:20
+    Confidence: 70%
+    Remediation: Limit the skill's scope to its documented purpose. Remove 
+instructions that enable the agent to perform actions outside its stated 
+functionality....
+
+  LOW: EA3 - Scope Creep...
+    Location: LICENSE:24
+    Confidence: 70%
+    Remediation: Limit the skill's scope to its documented purpose. Remove 
+instructions that enable the agent to perform actions outside its stated 
+functionality....
+
+  HIGH: PE3 - Credential Access...
+    Location: docker-compose.yml:7
+    Confidence: 60%
+    Remediation: Remove references to credential paths. Use environment 
+variables or secrets managers. For docs, use placeholder paths (e.g., 
+/path/to/config). Never l...
+
+  HIGH: PE3 - Credential Access...
+    Location: docker-compose.yml:9
+    Confidence: 60%
+    Remediation: Remove references to credential paths. Use environment 
+variables or secrets managers. For docs, use placeholder paths (e.g., 
+/path/to/config). Never l...
+
+  MEDIUM: SSRF2 - Internal Network Request...
+    Location: examples/demo_tool_call_leak.py:191
+    Confidence: 70%
+    Remediation: Avoid requests to loopback/link-local/private hosts from skill 
+code. If internal access is intended, document it and validate the target 
+against an al...
+
+  MEDIUM: SSRF2 - Internal Network Request...
+    Location: examples/demo_tool_call_leak.py:236
+    Confidence: 70%
+    Remediation: Avoid requests to loopback/link-local/private hosts from skill 
+code. If internal access is intended, document it and validate the target 
+against an al...
+
+  HIGH: SC2 - External Script Fetching...
+    Location: examples/curl_test.sh:2
+    Confidence: 90%
+    Remediation: Avoid downloading and executing remote scripts. Use trusted 
+packages from PyPI/npm. If remote fetch is required, verify checksums and use 
+HTTPS....
+
+  HIGH: SC2 - External Script Fetching...
+    Location: examples/curl_test.sh:17
+    Confidence: 90%
+    Remediation: Avoid downloading and executing remote scripts. Use trusted 
+packages from PyPI/npm. If remote fetch is required, verify checksums and use 
+HTTPS....
+
+  HIGH: SC4 - Known Vulnerable Dependency: fastapi — 3 advisory(ies): CVE-...
+    Location: pyproject.toml:32
+    Confidence: 80%
+    Remediation: Update the dependency to a patched version that addresses the 
+known CVE. Check OSV (osv.dev) or NVD for details on the vulnerability....
+
+  HIGH: SC4 - Known Vulnerable Dependency: uvicorn — 4 advisory(ies): CVE-...
+    Location: pyproject.toml:33
+    Confidence: 80%
+    Remediation: Update the dependency to a patched version that addresses the 
+known CVE. Check OSV (osv.dev) or NVD for details on the vulnerability....
+
+  CRITICAL: SC4 - Known Vulnerable Dependency: litellm — 10 advisory(ies): 
+CVE...
+    Location: pyproject.toml:35
+    Confidence: 90%
+    Remediation: Update the dependency to a patched version that addresses the 
+known CVE. Check OSV (osv.dev) or NVD for details on the vulnerability....
+
+  HIGH: SC4 - Known Vulnerable Dependency: pydantic — 4 advisory(ies): CVE...
+    Location: pyproject.toml:36
+    Confidence: 80%
+    Remediation: Update the dependency to a patched version that addresses the 
+known CVE. Check OSV (osv.dev) or NVD for details on the vulnerability....
+
+  CRITICAL: SC4 - Known Vulnerable Dependency: pyyaml — 8 advisory(ies): 
+CVE-2...
+    Location: pyproject.toml:37
+    Confidence: 90%
+    Remediation: Update the dependency to a patched version that addresses the 
+known CVE. Check OSV (osv.dev) or NVD for details on the vulnerability....
+
+  LOW: SC4 - Known Vulnerable Dependency: python-dotenv — 1 advisory(ies)...
+    Location: pyproject.toml:38
+    Confidence: 60%
+    Remediation: Update the dependency to a patched version that addresses the 
+known CVE. Check OSV (osv.dev) or NVD for details on the vulnerability....
+
+  CRITICAL: SC4 - Known Vulnerable Dependency: httpx — 2 advisory(ies): 
+CVE-20...
+    Location: pyproject.toml:39
+    Confidence: 90%
+    Remediation: Update the dependency to a patched version that addresses the 
+known CVE. Check OSV (osv.dev) or NVD for details on the vulnerability....
+
+  CRITICAL: SC4 - Known Vulnerable Dependency: transformers — 10 
+advisory(ies)...
+    Location: pyproject.toml:44
+    Confidence: 90%
+    Remediation: Update the dependency to a patched version that addresses the 
+known CVE. Check OSV (osv.dev) or NVD for details on the vulnerability....
+
+  CRITICAL: SC4 - Known Vulnerable Dependency: torch — 10 advisory(ies): 
+CVE-2...
+    Location: pyproject.toml:54
+    Confidence: 90%
+    Remediation: Update the dependency to a patched version that addresses the 
+known CVE. Check OSV (osv.dev) or NVD for details on the vulnerability....
+
+  CRITICAL: SC4 - Known Vulnerable Dependency: torch — 10 advisory(ies): 
+CVE-2...
+    Location: pyproject.toml:54
+    Confidence: 90%
+    Remediation: Update the dependency to a patched version that addresses the 
+known CVE. Check OSV (osv.dev) or NVD for details on the vulnerability....
+
+  HIGH: SC4 - Known Vulnerable Dependency: pytest — 2 advisory(ies): CVE-2...
+    Location: pyproject.toml:64
+    Confidence: 80%
+    Remediation: Update the dependency to a patched version that addresses the 
+known CVE. Check OSV (osv.dev) or NVD for details on the vulnerability....
+
+  CRITICAL: SC4 - Known Vulnerable Dependency: setuptools — 8 advisory(ies): 
+C...
+    Location: pyproject.toml:89
+    Confidence: 90%
+    Remediation: Update the dependency to a patched version that addresses the 
+known CVE. Check OSV (osv.dev) or NVD for details on the vulnerability....
+
+Executable scripts: Yes

@@ -2,9 +2,9 @@
 title: PrivAiTe PII Anonymizer
 author: crp4222
 author_url: https://github.com/crp4222/PrivAiTe
-version: 0.1.6
+version: 0.1.7
 required_open_webui_version: 0.5.0
-requirements: privaite>=0.2.12
+requirements: privaite>=0.3.1
 description: Anonymize or block PII (text, tool calls, multimodal) before it reaches the provider.
 """
 

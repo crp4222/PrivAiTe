@@ -8,7 +8,7 @@ text.
 ## Install
 
 1. Make sure `privaite` is available to Open WebUI. The filter declares
-   `requirements: privaite>=0.2.12`, so Open WebUI installs it automatically from
+   `requirements: privaite>=0.3.1`, so Open WebUI installs it automatically from
    PyPI. You can also install it into the Open WebUI environment yourself
    (`pip install privaite`).
 2. In Open WebUI: Admin Panel, Functions, "+", paste the contents of

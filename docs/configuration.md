@@ -4,6 +4,16 @@ Everything below goes in your `privaite.yaml` (`python -m privaite --config priv
 The [README quick start](https://github.com/crp4222/PrivAiTe#quick-start) has the minimal
 working file; this page covers every knob.
 
+## Server
+
+```yaml
+server:
+  host: "0.0.0.0"   # default
+  port: 8400        # default
+```
+
+Both can also be overridden at launch: `python -m privaite --config privaite.yaml --host 127.0.0.1 --port 8452`.
+
 ## LLM providers
 
 Any [LiteLLM-supported provider](https://docs.litellm.ai/docs/providers) works:
@@ -109,10 +119,13 @@ pii:
 pii:
   detectors:
     presidio:
-      languages: ["fr", "en"]  # Add "de", "es", etc.
+      languages: ["fr", "en"]  # the default; add "de", "es", etc.
 ```
 
-Each language needs its spaCy model: `python -m spacy download de_core_news_md`
+Each language needs its spaCy model: `python -m spacy download de_core_news_md`.
+The default list is `["fr", "en"]`, so a fresh install fetches `fr_core_news_md`
+on first boot if it is missing; set `languages: ["en"]` for an English-only,
+no-surprise-download setup.
 
 ## Detector model revisions
 

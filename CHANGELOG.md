@@ -4,9 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.1] - 2026-07-10
 
 ### Security
+- Dependency floors raised past known CVE fixes (litellm 1.84, pydantic 2.4,
+  transformers 5.3, torch 2.6, setuptools 78.1.1); the Docker base image is
+  digest-pinned, with Dependabot keeping the digest and floors current.
 - **Failure logs can no longer serialize PII from detector/anonymizer exceptions.**
   Unexpected PII-processing and streaming failures now cross request boundaries as
   a safe, non-chained error; the proxy's JSON and text formatters omit exception

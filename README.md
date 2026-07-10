@@ -41,7 +41,8 @@ Two keys, two roles: `PRIVAITE_API_KEYS` is the key your client sends to PrivAiT
 
 ```bash
 pip install privaite
-python -m spacy download en_core_web_lg   # one spaCy model per configured language
+# One spaCy model per scanned language; the default preset scans EN + FR.
+python -m spacy download en_core_web_lg && python -m spacy download fr_core_news_md
 
 cat > privaite.yaml <<'EOF'
 providers:
