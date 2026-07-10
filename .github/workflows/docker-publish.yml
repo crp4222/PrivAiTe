@@ -12,8 +12,8 @@ jobs:
       contents: read
       packages: write
     env:
-      # Docker Hub mirroring activates itself once the two secrets exist
-      # (DOCKERHUB_USERNAME + DOCKERHUB_TOKEN); until then the steps are skipped.
+      # Docker Hub publishing activates itself once the two secrets exist
+      # (DOCKERHUB_USERNAME + DOCKERHUB_TOKEN); until then buildx pushes to ghcr only.
       HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v7
@@ -31,11 +31,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Docker Hub
+        if: env.HAS_DOCKERHUB == 'true'
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Docker metadata
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/crp4222/privaite
+          images: |
+            ghcr.io/crp4222/privaite
+            ${{ env.HAS_DOCKERHUB == 'true' && 'docker.io/crp4222/privaite' || '' }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -51,23 +60,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Log in to Docker Hub
-        if: env.HAS_DOCKERHUB == 'true'
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Mirror manifests to Docker Hub
-        if: env.HAS_DOCKERHUB == 'true'
-        # Copy the freshly pushed ghcr manifest lists (multi-arch, incl. provenance)
-        # to docker.io with the same tags: no rebuild, identical digests.
-        run: |
-          tags='${{ steps.meta.outputs.tags }}'
-          src=$(echo "$tags" | head -n1)
-          create_args=$(echo "$tags" | sed 's|ghcr.io/|docker.io/|' | sed 's/^/-t /' | tr '\n' ' ')
-          docker buildx imagetools create $create_args "$src"
 
       - name: Sync Docker Hub description
         if: env.HAS_DOCKERHUB == 'true'
