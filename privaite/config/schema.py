@@ -49,6 +49,14 @@ _PRIVACY_FILTER_LABELS = {
     "secret": "SECRET",
 }
 
+# Immutable Hugging Face commits for the built-in detector models.  Keeping the
+# defaults at commits rather than the moving `main` branch makes fresh installs
+# reproducible.  Operators replacing model_name must set revision to a commit
+# from that model's repository (or explicitly choose a mutable ref).
+_PRIVACY_FILTER_REVISION = "7ffa9a043d54d1be65afb281eddf0ffbe629385b"
+_BERT_NER_REVISION = "d1a3e8f13f8c3566299d95fcfc9a8d2382a9affc"
+_GLINER_PII_REVISION = "1fcf13e85f4eef5394e1fcd406cf2ca9ea82351d"
+
 
 class _PrivacyFilterDetectorConfig(BaseModel):
     """Shared config for the two openai/privacy-filter backends; they differ only in
@@ -56,17 +64,15 @@ class _PrivacyFilterDetectorConfig(BaseModel):
 
     enabled: bool = False
     model_name: str = "openai/privacy-filter"
-    # Pin a Hugging Face revision (tag or commit sha) so a rewritten model repo
-    # cannot silently swap the weights this proxy runs. None = latest.
-    revision: str | None = None
+    # The built-in model is pinned to an immutable commit. When model_name is
+    # changed, set its matching commit SHA too; None deliberately follows main.
+    revision: str | None = _PRIVACY_FILTER_REVISION
     # Off by default: a PII proxy must not execute code shipped inside a model repo
     # unless the operator explicitly opts in for a custom-code model.
     trust_remote_code: bool = False
     device: str = "auto"
     score_threshold: float = 0.5
-    label_mapping: dict[str, str] = Field(
-        default_factory=lambda: dict(_PRIVACY_FILTER_LABELS)
-    )
+    label_mapping: dict[str, str] = Field(default_factory=lambda: dict(_PRIVACY_FILTER_LABELS))
 
 
 class MLModelDetectorConfig(_PrivacyFilterDetectorConfig):
@@ -83,15 +89,17 @@ class OnnxDetectorConfig(_PrivacyFilterDetectorConfig):
 class BertNERDetectorConfig(BaseModel):
     enabled: bool = False
     model_name: str = "dslim/bert-base-NER"
-    # Pin a Hugging Face revision (tag or commit sha); None = latest.
-    revision: str | None = None
+    # The built-in model is pinned to an immutable commit; None follows main.
+    revision: str | None = _BERT_NER_REVISION
     device: str = "auto"
     score_threshold: float = 0.5
-    label_mapping: dict[str, str] = Field(default_factory=lambda: {
-        "PER": "PERSON",
-        "LOC": "LOCATION",
-        "ORG": "ORGANIZATION",
-    })
+    label_mapping: dict[str, str] = Field(
+        default_factory=lambda: {
+            "PER": "PERSON",
+            "LOC": "LOCATION",
+            "ORG": "ORGANIZATION",
+        }
+    )
 
 
 class GlinerDetectorConfig(BaseModel):
@@ -101,26 +109,48 @@ class GlinerDetectorConfig(BaseModel):
     # OOD cross-check in privaite-bench. Needs torch + the gliner package
     # (pip install 'privaite[gliner]'); it is not part of the onnxruntime floor.
     model_name: str = "urchade/gliner_multi_pii-v1"
-    # Pin a Hugging Face revision (tag or commit sha); None = latest.
-    revision: str | None = None
+    # The built-in model is pinned to an immutable commit; None follows main.
+    revision: str | None = _GLINER_PII_REVISION
     device: str = "auto"
     score_threshold: float = 0.5
     # GLiNER is label-conditioned: it only returns the labels asked for here.
-    labels: list[str] = Field(default_factory=lambda: [
-        "person", "first name", "last name", "email", "phone number", "address",
-        "social security number", "iban", "swift bic code", "credit card number",
-        "date of birth", "password", "ip address", "passport number",
-    ])
+    labels: list[str] = Field(
+        default_factory=lambda: [
+            "person",
+            "first name",
+            "last name",
+            "email",
+            "phone number",
+            "address",
+            "social security number",
+            "iban",
+            "swift bic code",
+            "credit card number",
+            "date of birth",
+            "password",
+            "ip address",
+            "passport number",
+        ]
+    )
     # Map each requested GLiNER label to a canonical PrivAiTe entity type.
-    label_mapping: dict[str, str] = Field(default_factory=lambda: {
-        "person": "PERSON", "first name": "PERSON", "last name": "PERSON",
-        "email": "EMAIL_ADDRESS", "phone number": "PHONE_NUMBER",
-        "address": "LOCATION", "social security number": "US_SSN",
-        "iban": "IBAN_CODE", "swift bic code": "FINANCIAL",
-        "credit card number": "CREDIT_CARD", "date of birth": "DATE_TIME",
-        "password": "SECRET", "ip address": "IP_ADDRESS",
-        "passport number": "US_PASSPORT",
-    })
+    label_mapping: dict[str, str] = Field(
+        default_factory=lambda: {
+            "person": "PERSON",
+            "first name": "PERSON",
+            "last name": "PERSON",
+            "email": "EMAIL_ADDRESS",
+            "phone number": "PHONE_NUMBER",
+            "address": "LOCATION",
+            "social security number": "US_SSN",
+            "iban": "IBAN_CODE",
+            "swift bic code": "FINANCIAL",
+            "credit card number": "CREDIT_CARD",
+            "date of birth": "DATE_TIME",
+            "password": "SECRET",
+            "ip address": "IP_ADDRESS",
+            "passport number": "US_PASSPORT",
+        }
+    )
 
 
 class DetectorsConfig(BaseModel):
@@ -173,8 +203,15 @@ class PassthroughConfig(BaseModel):
 # Presidio entity allowlist for the onnx/max presets: the checksummed/structured
 # types Presidio is strong at, leaving names/addresses/secrets to the ML model.
 _ONNX_PRESIDIO_ENTITIES = [
-    "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD",
-    "IBAN_CODE", "IP_ADDRESS", "DATE_TIME", "US_SSN", "UK_NHS",
+    "PERSON",
+    "EMAIL_ADDRESS",
+    "PHONE_NUMBER",
+    "CREDIT_CARD",
+    "IBAN_CODE",
+    "IP_ADDRESS",
+    "DATE_TIME",
+    "US_SSN",
+    "UK_NHS",
 ]
 
 

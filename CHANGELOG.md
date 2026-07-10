@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+- **Failure logs can no longer serialize PII from detector/anonymizer exceptions.**
+  Unexpected PII-processing and streaming failures now cross request boundaries as
+  a safe, non-chained error; the proxy's JSON and text formatters omit exception
+  tracebacks, which third-party libraries may populate with inspected text.
+- Built-in Hugging Face detector models are pinned to immutable commits by
+  default, including the Docker image pre-download path. Fresh installs no
+  longer follow a mutable model branch unless the operator explicitly sets
+  `revision: null` or another ref.
+
+### Fixed
+- Open WebUI now restores placeholders inside structured `function_call`
+  output-item arguments, not only chat-shaped tool calls and text parts.
+
+### Changed
+- CI and the PyPI publish workflow enforce `ruff format --check`; the repository
+  is normalized with the pinned Ruff formatter version.
+
 ## [0.3.0] - 2026-07-09
 
 ### Added

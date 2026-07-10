@@ -76,7 +76,8 @@ async def embeddings(
 
     response, error = await call_provider(
         lambda: provider_router.embedding(model_alias=model, input_text=input_text, **kwargs),
-        model, logger,
+        model,
+        logger,
     )
     if error is not None:
         return error

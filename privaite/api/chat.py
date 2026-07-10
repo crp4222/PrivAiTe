@@ -40,9 +40,7 @@ async def _restore_message(msg: dict, pii_engine: Any, mapping: Any) -> None:
             msg[field] = await pii_engine.process_response(value, mapping)
     tool_calls = msg.get("tool_calls")
     if tool_calls:
-        msg["tool_calls"] = await pii_engine.process_response_tool_calls(
-            tool_calls, mapping
-        )
+        msg["tool_calls"] = await pii_engine.process_response_tool_calls(tool_calls, mapping)
     function_call = msg.get("function_call")
     if function_call:
         msg["function_call"] = await pii_engine.process_response_function_call(
@@ -90,21 +88,19 @@ async def chat_completions(
             lambda s: StreamingHandler.stream_response(
                 litellm_stream=s, mapping=mapping, deanonymizer_config=deanon_config
             ),
-            model, logger,
+            model,
+            logger,
         )
 
     response, error = await call_provider(
         lambda: provider_router.completion(model_alias=model, messages=messages, **kwargs),
-        model, logger,
+        model,
+        logger,
     )
     if error is not None:
         return error
 
-    if (
-        mapping
-        and config.pii.deanonymization.enabled
-        and pii_engine is not None
-    ):
+    if mapping and config.pii.deanonymization.enabled and pii_engine is not None:
         response_dict = dump_response(response)
         for choice in response_dict.get("choices", []):
             await _restore_message(choice.get("message", {}), pii_engine, mapping)

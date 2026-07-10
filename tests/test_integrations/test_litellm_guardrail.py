@@ -8,8 +8,7 @@ from pathlib import Path
 import pytest
 
 GUARDRAIL_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "integrations" / "litellm" / "privaite_guardrail.py"
+    Path(__file__).resolve().parents[2] / "integrations" / "litellm" / "privaite_guardrail.py"
 )
 
 
@@ -33,11 +32,22 @@ async def test_pre_call_anonymizes_text_and_tool_call_args():
     data = {
         "messages": [
             {"role": "user", "content": "I am Marie Dupont, email marie.dupont@acme.com"},
-            {"role": "assistant", "content": None, "tool_calls": [
-                {"id": "c1", "type": "function", "function": {
-                    "name": "save",
-                    "arguments": json.dumps(
-                        {"name": "Marie Dupont", "email": "marie.dupont@acme.com"})}}]},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {
+                            "name": "save",
+                            "arguments": json.dumps(
+                                {"name": "Marie Dupont", "email": "marie.dupont@acme.com"}
+                            ),
+                        },
+                    }
+                ],
+            },
         ]
     }
     data = await gr.async_pre_call_hook(None, None, data, "completion")
@@ -68,9 +78,9 @@ async def test_pre_call_clears_client_supplied_map():
 @pytest.mark.asyncio
 async def test_post_call_restores_text_and_tool_call_args():
     gr = _guardrail()
-    data = {"messages": [
-        {"role": "user", "content": "I am Marie Dupont, email marie.dupont@acme.com"}
-    ]}
+    data = {
+        "messages": [{"role": "user", "content": "I am Marie Dupont, email marie.dupont@acme.com"}]
+    }
     data = await gr.async_pre_call_hook(None, None, data, "completion")
     fakes = data["metadata"]["privaite_map"]
     person = next(f for f, o in fakes.items() if o == "Marie Dupont")
@@ -79,9 +89,13 @@ async def test_post_call_restores_text_and_tool_call_args():
     # the model only ever saw the placeholders, so it echoes them back
     message = types.SimpleNamespace(
         content=f"Noted {person} at {email}",
-        tool_calls=[types.SimpleNamespace(
-            function=types.SimpleNamespace(
-                arguments=json.dumps({"name": person, "email": email})))],
+        tool_calls=[
+            types.SimpleNamespace(
+                function=types.SimpleNamespace(
+                    arguments=json.dumps({"name": person, "email": email})
+                )
+            )
+        ],
         function_call=None,
     )
     response = types.SimpleNamespace(choices=[types.SimpleNamespace(message=message)])
@@ -94,6 +108,35 @@ async def test_post_call_restores_text_and_tool_call_args():
     assert "marie.dupont@acme.com" in restored
     assert "Marie Dupont" in restored_args
     assert "marie.dupont@acme.com" in restored_args
+
+
+@pytest.mark.asyncio
+async def test_post_call_restores_reasoning_and_legacy_function_call_arguments():
+    # Non-streaming restoration has to cover the same fields as the proxy: the
+    # model can echo placeholders in a reasoning trace or in legacy function
+    # calls just as easily as in content/tool_calls.
+    gr = _guardrail()
+    data = {"messages": [{"role": "user", "content": "I am Marie Dupont"}]}
+    data = await gr.async_pre_call_hook(None, None, data, "completion")
+    fakes = data["metadata"]["privaite_map"]
+    person = next(fake for fake, original in fakes.items() if original == "Marie Dupont")
+
+    message = types.SimpleNamespace(
+        content=f"Hello {person}",
+        reasoning_content=f"Considering {person}",
+        reasoning=f"Checked {person}",
+        tool_calls=None,
+        function_call=types.SimpleNamespace(arguments=json.dumps({"recipient": person})),
+    )
+    response = types.SimpleNamespace(choices=[types.SimpleNamespace(message=message)])
+
+    out = await gr.async_post_call_success_hook(data, None, response)
+    restored = out.choices[0].message
+    assert restored.content == "Hello Marie Dupont"
+    assert restored.reasoning_content == "Considering Marie Dupont"
+    assert restored.reasoning == "Checked Marie Dupont"
+    assert json.loads(restored.function_call.arguments) == {"recipient": "Marie Dupont"}
+    assert "privaite_map" not in data["metadata"]
 
 
 def test_event_hook_forces_both_pre_and_post():
@@ -110,9 +153,7 @@ def test_event_hook_forces_both_pre_and_post():
 @pytest.mark.asyncio
 async def test_pre_call_mutates_messages_in_place_and_post_call_pops_map():
     gr = _guardrail()
-    messages = [
-        {"role": "user", "content": "I am Marie Dupont, email marie.dupont@acme.com"}
-    ]
+    messages = [{"role": "user", "content": "I am Marie Dupont, email marie.dupont@acme.com"}]
     data = {"messages": messages}
     data = await gr.async_pre_call_hook(None, None, data, "completion")
 
@@ -126,8 +167,11 @@ async def test_pre_call_mutates_messages_in_place_and_post_call_pops_map():
     # be persisted to spend logs
     assert "privaite_map" in data["metadata"]
     response = types.SimpleNamespace(
-        choices=[types.SimpleNamespace(message=types.SimpleNamespace(
-            content="ok", tool_calls=None, function_call=None))]
+        choices=[
+            types.SimpleNamespace(
+                message=types.SimpleNamespace(content="ok", tool_calls=None, function_call=None)
+            )
+        ]
     )
     await gr.async_post_call_success_hook(data, None, response)
     assert "privaite_map" not in data["metadata"]
@@ -136,9 +180,7 @@ async def test_pre_call_mutates_messages_in_place_and_post_call_pops_map():
 @pytest.mark.asyncio
 async def test_streaming_restores_tool_call_arguments():
     gr = _guardrail()
-    data = {"messages": [
-        {"role": "user", "content": "email marie.dupont@acme.com"}
-    ]}
+    data = {"messages": [{"role": "user", "content": "email marie.dupont@acme.com"}]}
     data = await gr.async_pre_call_hook(None, None, data, "completion")
     fakes = data["metadata"]["privaite_map"]
     email = next(f for f, o in fakes.items() if o == "marie.dupont@acme.com")
@@ -148,14 +190,23 @@ async def test_streaming_restores_tool_call_arguments():
     part1, part2 = email[:mid], email[mid:]
 
     def _chunk(args, finish=None):
-        return types.SimpleNamespace(choices=[types.SimpleNamespace(
-            index=0,
-            delta=types.SimpleNamespace(
-                content=None,
-                tool_calls=[types.SimpleNamespace(
-                    index=0, function=types.SimpleNamespace(arguments=args))],
-                function_call=None),
-            finish_reason=finish)])
+        return types.SimpleNamespace(
+            choices=[
+                types.SimpleNamespace(
+                    index=0,
+                    delta=types.SimpleNamespace(
+                        content=None,
+                        tool_calls=[
+                            types.SimpleNamespace(
+                                index=0, function=types.SimpleNamespace(arguments=args)
+                            )
+                        ],
+                        function_call=None,
+                    ),
+                    finish_reason=finish,
+                )
+            ]
+        )
 
     async def _source():
         yield _chunk('{"email": "' + part1)
@@ -164,7 +215,7 @@ async def test_streaming_restores_tool_call_arguments():
     out = ""
     async for chunk in gr.async_post_call_streaming_iterator_hook(None, _source(), data):
         for choice in chunk.choices:
-            for tc in (choice.delta.tool_calls or []):
+            for tc in choice.delta.tool_calls or []:
                 if tc.function and tc.function.arguments:
                     out += tc.function.arguments
 
@@ -229,12 +280,17 @@ async def test_responses_mixed_input_list_is_fully_scanned():
     # string. The old homogeneity check wrapped the whole list as one content and
     # left the non-message items (and their PII) raw. Every item must be scanned.
     gr = _guardrail()
-    data = {"input": [
-        {"role": "user", "content": "I am Marie Dupont"},
-        {"type": "function_call_output", "call_id": "c1",
-         "output": "tool says carol.smith@example.net"},
-        "also reach paul@acme.org",
-    ]}
+    data = {
+        "input": [
+            {"role": "user", "content": "I am Marie Dupont"},
+            {
+                "type": "function_call_output",
+                "call_id": "c1",
+                "output": "tool says carol.smith@example.net",
+            },
+            "also reach paul@acme.org",
+        ]
+    }
     data = await gr.async_pre_call_hook(None, None, data, "aresponses")
     serialized = json.dumps(data["input"])
 
@@ -260,10 +316,42 @@ async def test_responses_input_text_content_parts_are_scanned():
 
 
 @pytest.mark.asyncio
+async def test_responses_function_call_arguments_are_anonymized_in_body_snapshot():
+    # LiteLLM's Responses request body is shallow-copied before hooks run. A
+    # function_call input item must therefore be scrubbed in the shared list as
+    # well as in data["input"], otherwise the provider snapshot leaks PII.
+    gr = _guardrail()
+    input_items = [
+        {
+            "type": "function_call",
+            "call_id": "c1",
+            "name": "lookup",
+            "arguments": json.dumps({"name": "Marie Dupont", "email": "marie.dupont@acme.com"}),
+        }
+    ]
+    body = {"input": input_items}
+    data = {"input": input_items, "proxy_server_request": {"body": body}}
+
+    out = await gr.async_pre_call_hook(None, None, data, "aresponses")
+    serialized = json.dumps(out["input"])
+    snapshot = json.dumps(body["input"])
+
+    assert "Marie Dupont" not in serialized
+    assert "marie.dupont@acme.com" not in serialized
+    assert "Marie Dupont" not in snapshot
+    assert "marie.dupont@acme.com" not in snapshot
+    assert out["input"][0]["type"] == "function_call"
+    assert out["input"][0]["call_id"] == "c1"
+    assert out["metadata"]["privaite_map"]
+
+
+@pytest.mark.asyncio
 async def test_responses_mixed_input_list_enforces_block_gate():
     module = _load()
     gr = module.PrivaiteGuardrail(
-        guardrail_name="privaite", preset="light", languages="en",
+        guardrail_name="privaite",
+        preset="light",
+        languages="en",
         block_entities=["EMAIL_ADDRESS"],
     )
     from fastapi import HTTPException
@@ -275,6 +363,67 @@ async def test_responses_mixed_input_list_enforces_block_gate():
 
 
 @pytest.mark.asyncio
+async def test_responses_function_call_arguments_enforce_block_gate():
+    # The hard policy gate must apply to Responses function_call arguments, not
+    # just tool-output text. A rejected hook returns no body to LiteLLM and never
+    # leaves a reversible map in metadata.
+    from fastapi import HTTPException
+
+    module = _load()
+    gr = module.PrivaiteGuardrail(
+        guardrail_name="privaite",
+        preset="light",
+        languages="en",
+        block_entities=["EMAIL_ADDRESS"],
+    )
+    data = {
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "c1",
+                "arguments": json.dumps({"email": "bob@leak.com"}),
+            }
+        ],
+        "metadata": {"privaite_map": {"<PERSON_1>": "attacker-controlled"}},
+    }
+
+    with pytest.raises(HTTPException) as ei:
+        await gr.async_pre_call_hook(None, None, data, "aresponses")
+
+    assert ei.value.status_code == 400
+    assert "bob@leak.com" not in str(ei.value.detail)
+    assert "privaite_map" not in data["metadata"]
+
+
+@pytest.mark.asyncio
+async def test_pre_call_failure_clears_map_and_aborts_before_returning_data(monkeypatch):
+    # A detector error has no allow-through path in the guardrail. The hook
+    # propagates it before returning a request to LiteLLM and discards any
+    # caller-supplied reversible map at the boundary.
+    gr = _guardrail()
+
+    class FailingEngine:
+        async def process_request(self, messages):
+            raise RuntimeError("detector unavailable")
+
+    async def _failing_engine_for(_languages):
+        return FailingEngine()
+
+    monkeypatch.setattr(gr, "_engine_for", _failing_engine_for)
+    messages = [{"role": "user", "content": "Marie Dupont"}]
+    data = {
+        "messages": messages,
+        "metadata": {"privaite_map": {"<PERSON_1>": "attacker-controlled"}},
+    }
+
+    with pytest.raises(RuntimeError, match="detector unavailable"):
+        await gr.async_pre_call_hook(None, None, data, "completion")
+
+    assert messages[0]["content"] == "Marie Dupont"
+    assert "privaite_map" not in data["metadata"]
+
+
+@pytest.mark.asyncio
 async def test_streaming_restores_reasoning_content():
     gr = _guardrail()
     data = {"messages": [{"role": "user", "content": "email marie.dupont@acme.com"}]}
@@ -283,12 +432,20 @@ async def test_streaming_restores_reasoning_content():
     email = next(f for f, o in fakes.items() if o == "marie.dupont@acme.com")
 
     def _chunk(reasoning, finish=None):
-        return types.SimpleNamespace(choices=[types.SimpleNamespace(
-            index=0,
-            delta=types.SimpleNamespace(
-                content=None, tool_calls=None, function_call=None,
-                reasoning_content=reasoning),
-            finish_reason=finish)])
+        return types.SimpleNamespace(
+            choices=[
+                types.SimpleNamespace(
+                    index=0,
+                    delta=types.SimpleNamespace(
+                        content=None,
+                        tool_calls=None,
+                        function_call=None,
+                        reasoning_content=reasoning,
+                    ),
+                    finish_reason=finish,
+                )
+            ]
+        )
 
     async def _source():
         yield _chunk("the user is " + email)
@@ -315,14 +472,23 @@ async def test_streaming_flushes_tool_tail_on_same_finish_chunk():
     mid = len(email) // 2
 
     def _chunk(args, finish=None):
-        return types.SimpleNamespace(choices=[types.SimpleNamespace(
-            index=0,
-            delta=types.SimpleNamespace(
-                content=None,
-                tool_calls=[types.SimpleNamespace(
-                    index=0, function=types.SimpleNamespace(arguments=args))],
-                function_call=None),
-            finish_reason=finish)])
+        return types.SimpleNamespace(
+            choices=[
+                types.SimpleNamespace(
+                    index=0,
+                    delta=types.SimpleNamespace(
+                        content=None,
+                        tool_calls=[
+                            types.SimpleNamespace(
+                                index=0, function=types.SimpleNamespace(arguments=args)
+                            )
+                        ],
+                        function_call=None,
+                    ),
+                    finish_reason=finish,
+                )
+            ]
+        )
 
     async def _source():
         yield _chunk('{"e": "' + email[:mid])
@@ -332,7 +498,7 @@ async def test_streaming_flushes_tool_tail_on_same_finish_chunk():
     out = ""
     async for chunk in gr.async_post_call_streaming_iterator_hook(None, _source(), data):
         for choice in chunk.choices:
-            for tc in (choice.delta.tool_calls or []):
+            for tc in choice.delta.tool_calls or []:
                 if tc.function and tc.function.arguments:
                     out += tc.function.arguments
     assert "marie.dupont@acme.com" in out
@@ -352,9 +518,7 @@ async def test_post_call_failure_hook_pops_map():
 
 def test_block_entities_parsed_from_string_and_list():
     module = _load()
-    g1 = module.PrivaiteGuardrail(
-        guardrail_name="p", block_entities="US_SSN, CREDIT_CARD"
-    )
+    g1 = module.PrivaiteGuardrail(guardrail_name="p", block_entities="US_SSN, CREDIT_CARD")
     assert g1.block_entities == ["US_SSN", "CREDIT_CARD"]
     g2 = module.PrivaiteGuardrail(guardrail_name="p", block_entities=["EMAIL_ADDRESS"])
     assert g2.block_entities == ["EMAIL_ADDRESS"]
@@ -367,7 +531,9 @@ async def test_block_entities_rejects_with_400():
 
     module = _load()
     gr = module.PrivaiteGuardrail(
-        guardrail_name="privaite", preset="light", languages="en",
+        guardrail_name="privaite",
+        preset="light",
+        languages="en",
         block_entities=["EMAIL_ADDRESS"],
     )
     data = {"messages": [{"role": "user", "content": "reach me at bob@example.com"}]}
@@ -387,12 +553,14 @@ async def test_block_entities_ignores_types_not_present():
     # PII is still masked and the request goes through.
     module = _load()
     gr = module.PrivaiteGuardrail(
-        guardrail_name="privaite", preset="light", languages="en",
+        guardrail_name="privaite",
+        preset="light",
+        languages="en",
         block_entities=["US_SSN"],
     )
-    data = {"messages": [
-        {"role": "user", "content": "I am Marie Dupont, email marie.dupont@acme.com"}
-    ]}
+    data = {
+        "messages": [{"role": "user", "content": "I am Marie Dupont, email marie.dupont@acme.com"}]
+    }
     out = await gr.async_pre_call_hook(None, None, data, "completion")
     serialized = json.dumps(out["messages"])
     assert "Marie Dupont" not in serialized
@@ -407,12 +575,12 @@ async def test_block_entities_fails_closed_when_privaite_too_old(monkeypatch):
 
     module = _load()
     gr = module.PrivaiteGuardrail(
-        guardrail_name="privaite", preset="light", languages="en",
+        guardrail_name="privaite",
+        preset="light",
+        languages="en",
         block_entities=["EMAIL_ADDRESS"],
     )
-    reduced = {
-        k: v for k, v in schema.PIIConfig.model_fields.items() if k != "block_entities"
-    }
+    reduced = {k: v for k, v in schema.PIIConfig.model_fields.items() if k != "block_entities"}
     monkeypatch.setattr(schema.PIIConfig, "model_fields", reduced)
 
     data = {"messages": [{"role": "user", "content": "bob@example.com"}]}

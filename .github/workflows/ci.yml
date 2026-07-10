@@ -38,6 +38,9 @@ jobs:
       - name: Lint
         run: ruff check .
 
+      - name: Format
+        run: ruff format --check .
+
       - name: Test
         run: python -m pytest tests/ -v --tb=short
 

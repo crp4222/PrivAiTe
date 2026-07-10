@@ -36,7 +36,11 @@ async def test_maps_label_and_builds_entity():
     assert len(out) == 1
     e = out[0]
     assert (e.entity_type, e.text, e.start, e.end, e.source) == (
-        "PERSON", "MARK", 0, 4, "test",
+        "PERSON",
+        "MARK",
+        0,
+        4,
+        "test",
     )
     assert e.score == 0.9
 
@@ -45,9 +49,9 @@ async def test_maps_label_and_builds_entity():
 async def test_below_threshold_unmapped_and_none_are_skipped():
     def predict(chunk):
         return [
-            {"label": "M", "score": 0.2, "start": 0, "end": 4},   # below threshold
+            {"label": "M", "score": 0.2, "start": 0, "end": 4},  # below threshold
             {"label": "UNKNOWN", "score": 0.9, "start": 0, "end": 4},  # unmapped
-            {"skip": True},                                        # extract -> None
+            {"skip": True},  # extract -> None
         ]
 
     out = await windowed_ner_detect(

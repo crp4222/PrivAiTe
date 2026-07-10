@@ -51,9 +51,7 @@ class PresidioDetector(PIIDetector):
             )
 
         for lang in self.config.languages:
-            nlp_config["models"].append(
-                {"lang_code": lang, "model_name": lang_model_map[lang]}
-            )
+            nlp_config["models"].append({"lang_code": lang, "model_name": lang_model_map[lang]})
 
         if not nlp_config["models"]:
             nlp_config["models"].append({"lang_code": "en", "model_name": "en_core_web_lg"})
@@ -74,9 +72,7 @@ class PresidioDetector(PIIDetector):
             self._analyzer.registry.add_recognizer(
                 ContextualNameRecognizer(supported_language=lang)
             )
-            self._analyzer.registry.add_recognizer(
-                FrenchDateRecognizer(supported_language=lang)
-            )
+            self._analyzer.registry.add_recognizer(FrenchDateRecognizer(supported_language=lang))
             self._analyzer.registry.add_recognizer(
                 ContextualLocationRecognizer(supported_language=lang)
             )
@@ -117,9 +113,7 @@ class PresidioDetector(PIIDetector):
                 if allowed and result.entity_type not in allowed:
                     continue
 
-                recognizer = result.recognition_metadata.get(
-                    "recognizer_name", ""
-                )
+                recognizer = result.recognition_metadata.get("recognizer_name", "")
                 if recognizer == "SpacyRecognizer" and lang != primary_lang:
                     continue
 

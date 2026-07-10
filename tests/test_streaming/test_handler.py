@@ -124,16 +124,22 @@ async def test_deanonymizes_tool_call_arguments_split_across_chunks():
     cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
     # the fake value is split across two argument deltas
     chunks = [
-        FakeDeltaChunk({"tool_calls": [
-            {"index": 0, "id": "call_1", "type": "function",
-             "function": {"name": "save_contact", "arguments": ""}}
-        ]}),
-        FakeDeltaChunk({"tool_calls": [
-            {"index": 0, "function": {"arguments": '{"name": "Zorp Gl'}}
-        ]}),
-        FakeDeltaChunk({"tool_calls": [
-            {"index": 0, "function": {"arguments": 'ax"}'}}
-        ]}),
+        FakeDeltaChunk(
+            {
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "save_contact", "arguments": ""},
+                    }
+                ]
+            }
+        ),
+        FakeDeltaChunk(
+            {"tool_calls": [{"index": 0, "function": {"arguments": '{"name": "Zorp Gl'}}]}
+        ),
+        FakeDeltaChunk({"tool_calls": [{"index": 0, "function": {"arguments": 'ax"}'}}]}),
         FakeChunk("", finish_reason="tool_calls"),
     ]
 
@@ -179,8 +185,8 @@ def _payloads(events: list[str]) -> list[dict]:
     out = []
     for event in events:
         for line in event.splitlines():
-            if line.startswith("data: ") and line[len("data: "):].strip() != "[DONE]":
-                out.append(json.loads(line[len("data: "):]))
+            if line.startswith("data: ") and line[len("data: ") :].strip() != "[DONE]":
+                out.append(json.loads(line[len("data: ") :]))
     return out
 
 
@@ -233,21 +239,29 @@ async def test_provider_finish_chunk_survives_with_usage_and_id():
     cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
 
     chunks = [
-        RawChunk({"id": "chatcmpl-real", "model": "m", "choices": [
-            {"index": 0, "delta": {"content": "hi <PERSON_1>"}, "finish_reason": None}
-        ]}),
-        RawChunk({"id": "chatcmpl-real", "model": "m",
-                  "usage": {"total_tokens": 7},
-                  "choices": [
-                      {"index": 0, "delta": {}, "finish_reason": "stop"}
-                  ]}),
+        RawChunk(
+            {
+                "id": "chatcmpl-real",
+                "model": "m",
+                "choices": [
+                    {"index": 0, "delta": {"content": "hi <PERSON_1>"}, "finish_reason": None}
+                ],
+            }
+        ),
+        RawChunk(
+            {
+                "id": "chatcmpl-real",
+                "model": "m",
+                "usage": {"total_tokens": 7},
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            }
+        ),
     ]
 
     events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
     payloads = _payloads(events)
 
-    finish = [p for p in payloads
-              if any(c.get("finish_reason") for c in p.get("choices", []))]
+    finish = [p for p in payloads if any(c.get("finish_reason") for c in p.get("choices", []))]
     assert len(finish) == 1  # exactly one finish chunk, never a duplicated pair
     assert finish[0]["id"] == "chatcmpl-real"
     assert finish[0]["usage"] == {"total_tokens": 7}
@@ -261,10 +275,18 @@ async def test_initial_role_chunk_is_not_swallowed():
     cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
 
     chunks = [
-        RawChunk({"model": "m", "choices": [
-            {"index": 0, "delta": {"role": "assistant", "content": ""},
-             "finish_reason": None}
-        ]}),
+        RawChunk(
+            {
+                "model": "m",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"role": "assistant", "content": ""},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        ),
         FakeChunk("hello", finish_reason="stop"),
     ]
 
@@ -303,24 +325,49 @@ async def test_held_back_chunk_with_logprobs_or_refusal_still_emitted():
     cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
 
     chunks = [
-        RawChunk({"model": "m", "choices": [
-            {"index": 0, "delta": {"content": "<PERSON"},
-             "logprobs": {"content": [{"token": "x"}]}, "finish_reason": None}
-        ]}),
-        RawChunk({"model": "m", "choices": [
-            {"index": 0, "delta": {"content": "<PERS", "refusal": "no"},
-             "finish_reason": None}
-        ]}),
+        RawChunk(
+            {
+                "model": "m",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": "<PERSON"},
+                        "logprobs": {"content": [{"token": "x"}]},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        ),
+        RawChunk(
+            {
+                "model": "m",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": "<PERS", "refusal": "no"},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        ),
         FakeChunk("ON_1> ok", finish_reason="stop"),
     ]
 
     events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
     payloads = _payloads(events)
 
-    logprobs = [c.get("logprobs") for p in payloads for c in p.get("choices", [])
-                if c.get("logprobs") is not None]
-    refusals = [c.get("delta", {}).get("refusal") for p in payloads
-                for c in p.get("choices", []) if c.get("delta", {}).get("refusal")]
+    logprobs = [
+        c.get("logprobs")
+        for p in payloads
+        for c in p.get("choices", [])
+        if c.get("logprobs") is not None
+    ]
+    refusals = [
+        c.get("delta", {}).get("refusal")
+        for p in payloads
+        for c in p.get("choices", [])
+        if c.get("delta", {}).get("refusal")
+    ]
     assert len(logprobs) == 1
     assert refusals == ["no"]
 
@@ -332,9 +379,13 @@ async def test_held_back_chunk_with_usage_still_emitted():
     cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
 
     chunks = [
-        RawChunk({"model": "m", "usage": {"total_tokens": 5}, "choices": [
-            {"index": 0, "delta": {"content": "<PERSON"}, "finish_reason": None}
-        ]}),
+        RawChunk(
+            {
+                "model": "m",
+                "usage": {"total_tokens": 5},
+                "choices": [{"index": 0, "delta": {"content": "<PERSON"}, "finish_reason": None}],
+            }
+        ),
         FakeChunk("_1>", finish_reason="stop"),
     ]
 
@@ -352,15 +403,34 @@ async def test_finish_chunk_with_function_none_does_not_crash():
     cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
 
     chunks = [
-        RawChunk({"model": "m", "choices": [
-            {"index": 0, "delta": {"tool_calls": [
-                {"index": 0, "function": {"arguments": '{"to": "<EMAIL_ADDRES'}}
-            ]}, "finish_reason": None}
-        ]}),
-        RawChunk({"model": "m", "choices": [
-            {"index": 0, "delta": {"tool_calls": [{"index": 0, "function": None}]},
-             "finish_reason": "tool_calls"}
-        ]}),
+        RawChunk(
+            {
+                "model": "m",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "tool_calls": [
+                                {"index": 0, "function": {"arguments": '{"to": "<EMAIL_ADDRES'}}
+                            ]
+                        },
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        ),
+        RawChunk(
+            {
+                "model": "m",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"tool_calls": [{"index": 0, "function": None}]},
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+            }
+        ),
     ]
 
     events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
@@ -377,11 +447,18 @@ async def test_reasoning_content_is_restored():
     cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
 
     chunks = [
-        RawChunk({"model": "m", "choices": [
-            {"index": 0,
-             "delta": {"reasoning_content": "the user is <PERSON_1>"},
-             "finish_reason": None}
-        ]}),
+        RawChunk(
+            {
+                "model": "m",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"reasoning_content": "the user is <PERSON_1>"},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        ),
         FakeChunk("", finish_reason="stop"),
     ]
 

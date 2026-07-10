@@ -52,9 +52,7 @@ class FakeDetector(PIIDetector):
         return entities
 
 
-def _make_engine(
-    passthrough: PassthroughConfig | None = None, strict: bool = False
-) -> PIIEngine:
+def _make_engine(passthrough: PassthroughConfig | None = None, strict: bool = False) -> PIIEngine:
     config = PIIConfig(
         enabled=True,
         detectors=DetectorsConfig(presidio=PresidioDetectorConfig(enabled=False)),
@@ -64,9 +62,7 @@ def _make_engine(
         strict=strict,
     )
     engine = PIIEngine(config)
-    engine.detectors = [
-        FakeDetector({"Marie Dupont": "PERSON", "marie@acme.com": "EMAIL_ADDRESS"})
-    ]
+    engine.detectors = [FakeDetector({"Marie Dupont": "PERSON", "marie@acme.com": "EMAIL_ADDRESS"})]
     engine._ready = True
     return engine
 
@@ -158,9 +154,9 @@ async def test_short_numbers_keep_their_type_without_scanning():
     # are not scanned (no realistic numeric PII is that short).
     engine = _make_engine()
     args = json.dumps({"year": 2024, "qty": 3, "ratio": 0.5})
-    messages = [{"role": "assistant", "tool_calls": [
-        {"function": {"name": "f", "arguments": args}}
-    ]}]
+    messages = [
+        {"role": "assistant", "tool_calls": [{"function": {"name": "f", "arguments": args}}]}
+    ]
     out, _ = await engine.process_request(messages)
     parsed = json.loads(out[0]["tool_calls"][0]["function"]["arguments"])
     assert parsed == {"year": 2024, "qty": 3, "ratio": 0.5}
@@ -181,9 +177,9 @@ async def test_numeric_json_value_with_pii_is_masked():
     engine._ready = True
 
     args = json.dumps({"card": 4111111111111111, "qty": 2})
-    messages = [{"role": "assistant", "tool_calls": [
-        {"function": {"name": "pay", "arguments": args}}
-    ]}]
+    messages = [
+        {"role": "assistant", "tool_calls": [{"function": {"name": "pay", "arguments": args}}]}
+    ]
 
     out, _ = await engine.process_request(messages)
     parsed = json.loads(out[0]["tool_calls"][0]["function"]["arguments"])
@@ -208,9 +204,9 @@ async def test_numeric_json_value_triggers_block_gate():
     engine._ready = True
 
     args = json.dumps({"card": 4111111111111111})
-    messages = [{"role": "assistant", "tool_calls": [
-        {"function": {"name": "pay", "arguments": args}}
-    ]}]
+    messages = [
+        {"role": "assistant", "tool_calls": [{"function": {"name": "pay", "arguments": args}}]}
+    ]
 
     with pytest.raises(PIIBlockedError):
         await engine.process_request(messages)
@@ -223,9 +219,7 @@ async def test_tool_call_roundtrip_restores_original():
     messages = [
         {
             "role": "assistant",
-            "tool_calls": [
-                {"function": {"name": "f", "arguments": json.dumps(original)}}
-            ],
+            "tool_calls": [{"function": {"name": "f", "arguments": json.dumps(original)}}],
         }
     ]
 
@@ -240,9 +234,7 @@ async def test_tool_call_roundtrip_restores_original():
 async def test_passthrough_tool_calls_flag_skips_anonymization():
     engine = _make_engine(PassthroughConfig(tool_calls=True))
     args = json.dumps({"name": "Marie Dupont"})
-    messages = [
-        {"role": "assistant", "tool_calls": [{"function": {"arguments": args}}]}
-    ]
+    messages = [{"role": "assistant", "tool_calls": [{"function": {"arguments": args}}]}]
 
     out, _ = await engine.process_request(messages)
 
@@ -255,9 +247,7 @@ async def test_invalid_json_arguments_anonymized_as_text():
     messages = [
         {
             "role": "assistant",
-            "tool_calls": [
-                {"function": {"arguments": "send to Marie Dupont now (not json)"}}
-            ],
+            "tool_calls": [{"function": {"arguments": "send to Marie Dupont now (not json)"}}],
         }
     ]
 
@@ -343,7 +333,5 @@ async def test_strict_mode_allows_text_and_media_parts():
 @pytest.mark.asyncio
 async def test_non_strict_passes_uninspectable_through():
     engine = _make_engine()  # strict=False
-    out, _ = await engine.process_request(
-        [{"role": "user", "content": {"weird": "shape"}}]
-    )
+    out, _ = await engine.process_request([{"role": "user", "content": {"weird": "shape"}}])
     assert out[0]["content"] == {"weird": "shape"}

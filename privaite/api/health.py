@@ -15,9 +15,7 @@ async def ready(request: Request) -> dict:
     checks: dict[str, bool] = {}
 
     provider_router = getattr(request.app.state, "provider_router", None)
-    checks["providers_configured"] = (
-        provider_router is not None and len(provider_router.models) > 0
-    )
+    checks["providers_configured"] = provider_router is not None and len(provider_router.models) > 0
 
     pii_engine = getattr(request.app.state, "pii_engine", None)
     if pii_engine is not None:

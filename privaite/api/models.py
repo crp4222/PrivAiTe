@@ -16,10 +16,12 @@ async def list_models(
 ) -> dict:
     models = []
     for model_name in provider_router.models:
-        models.append({
-            "id": model_name,
-            "object": "model",
-            "created": int(time.time()),
-            "owned_by": "privaite",
-        })
+        models.append(
+            {
+                "id": model_name,
+                "object": "model",
+                "created": int(time.time()),
+                "owned_by": "privaite",
+            }
+        )
     return {"object": "list", "data": models}

@@ -4,9 +4,7 @@ from privaite.pii.entity import PIIEntity
 from privaite.pii.mapping import PIIMapping
 
 
-def _entity(
-    entity_type: str, text: str, start: int, end: int, score: float = 0.9
-) -> PIIEntity:
+def _entity(entity_type: str, text: str, start: int, end: int, score: float = 0.9) -> PIIEntity:
     return PIIEntity(
         entity_type=entity_type,
         text=text,
@@ -79,9 +77,7 @@ def test_deterministic_fakes():
 def test_entity_override_mask():
     config = AnonymizationConfig(
         faker_locale=["en_US"],
-        entity_overrides={
-            "CREDIT_CARD": EntityOverride(method="mask", masking_char="*")
-        },
+        entity_overrides={"CREDIT_CARD": EntityOverride(method="mask", masking_char="*")},
     )
     anon = Anonymizer(config)
     mapping = PIIMapping()
@@ -130,9 +126,7 @@ def test_global_redact_uses_typed_marker():
     anon = Anonymizer(config)
     mapping = PIIMapping()
 
-    result = anon.anonymize(
-        "Hi John Smith", [_entity("PERSON", "John Smith", 3, 13)], mapping
-    )
+    result = anon.anonymize("Hi John Smith", [_entity("PERSON", "John Smith", 3, 13)], mapping)
     assert "[PERSON]" in result
     assert "John Smith" not in result
 
@@ -208,9 +202,7 @@ def test_override_redact_matches_global_typed_marker():
     anon = Anonymizer(config)
     mapping = PIIMapping()
 
-    result = anon.anonymize(
-        "key sk-abc123", [_entity("SECRET", "sk-abc123", 4, 13)], mapping
-    )
+    result = anon.anonymize("key sk-abc123", [_entity("SECRET", "sk-abc123", 4, 13)], mapping)
     assert "[SECRET]" in result
     assert "sk-abc123" not in result
 
@@ -226,9 +218,7 @@ def test_override_placeholder_is_numbered():
     anon = Anonymizer(config)
     mapping = PIIMapping()
 
-    result = anon.anonymize(
-        "Hi John Smith", [_entity("PERSON", "John Smith", 3, 13)], mapping
-    )
+    result = anon.anonymize("Hi John Smith", [_entity("PERSON", "John Smith", 3, 13)], mapping)
     assert "<PERSON_1>" in result
     assert mapping.get_original("<PERSON_1>") == "John Smith"
 
@@ -244,9 +234,7 @@ def test_override_fake_replacement_uses_entity_type():
     anon = Anonymizer(config)
     mapping = PIIMapping()
 
-    result = anon.anonymize(
-        "mail a@b.com", [_entity("EMAIL_ADDRESS", "a@b.com", 5, 12)], mapping
-    )
+    result = anon.anonymize("mail a@b.com", [_entity("EMAIL_ADDRESS", "a@b.com", 5, 12)], mapping)
     fake = mapping.get_fake("a@b.com")
     assert fake is not None
     assert "a@b.com" not in result

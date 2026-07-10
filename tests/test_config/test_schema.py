@@ -33,8 +33,15 @@ def test_preset_max_enables_gliner_on_top_of_onnx():
     assert config.detectors.mlmodel.enabled is False
     # mirrors the onnx preset's Presidio allowlist
     assert config.detectors.presidio.entities == [
-        "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD",
-        "IBAN_CODE", "IP_ADDRESS", "DATE_TIME", "US_SSN", "UK_NHS",
+        "PERSON",
+        "EMAIL_ADDRESS",
+        "PHONE_NUMBER",
+        "CREDIT_CARD",
+        "IBAN_CODE",
+        "IP_ADDRESS",
+        "DATE_TIME",
+        "US_SSN",
+        "UK_NHS",
     ]
 
 
@@ -93,16 +100,18 @@ def test_block_entities_default_empty_and_accepts_list():
 
 
 def test_model_loading_is_supply_chain_safe_by_default():
-    # A PII proxy must not execute model-repo code, and should be pinnable to a
-    # revision so a rewritten repo cannot silently swap the weights.
+    # A PII proxy must not execute model-repo code or follow mutable model refs
+    # by default, so a rewritten repo cannot silently swap the weights.
     from privaite.config.schema import (
         BertNERDetectorConfig,
+        GlinerDetectorConfig,
         MLModelDetectorConfig,
         OnnxDetectorConfig,
     )
 
     assert MLModelDetectorConfig().trust_remote_code is False
     assert OnnxDetectorConfig().trust_remote_code is False
-    assert MLModelDetectorConfig().revision is None
-    assert OnnxDetectorConfig().revision is None
-    assert BertNERDetectorConfig().revision is None
+    assert MLModelDetectorConfig().revision == "7ffa9a043d54d1be65afb281eddf0ffbe629385b"
+    assert OnnxDetectorConfig().revision == "7ffa9a043d54d1be65afb281eddf0ffbe629385b"
+    assert BertNERDetectorConfig().revision == "d1a3e8f13f8c3566299d95fcfc9a8d2382a9affc"
+    assert GlinerDetectorConfig().revision == "1fcf13e85f4eef5394e1fcd406cf2ca9ea82351d"

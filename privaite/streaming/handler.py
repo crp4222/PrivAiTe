@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from typing import Any
 
 from privaite.config.schema import DeanonymizationConfig
+from privaite.pii.engine import PIIProcessingError
 from privaite.pii.mapping import PIIMapping
 from privaite.streaming.buffer import StreamingDeAnonymizer
 from privaite.streaming.sse import (
@@ -58,10 +59,7 @@ class StreamingHandler:
         provider never sent a finish_reason.
         """
         do_deanon = bool(
-            mapping
-            and deanonymizer_config
-            and deanonymizer_config.enabled
-            and not mapping.is_empty
+            mapping and deanonymizer_config and deanonymizer_config.enabled and not mapping.is_empty
         )
 
         content_bufs: dict[int, StreamingDeAnonymizer] = {}
@@ -113,12 +111,17 @@ class StreamingHandler:
                         call["function"] = fn
                     fn["arguments"] = (fn.get("arguments") or "") + remaining
                 else:
-                    pre_events.append(create_delta_chunk(
-                        {"tool_calls": [
-                            {"index": t_idx, "function": {"arguments": remaining}}
-                        ]},
-                        model=model_name, index=idx,
-                    ))
+                    pre_events.append(
+                        create_delta_chunk(
+                            {
+                                "tool_calls": [
+                                    {"index": t_idx, "function": {"arguments": remaining}}
+                                ]
+                            },
+                            model=model_name,
+                            index=idx,
+                        )
+                    )
             fbuf = func_bufs.get(idx)
             if fbuf is not None:
                 remaining = fbuf.flush()
@@ -129,10 +132,13 @@ class StreamingHandler:
                             function_call.get("arguments") or ""
                         ) + remaining
                     else:
-                        pre_events.append(create_delta_chunk(
-                            {"function_call": {"arguments": remaining}},
-                            model=model_name, index=idx,
-                        ))
+                        pre_events.append(
+                            create_delta_chunk(
+                                {"function_call": {"arguments": remaining}},
+                                model=model_name,
+                                index=idx,
+                            )
+                        )
 
         try:
             async for chunk in litellm_stream:
@@ -249,8 +255,10 @@ class StreamingHandler:
                 yield sse
 
         except Exception:
-            logger.exception("Error during streaming")
-            raise
+            # A stream error can originate from a chunk being restored. Never
+            # serialize its traceback: it could contain the caller's PII.
+            logger.error("Streaming response processing failed")
+            raise PIIProcessingError() from None
 
         yield format_sse_done()
 
@@ -266,10 +274,7 @@ class StreamingHandler:
         choice index, flushed onto the choice's finish chunk, or after the stream
         if the provider never sent a finish_reason."""
         do_deanon = bool(
-            mapping
-            and deanonymizer_config
-            and deanonymizer_config.enabled
-            and not mapping.is_empty
+            mapping and deanonymizer_config and deanonymizer_config.enabled and not mapping.is_empty
         )
         buffers: dict[int, StreamingDeAnonymizer] = {}
         flushed: set[int] = set()
@@ -315,7 +320,8 @@ class StreamingHandler:
                 yield sse
 
         except Exception:
-            logger.exception("Error during text-completion streaming")
-            raise
+            # See stream_response: error details may carry restored PII.
+            logger.error("Text-completion stream processing failed")
+            raise PIIProcessingError() from None
 
         yield format_sse_done()

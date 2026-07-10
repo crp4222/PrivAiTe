@@ -10,8 +10,7 @@ MONTHS_FR = (
 )
 
 MONTHS_DE = (
-    "Januar|Februar|März|Maerz|April|Mai|Juni|"
-    "Juli|August|September|Oktober|November|Dezember"
+    "Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember"
 )
 
 MONTHS_ALL = f"{MONTHS_FR}|{MONTHS_DE}"

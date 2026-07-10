@@ -50,9 +50,7 @@ class GlinerDetector(PIIDetector):
                     "Install it with: pip install 'privaite[gliner]'"
                 ) from exc
 
-            model = GLiNER.from_pretrained(
-                self.config.model_name, revision=self.config.revision
-            )
+            model = GLiNER.from_pretrained(self.config.model_name, revision=self.config.revision)
             device = resolve_torch_device(self.config.device)
             self._model = model.to(device)
 
@@ -71,9 +69,7 @@ class GlinerDetector(PIIDetector):
         threshold = self.config.score_threshold
         return await windowed_ner_detect(
             text,
-            predict=lambda chunk: self._model.predict_entities(
-                chunk, labels, threshold=threshold
-            ),
+            predict=lambda chunk: self._model.predict_entities(chunk, labels, threshold=threshold),
             extract=_gliner_extract,
             label_mapping=self.config.label_mapping,
             score_threshold=threshold,

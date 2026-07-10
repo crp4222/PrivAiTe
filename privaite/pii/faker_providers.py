@@ -34,9 +34,7 @@ class FakerReplacementGenerator:
         f.seed_instance(seed)
         return f
 
-    def _generate_fake(
-        self, entity_type: str, original: str, salt: int = 0
-    ) -> str:
+    def _generate_fake(self, entity_type: str, original: str, salt: int = 0) -> str:
         f = self._seeded_faker(original, salt)
 
         generators: dict[str, Callable[[], str]] = {

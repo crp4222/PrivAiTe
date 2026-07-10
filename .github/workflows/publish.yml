@@ -29,6 +29,9 @@ jobs:
       - name: Lint
         run: ruff check .
 
+      - name: Format
+        run: ruff format --check .
+
       - name: Type check
         run: mypy privaite/ integrations/openwebui/privaite_filter.py integrations/litellm/privaite_guardrail.py
 

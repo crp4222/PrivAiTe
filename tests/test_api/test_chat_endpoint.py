@@ -91,9 +91,7 @@ def _make_app(
     app = create_app(config)
 
     engine = PIIEngine(config.pii)
-    engine.detectors = [
-        FakeDetector({"Marie Dupont": "PERSON", "marie@acme.com": "EMAIL_ADDRESS"})
-    ]
+    engine.detectors = [FakeDetector({"Marie Dupont": "PERSON", "marie@acme.com": "EMAIL_ADDRESS"})]
     engine._ready = True
 
     app.state.pii_engine = engine
@@ -106,16 +104,12 @@ def _make_app(
 @pytest.mark.asyncio
 async def test_provider_receives_anonymized_and_response_restored():
     app, router = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/v1/chat/completions",
             json={
                 "model": "m",
-                "messages": [
-                    {"role": "user", "content": "Contact Marie Dupont at marie@acme.com"}
-                ],
+                "messages": [{"role": "user", "content": "Contact Marie Dupont at marie@acme.com"}],
             },
         )
 
@@ -137,9 +131,7 @@ async def test_provider_receives_anonymized_and_response_restored():
 async def test_tool_call_arguments_anonymized_and_restored_through_endpoint():
     app, router = _make_app()
     args = json.dumps({"to": "marie@acme.com", "name": "Marie Dupont"})
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/v1/chat/completions",
             json={
@@ -166,18 +158,14 @@ async def test_tool_call_arguments_anonymized_and_restored_through_endpoint():
     assert "Marie Dupont" not in sent_args
     assert "marie@acme.com" not in sent_args
 
-    out_args = resp.json()["choices"][0]["message"]["tool_calls"][0]["function"][
-        "arguments"
-    ]
+    out_args = resp.json()["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
     assert json.loads(out_args) == json.loads(args)
 
 
 @pytest.mark.asyncio
 async def test_clean_message_passes_through_unchanged():
     app, router = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/v1/chat/completions",
             json={"model": "m", "messages": [{"role": "user", "content": "hello there"}]},
@@ -190,9 +178,7 @@ async def test_clean_message_passes_through_unchanged():
 @pytest.mark.asyncio
 async def test_strict_mode_returns_400_on_uninspectable_payload():
     app, router = _make_app(strict=True)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/v1/chat/completions",
             json={"model": "m", "messages": [{"role": "user", "content": {"x": "y"}}]},
@@ -212,9 +198,7 @@ async def test_pii_failure_fails_closed_by_default():
 
     app.state.pii_engine.process_request = _boom
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/v1/chat/completions",
             json={
@@ -238,9 +222,7 @@ async def test_on_error_allow_forwards_despite_engine_failure():
 
     app.state.pii_engine.process_request = _boom
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/v1/chat/completions",
             json={
@@ -258,9 +240,7 @@ async def test_block_entities_rejects_and_forwards_nothing():
     # A blocked PII type in the request -> hard 400, provider never called, and
     # the error names the TYPE, never the value.
     app, router = _make_app(block_entities=["EMAIL_ADDRESS"])
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/v1/chat/completions",
             json={
@@ -280,9 +260,7 @@ async def test_block_entities_rejects_and_forwards_nothing():
 async def test_block_entities_lets_non_blocked_pii_through_masked():
     # A non-blocked type (PERSON) is still masked and forwarded as usual.
     app, router = _make_app(block_entities=["EMAIL_ADDRESS"])
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/v1/chat/completions",
             json={

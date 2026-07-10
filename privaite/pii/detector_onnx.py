@@ -15,8 +15,14 @@ from privaite.pii.entity import PIIEntity
 logger = logging.getLogger("privaite.pii.detector_onnx")
 
 _ENTITY_ORDER = [
-    "account_number", "private_address", "private_date", "private_email",
-    "private_person", "private_phone", "private_url", "secret",
+    "account_number",
+    "private_address",
+    "private_date",
+    "private_email",
+    "private_person",
+    "private_phone",
+    "private_url",
+    "secret",
 ]
 _BIOES = ["B", "I", "E", "S"]
 
@@ -26,10 +32,15 @@ for _i, _ent in enumerate(_ENTITY_ORDER):
         ID2LABEL[_i * 4 + _j + 1] = f"{_tag}-{_ent}"
 
 ENTITY_TYPES = [
-    "account_number", "private_address", "private_date", "private_email",
-    "private_person", "private_phone", "private_url", "secret",
+    "account_number",
+    "private_address",
+    "private_date",
+    "private_email",
+    "private_person",
+    "private_phone",
+    "private_url",
+    "secret",
 ]
-
 
 
 def _parse_tag(label: str) -> tuple[str, str]:
@@ -57,13 +68,15 @@ def decode_bioes_spans(
         start = offsets[current_tokens[0]][0]
         end = offsets[current_tokens[-1]][1]
         avg_score = float(np.mean([scores[i] for i in current_tokens]))
-        spans.append({
-            "entity_type": current_type,
-            "text": text[start:end],
-            "start": start,
-            "end": end,
-            "score": avg_score,
-        })
+        spans.append(
+            {
+                "entity_type": current_type,
+                "text": text[start:end],
+                "start": start,
+                "end": end,
+                "score": avg_score,
+            }
+        )
         current_tokens, current_type = [], None
 
     for idx, label in enumerate(labels):
@@ -72,13 +85,15 @@ def decode_bioes_spans(
         if prefix == "S":
             _flush()
             s, e = offsets[idx][0], offsets[idx][1]
-            spans.append({
-                "entity_type": etype,
-                "text": text[s:e],
-                "start": s,
-                "end": e,
-                "score": float(scores[idx]),
-            })
+            spans.append(
+                {
+                    "entity_type": etype,
+                    "text": text[s:e],
+                    "start": s,
+                    "end": e,
+                    "score": float(scores[idx]),
+                }
+            )
 
         elif prefix == "B":
             _flush()
@@ -102,7 +117,6 @@ def decode_bioes_spans(
     return spans
 
 
-
 def download_onnx_model(
     repo_id: str = "openai/privacy-filter",
     variant: str = "q4f16",
@@ -119,12 +133,14 @@ def download_onnx_model(
     except ImportError:  # pragma: no cover - only on hub < 0.25
         from huggingface_hub.utils import EntryNotFoundError
 
-    local_path = Path(hf_hub_download(
-        repo_id=repo_id,
-        filename=f"onnx/model_{variant}.onnx",
-        cache_dir=cache_dir,
-        revision=revision,
-    ))
+    local_path = Path(
+        hf_hub_download(
+            repo_id=repo_id,
+            filename=f"onnx/model_{variant}.onnx",
+            cache_dir=cache_dir,
+            revision=revision,
+        )
+    )
     try:
         # Only variants with externalized weights ship this side file; a variant
         # packed into a single .onnx must not fail here.
@@ -141,9 +157,7 @@ def download_onnx_model(
     return local_path
 
 
-
 class OnnxPrivacyFilterDetector(PIIDetector):
-
     def __init__(self, config: OnnxDetectorConfig) -> None:
         self.config = config
         self._session: Any = None
@@ -173,9 +187,7 @@ class OnnxPrivacyFilterDetector(PIIDetector):
             )
 
             sess_opts = ort.SessionOptions()
-            sess_opts.graph_optimization_level = (
-                ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-            )
+            sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
             self._session = ort.InferenceSession(
                 str(model_path),
                 sess_options=sess_opts,
@@ -196,6 +208,7 @@ class OnnxPrivacyFilterDetector(PIIDetector):
         device = self.config.device
         if device == "auto":
             import onnxruntime as ort
+
             available = ort.get_available_providers()
             if "CoreMLExecutionProvider" in available:
                 return ["CoreMLExecutionProvider", "CPUExecutionProvider"]

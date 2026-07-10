@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Request
 
 from privaite.api.dependencies import get_config, get_pii_engine
 from privaite.config.schema import PrivAiTeConfig
-from privaite.pii.engine import PIIBlockedError
+from privaite.pii.engine import PIIBlockedError, PIIProcessingError
 from privaite.utils.errors import openai_error
 
 # Dry-run inspection: shows what the proxy WOULD redact in a text, so operators
@@ -28,24 +28,32 @@ async def pii_inspect(
 ):
     if not config.pii.inspect.enabled:
         return openai_error(
-            "The PII inspect endpoint is disabled. Set pii.inspect.enabled: true "
-            "to use it.",
-            "permission_error", 403, "inspect_disabled",
+            "The PII inspect endpoint is disabled. Set pii.inspect.enabled: true to use it.",
+            "permission_error",
+            403,
+            "inspect_disabled",
         )
     if not config.pii.enabled or pii_engine is None:
         return openai_error(
             "PII processing is disabled; there is nothing to inspect.",
-            "invalid_request_error", 400,
+            "invalid_request_error",
+            400,
         )
 
     body = await request.json()
     text = body.get("text")
     if not isinstance(text, str) or not text:
-        return openai_error(
-            "'text' (non-empty string) is required", "invalid_request_error", 400
-        )
+        return openai_error("'text' (non-empty string) is required", "invalid_request_error", 400)
 
-    entities = await pii_engine.inspect_text(text)
+    try:
+        entities = await pii_engine.inspect_text(text)
+    except PIIProcessingError:
+        return openai_error(
+            "PII inspection failed. Nothing was forwarded.",
+            "server_error",
+            500,
+            "pii_error",
+        )
 
     blocked = set(config.pii.block_entities or [])
     would_block = sorted({e.entity_type for e in entities} & blocked)
@@ -64,6 +72,13 @@ async def pii_inspect(
         except PIIBlockedError as exc:
             # Defensive: the gate fired anyway; report it the dry-run way.
             would_block = list(exc.entity_types)
+        except PIIProcessingError:
+            return openai_error(
+                "PII inspection failed. Nothing was forwarded.",
+                "server_error",
+                500,
+                "pii_error",
+            )
 
     return {
         "language": pii_engine._language(),

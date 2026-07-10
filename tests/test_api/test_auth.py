@@ -32,9 +32,7 @@ def _make_config(auth_enabled: bool) -> PrivAiTeConfig:
 def _inject_state(app):
     from privaite.providers.router import ProviderRouter
 
-    app.state.provider_router = ProviderRouter(
-        _make_config(True).providers
-    )
+    app.state.provider_router = ProviderRouter(_make_config(True).providers)
     app.state.pii_engine = None
     return app
 
@@ -66,9 +64,7 @@ async def test_auth_rejects_wrong_key(app_auth_enabled):
     async with AsyncClient(
         transport=ASGITransport(app=app_auth_enabled), base_url="http://test"
     ) as client:
-        resp = await client.get(
-            "/v1/models", headers={"Authorization": "Bearer wrong-key"}
-        )
+        resp = await client.get("/v1/models", headers={"Authorization": "Bearer wrong-key"})
         assert resp.status_code == 401
 
 
@@ -77,9 +73,7 @@ async def test_auth_accepts_valid_key(app_auth_enabled):
     async with AsyncClient(
         transport=ASGITransport(app=app_auth_enabled), base_url="http://test"
     ) as client:
-        resp = await client.get(
-            "/v1/models", headers={"Authorization": "Bearer test-key-123"}
-        )
+        resp = await client.get("/v1/models", headers={"Authorization": "Bearer test-key-123"})
         assert resp.status_code == 200
 
 
@@ -88,9 +82,7 @@ async def test_auth_accepts_second_key(app_auth_enabled):
     async with AsyncClient(
         transport=ASGITransport(app=app_auth_enabled), base_url="http://test"
     ) as client:
-        resp = await client.get(
-            "/v1/models", headers={"Authorization": "Bearer test-key-456"}
-        )
+        resp = await client.get("/v1/models", headers={"Authorization": "Bearer test-key-456"})
         assert resp.status_code == 200
 
 
@@ -117,8 +109,6 @@ async def test_auth_enabled_without_keys_denies():
     # Fail closed: auth on + no configured keys must reject, not pass through.
     os.environ.pop("PRIVAITE_API_KEYS", None)
     app = _inject_state(create_app(_make_config(auth_enabled=True)))
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/v1/models")
         assert resp.status_code == 401

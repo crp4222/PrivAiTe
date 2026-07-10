@@ -180,9 +180,7 @@ class Filter:
                 # Multimodal replies: restore each text part.
                 for part in content:
                     if isinstance(part, dict) and isinstance(part.get("text"), str):
-                        part["text"] = await engine.process_response(
-                            part["text"], mapping
-                        )
+                        part["text"] = await engine.process_response(part["text"], mapping)
             for field in ("reasoning_content", "reasoning"):
                 value = message.get(field)
                 if isinstance(value, str) and value:
@@ -216,25 +214,38 @@ class Filter:
         # Return a NEW output list when a value changed and None otherwise: Open
         # WebUI decides whether to persist/emit the restored reply by comparing
         # the output object against the stored one, so an in-place edit would be
-        # seen as unchanged and dropped. Only text parts are rewritten; every
-        # other node is carried over by reference.
+        # seen as unchanged and dropped. Text parts and function-call arguments
+        # can carry placeholders; every other node is carried over by reference.
         changed = False
         new_output: list[Any] = []
         for item in output:
-            if not isinstance(item, dict) or not isinstance(item.get("content"), list):
+            if not isinstance(item, dict):
                 new_output.append(item)
                 continue
             new_parts: list[Any] = []
             item_changed = False
-            for part in item["content"]:
-                if isinstance(part, dict) and isinstance(part.get("text"), str) and part["text"]:
-                    restored = await engine.process_response(part["text"], mapping)
-                    if restored != part["text"]:
-                        part = {**part, "text": restored}
-                        item_changed = True
-                new_parts.append(part)
+            content = item.get("content")
+            if isinstance(content, list):
+                for part in content:
+                    if (
+                        isinstance(part, dict)
+                        and isinstance(part.get("text"), str)
+                        and part["text"]
+                    ):
+                        restored = await engine.process_response(part["text"], mapping)
+                        if restored != part["text"]:
+                            part = {**part, "text": restored}
+                            item_changed = True
+                    new_parts.append(part)
             if item_changed:
                 item = {**item, "content": new_parts}
+            arguments = item.get("arguments")
+            if isinstance(arguments, str) and arguments:
+                restored = await engine.process_response(arguments, mapping)
+                if restored != arguments:
+                    item = {**item, "arguments": restored}
+                    item_changed = True
+            if item_changed:
                 changed = True
             new_output.append(item)
         return new_output if changed else None

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
 
 FILTER_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "integrations" / "openwebui" / "privaite_filter.py"
+    Path(__file__).resolve().parents[2] / "integrations" / "openwebui" / "privaite_filter.py"
 )
 
 
@@ -45,9 +45,9 @@ async def test_inlet_outlet_roundtrip():
     flt.valves.languages = "en,fr"
 
     meta: dict = {}
-    body = {"messages": [
-        {"role": "user", "content": "I am Marie Dupont, email marie.dupont@acme.com"}
-    ]}
+    body = {
+        "messages": [{"role": "user", "content": "I am Marie Dupont, email marie.dupont@acme.com"}]
+    }
     body = await flt.inlet(body, meta)
     anonymized = body["messages"][0]["content"]
 
@@ -73,9 +73,7 @@ async def test_outlet_pops_map_so_originals_cannot_persist():
     flt.valves.languages = "en"
 
     meta: dict = {}
-    await flt.inlet(
-        {"messages": [{"role": "user", "content": "I am Marie Dupont"}]}, meta
-    )
+    await flt.inlet({"messages": [{"role": "user", "content": "I am Marie Dupont"}]}, meta)
     assert "privaite_map" in meta
 
     reply = {"messages": [{"role": "assistant", "content": "ok"}]}
@@ -94,9 +92,7 @@ async def test_inlet_never_stashes_when_restore_disabled():
     flt.valves.deanonymize = False
 
     meta: dict = {}
-    await flt.inlet(
-        {"messages": [{"role": "user", "content": "I am Marie Dupont"}]}, meta
-    )
+    await flt.inlet({"messages": [{"role": "user", "content": "I am Marie Dupont"}]}, meta)
     assert "privaite_map" not in meta
 
 
@@ -124,15 +120,17 @@ async def test_outlet_restores_multimodal_text_parts():
     flt.valves.languages = "en"
 
     meta: dict = {}
-    body = await flt.inlet(
-        {"messages": [{"role": "user", "content": "I am Marie Dupont"}]}, meta
-    )
+    body = await flt.inlet({"messages": [{"role": "user", "content": "I am Marie Dupont"}]}, meta)
     placeholder = body["messages"][0]["content"].replace("I am ", "")
 
-    reply = {"messages": [{
-        "role": "assistant",
-        "content": [{"type": "text", "text": f"Hello {placeholder}"}],
-    }]}
+    reply = {
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": f"Hello {placeholder}"}],
+            }
+        ]
+    }
     out = await flt.outlet(reply, meta)
     assert out["messages"][0]["content"][0]["text"] == "Hello Marie Dupont"
 
@@ -150,9 +148,7 @@ async def test_outlet_restores_structured_output_items():
     flt.valves.languages = "en"
 
     meta: dict = {}
-    body = await flt.inlet(
-        {"messages": [{"role": "user", "content": "I am Marie Dupont"}]}, meta
-    )
+    body = await flt.inlet({"messages": [{"role": "user", "content": "I am Marie Dupont"}]}, meta)
     placeholder = body["messages"][0]["content"].replace("I am ", "")
 
     original_output = [
@@ -177,6 +173,84 @@ async def test_outlet_restores_structured_output_items():
 
 
 @pytest.mark.asyncio
+async def test_outlet_restores_structured_function_call_arguments():
+    # Structured Open WebUI output may contain a function_call item rather than
+    # chat-shaped message["tool_calls"]. Its arguments are user-visible output
+    # too, so a placeholder there must be restored before the reply is stored.
+    module = _load_filter()
+    flt = module.Filter()
+    flt.valves.preset = "light"
+    flt.valves.languages = "en"
+
+    meta: dict = {}
+    body = await flt.inlet({"messages": [{"role": "user", "content": "I am Marie Dupont"}]}, meta)
+    placeholder = body["messages"][0]["content"].replace("I am ", "")
+    original_output = [
+        {
+            "type": "function_call",
+            "name": "send_email",
+            "arguments": json.dumps({"recipient": placeholder}),
+        }
+    ]
+
+    reply = {"messages": [{"role": "assistant", "content": "", "output": original_output}]}
+    out = await flt.outlet(reply, meta)
+
+    restored = out["messages"][0]["output"]
+    assert json.loads(restored[0]["arguments"]) == {"recipient": "Marie Dupont"}
+    # Open WebUI needs a replacement object to persist the changed output, and
+    # the original provider object must not be mutated behind its back.
+    assert restored is not original_output
+    assert json.loads(original_output[0]["arguments"]) == {"recipient": placeholder}
+
+
+@pytest.mark.asyncio
+async def test_outlet_restores_all_chat_response_fields():
+    # Keep OpenWebUI in lockstep with the proxy response contract: every
+    # reversible request path has a non-streaming restoration path.
+    module = _load_filter()
+    flt = module.Filter()
+    flt.valves.preset = "light"
+    flt.valves.languages = "en"
+
+    meta: dict = {}
+    body = await flt.inlet({"messages": [{"role": "user", "content": "I am Marie Dupont"}]}, meta)
+    placeholder = body["messages"][0]["content"].replace("I am ", "")
+    reply = {
+        "messages": [
+            {
+                "role": "assistant",
+                "content": f"Hello {placeholder}",
+                "reasoning_content": f"Considering {placeholder}",
+                "reasoning": f"Checked {placeholder}",
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {
+                            "name": "save",
+                            "arguments": json.dumps({"name": placeholder}),
+                        },
+                    }
+                ],
+                "function_call": {
+                    "name": "save_legacy",
+                    "arguments": json.dumps({"name": placeholder}),
+                },
+            }
+        ]
+    }
+
+    out = await flt.outlet(reply, meta)
+    message = out["messages"][0]
+    assert message["content"] == "Hello Marie Dupont"
+    assert message["reasoning_content"] == "Considering Marie Dupont"
+    assert message["reasoning"] == "Checked Marie Dupont"
+    assert json.loads(message["tool_calls"][0]["function"]["arguments"]) == {"name": "Marie Dupont"}
+    assert json.loads(message["function_call"]["arguments"]) == {"name": "Marie Dupont"}
+
+
+@pytest.mark.asyncio
 async def test_outlet_leaves_output_untouched_when_no_pii():
     # A clean reply (nothing to restore) must not be rewritten: outlet returns the
     # SAME output object so Open WebUI treats it as unchanged and skips persisting.
@@ -186,9 +260,7 @@ async def test_outlet_leaves_output_untouched_when_no_pii():
     flt.valves.languages = "en"
 
     meta: dict = {}
-    await flt.inlet(
-        {"messages": [{"role": "user", "content": "I am Marie Dupont"}]}, meta
-    )
+    await flt.inlet({"messages": [{"role": "user", "content": "I am Marie Dupont"}]}, meta)
 
     original_output = [
         {"type": "message", "content": [{"type": "output_text", "text": "no pii here"}]}
@@ -226,11 +298,37 @@ async def test_inlet_ignores_types_not_present():
     flt.valves.block_entities = "US_SSN"
 
     meta: dict = {}
-    body = {"messages": [
-        {"role": "user", "content": "I am Marie Dupont, email marie.dupont@acme.com"}
-    ]}
+    body = {
+        "messages": [{"role": "user", "content": "I am Marie Dupont, email marie.dupont@acme.com"}]
+    }
     body = await flt.inlet(body, meta)
     anonymized = body["messages"][0]["content"]
 
     assert "Marie Dupont" not in anonymized
     assert "marie.dupont@acme.com" not in anonymized
+
+
+@pytest.mark.asyncio
+async def test_inlet_failure_clears_map_and_aborts_before_returning_body(monkeypatch):
+    # A detector/engine failure must not fall back to a raw body. inlet() clears
+    # caller-controlled state first and propagates the failure, so outlet cannot
+    # later restore from a stale map that OpenWebUI might persist.
+    module = _load_filter()
+    flt = module.Filter()
+
+    class FailingEngine:
+        async def process_request(self, messages):
+            raise RuntimeError("detector unavailable")
+
+    async def _failing_engine_for(_languages):
+        return FailingEngine()
+
+    monkeypatch.setattr(flt, "_engine_for", _failing_engine_for)
+    body = {"messages": [{"role": "user", "content": "Marie Dupont"}]}
+    meta = {"privaite_map": {"<PERSON_1>": "attacker-controlled"}}
+
+    with pytest.raises(RuntimeError, match="detector unavailable"):
+        await flt.inlet(body, meta)
+
+    assert body["messages"][0]["content"] == "Marie Dupont"
+    assert "privaite_map" not in meta

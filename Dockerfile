@@ -15,8 +15,8 @@ RUN python -m spacy download en_core_web_lg && \
 
 # Pre-download the default ONNX Privacy Filter model and tokenizer so the
 # container starts fast and works offline from the first request.
-RUN python -c "from privaite.pii.detector_onnx import download_onnx_model; download_onnx_model()" && \
-    python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('openai/privacy-filter')"
+RUN python -c "from privaite.config.schema import OnnxDetectorConfig; from privaite.pii.detector_onnx import download_onnx_model; config = OnnxDetectorConfig(); download_onnx_model(repo_id=config.model_name, revision=config.revision)" && \
+    python -c "from privaite.config.schema import OnnxDetectorConfig; from transformers import AutoTokenizer; config = OnnxDetectorConfig(); AutoTokenizer.from_pretrained(config.model_name, revision=config.revision, trust_remote_code=config.trust_remote_code)"
 
 COPY config/ config/
 

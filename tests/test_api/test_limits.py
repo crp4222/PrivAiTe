@@ -48,9 +48,7 @@ async def test_auth_rejects_before_body_is_buffered(monkeypatch):
     app.state.pii_tracker = None
     app.state.provider_router = ProviderRouter([])
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/v1/chat/completions",
             content="x" * 500,
@@ -65,9 +63,7 @@ async def test_auth_rejects_before_body_is_buffered(monkeypatch):
 @pytest.mark.asyncio
 async def test_oversized_request_is_rejected():
     app = _app(max_bytes=100)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/v1/chat/completions",
             content="x" * 500,
@@ -79,12 +75,8 @@ async def test_oversized_request_is_rejected():
 @pytest.mark.asyncio
 async def test_request_within_limit_passes_size_check():
     app = _app(max_bytes=10_000_000)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        resp = await client.post(
-            "/v1/chat/completions", json={"model": "x", "messages": []}
-        )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/v1/chat/completions", json={"model": "x", "messages": []})
     # The size middleware lets it through; the request fails later for another
     # reason (unknown model), never with 413.
     assert resp.status_code != 413

@@ -61,11 +61,15 @@ async def anonymize_or_error(
         # nothing. Independent of on_error. The message names TYPES, not values.
         return None, openai_error(str(exc), "invalid_request_error", 400, "pii_blocked")
     except Exception:
-        log.exception("PII processing failed")
+        # Detector/anonymizer exceptions can contain the source text. Do not
+        # attach a traceback to a log record on a privacy-sensitive path.
+        log.error("PII processing failed")
         if config.pii.on_error != "allow":  # fail closed unless explicit opt-out
             return None, openai_error(
                 "PII anonymization failed. Request blocked for privacy.",
-                "server_error", 500, "pii_error",
+                "server_error",
+                500,
+                "pii_error",
             )
         return None, None
 
@@ -79,7 +83,9 @@ async def call_provider(
     try:
         return await call(), None
     except Exception as exc:
-        log.exception("Provider error for model %s", model)
+        # A provider may echo request fields in an exception. It receives
+        # anonymized text in the normal path, but logging it is still unsafe.
+        log.error("Provider request failed")
         return None, provider_error_response(exc)
 
 
@@ -107,9 +113,7 @@ async def resolve_input(
 
 
 def sse_response(generator: AsyncIterator[str]) -> StreamingResponse:
-    return StreamingResponse(
-        generator, media_type="text/event-stream", headers=dict(SSE_HEADERS)
-    )
+    return StreamingResponse(generator, media_type="text/event-stream", headers=dict(SSE_HEADERS))
 
 
 async def stream_or_error(

@@ -23,6 +23,19 @@ class UnsupportedContentError(Exception):
     """Raised in strict mode when a payload shape cannot be inspected for PII."""
 
 
+class PIIProcessingError(RuntimeError):
+    """A safe error for an unexpected PII-processing failure.
+
+    Detector and anonymizer exceptions can include the text they were given. Do
+    not let those exceptions cross a request boundary: integration hosts commonly
+    log unhandled exceptions, which would turn a fail-closed request into a PII
+    log leak.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("PII processing failed")
+
+
 class PIIBlockedError(Exception):
     """Raised when a request contains a PII type configured to be blocked outright
     (pii.block_entities). Carries the entity TYPES that triggered the block, never
@@ -31,8 +44,7 @@ class PIIBlockedError(Exception):
     def __init__(self, entity_types: set[str]) -> None:
         self.entity_types = sorted(entity_types)
         super().__init__(
-            "request blocked: contains disallowed PII type(s): "
-            + ", ".join(self.entity_types)
+            "request blocked: contains disallowed PII type(s): " + ", ".join(self.entity_types)
         )
 
 
@@ -123,11 +135,11 @@ class PIIEngine:
         if not self.detectors:
             return
         try:
-            await self.process_request(
-                [{"role": "user", "content": "warm up jean@example.com"}]
-            )
+            await self.process_request([{"role": "user", "content": "warm up jean@example.com"}])
         except Exception:  # pragma: no cover - warmup is best-effort, never fatal
-            logger.warning("PII engine warmup pass failed (non-fatal)", exc_info=True)
+            # Never include an exception or traceback here: a detector may have
+            # copied its input into the exception message.
+            logger.warning("PII engine warmup pass failed (non-fatal)")
 
     async def shutdown(self) -> None:
         for detector in self.detectors:
@@ -135,6 +147,23 @@ class PIIEngine:
         self._ready = False
 
     async def process_request(
+        self, messages: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], PIIMapping]:
+        """Anonymize a request, exposing only safe failures to callers.
+
+        Both in-process integrations let this exception propagate to their host,
+        which may log it. Keep expected policy errors intact, but deliberately
+        discard all other exception details because they may contain raw input.
+        """
+        try:
+            return await self._process_request(messages)
+        except (PIIBlockedError, UnsupportedContentError, PIIProcessingError):
+            raise
+        except Exception:
+            logger.error("PII request processing failed; request will be blocked")
+            raise PIIProcessingError() from None
+
+    async def _process_request(
         self, messages: list[dict[str, Any]]
     ) -> tuple[list[dict[str, Any]], PIIMapping]:
         mapping = PIIMapping()
@@ -174,24 +203,28 @@ class PIIEngine:
         langs = self.config.detectors.presidio.languages
         return langs[0] if langs else "en"
 
-    async def _anonymize_text(
-        self, text: Any, mapping: PIIMapping, language: str
-    ) -> Any:
+    async def _anonymize_text(self, text: Any, mapping: PIIMapping, language: str) -> Any:
         if not text or not isinstance(text, str):
             return text
-        entities = await self._detect_all(text, language)
-        # Hard policy gate: if any detected type is blocked, reject the whole
-        # request before anonymizing (nothing is forwarded). This single choke
-        # point covers message content, multimodal text, and tool-call arguments.
-        if self._blocked:
-            hit = {e.entity_type for e in entities if e.entity_type in self._blocked}
-            if hit:
-                raise PIIBlockedError(hit)
-        return self.anonymizer.anonymize(text, entities, mapping)
+        try:
+            entities = await self._detect_all(text, language)
+            # Hard policy gate: if any detected type is blocked, reject the whole
+            # request before anonymizing (nothing is forwarded). This single choke
+            # point covers message content, multimodal text, and tool-call arguments.
+            if self._blocked:
+                hit = {e.entity_type for e in entities if e.entity_type in self._blocked}
+                if hit:
+                    raise PIIBlockedError(hit)
+            return self.anonymizer.anonymize(text, entities, mapping)
+        except (PIIBlockedError, PIIProcessingError):
+            raise
+        except Exception:
+            # The anonymizer receives raw text too, so it must not expose an
+            # implementation error (or its traceback) to a host logger.
+            logger.error("PII anonymization failed; request will be blocked")
+            raise PIIProcessingError() from None
 
-    async def _anonymize_content(
-        self, content: Any, mapping: PIIMapping, language: str
-    ) -> Any:
+    async def _anonymize_content(self, content: Any, mapping: PIIMapping, language: str) -> Any:
         if isinstance(content, str):
             return await self._anonymize_text(content, mapping, language)
         if content is None:
@@ -208,9 +241,7 @@ class PIIEngine:
                     new_parts.append(await self._anonymize_text(part, mapping, language))
                 elif isinstance(part, dict) and isinstance(part.get("text"), str):
                     new_part = dict(part)
-                    new_part["text"] = await self._anonymize_text(
-                        part["text"], mapping, language
-                    )
+                    new_part["text"] = await self._anonymize_text(part["text"], mapping, language)
                     new_parts.append(new_part)
                 elif self._is_known_media_part(part):
                     new_parts.append(part)
@@ -268,9 +299,7 @@ class PIIEngine:
         )
         return new_call
 
-    async def _anonymize_arguments(
-        self, arguments: str, mapping: PIIMapping, language: str
-    ) -> str:
+    async def _anonymize_arguments(self, arguments: str, mapping: PIIMapping, language: str) -> str:
         try:
             parsed = json.loads(arguments)
         except (json.JSONDecodeError, ValueError):
@@ -279,9 +308,7 @@ class PIIEngine:
         walked = await self._walk_anonymize(parsed, mapping, language)
         return json.dumps(walked, ensure_ascii=False)
 
-    async def _walk_anonymize(
-        self, value: Any, mapping: PIIMapping, language: str
-    ) -> Any:
+    async def _walk_anonymize(self, value: Any, mapping: PIIMapping, language: str) -> Any:
         if isinstance(value, str):
             return await self._anonymize_text(value, mapping, language)
         # bool is a subclass of int; leave true/false alone.
@@ -322,16 +349,25 @@ class PIIEngine:
         """
         if not text or not isinstance(text, str):
             return []
-        return await self._detect_all(text, self._language())
+        try:
+            return await self._detect_all(text, self._language())
+        except PIIProcessingError:
+            raise
+        except Exception:
+            logger.error("PII inspection failed")
+            raise PIIProcessingError() from None
 
     async def process_response(self, content: str, mapping: PIIMapping) -> str:
         if not self.config.deanonymization.enabled:
             return content
-        return self.deanonymizer.deanonymize(content, mapping)
+        try:
+            return self.deanonymizer.deanonymize(content, mapping)
+        except Exception:
+            # A restore failure can include the original value from the mapping.
+            logger.error("PII response deanonymization failed")
+            raise PIIProcessingError() from None
 
-    async def process_response_tool_calls(
-        self, tool_calls: Any, mapping: PIIMapping | None
-    ) -> Any:
+    async def process_response_tool_calls(self, tool_calls: Any, mapping: PIIMapping | None) -> Any:
         if (
             not self.config.deanonymization.enabled
             or mapping is None
@@ -340,21 +376,25 @@ class PIIEngine:
         ):
             return tool_calls
 
-        new_calls: list[Any] = []
-        for call in tool_calls:
-            if not isinstance(call, dict):
-                new_calls.append(call)
-                continue
-            new_call = dict(call)
-            function = call.get("function")
-            if isinstance(function, dict) and isinstance(function.get("arguments"), str):
-                new_function = dict(function)
-                new_function["arguments"] = self._deanonymize_arguments(
-                    function["arguments"], mapping
-                )
-                new_call["function"] = new_function
-            new_calls.append(new_call)
-        return new_calls
+        try:
+            new_calls: list[Any] = []
+            for call in tool_calls:
+                if not isinstance(call, dict):
+                    new_calls.append(call)
+                    continue
+                new_call = dict(call)
+                function = call.get("function")
+                if isinstance(function, dict) and isinstance(function.get("arguments"), str):
+                    new_function = dict(function)
+                    new_function["arguments"] = self._deanonymize_arguments(
+                        function["arguments"], mapping
+                    )
+                    new_call["function"] = new_function
+                new_calls.append(new_call)
+            return new_calls
+        except Exception:
+            logger.error("PII tool-call deanonymization failed")
+            raise PIIProcessingError() from None
 
     async def process_response_function_call(
         self, function_call: Any, mapping: PIIMapping | None
@@ -367,11 +407,13 @@ class PIIEngine:
             or not isinstance(function_call.get("arguments"), str)
         ):
             return function_call
-        new_call = dict(function_call)
-        new_call["arguments"] = self._deanonymize_arguments(
-            function_call["arguments"], mapping
-        )
-        return new_call
+        try:
+            new_call = dict(function_call)
+            new_call["arguments"] = self._deanonymize_arguments(function_call["arguments"], mapping)
+            return new_call
+        except Exception:
+            logger.error("PII function-call deanonymization failed")
+            raise PIIProcessingError() from None
 
     def _deanonymize_arguments(self, arguments: str, mapping: PIIMapping) -> str:
         try:
@@ -389,25 +431,36 @@ class PIIEngine:
             return [self._walk_deanonymize(v, mapping) for v in value]
         return value
 
-    async def _detect_all(
-        self, text: str, language: str = "en"
-    ) -> list[PIIEntity]:
+    async def _detect_all(self, text: str, language: str = "en") -> list[PIIEntity]:
         if not self.detectors:
             return []
 
         tasks = [detector.detect(text, language) for detector in self.detectors]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+        except Exception:
+            logger.error("PII detector execution failed; request will be blocked")
+            raise PIIProcessingError() from None
 
         all_entities: list[PIIEntity] = []
         for result in results:
             if isinstance(result, BaseException):
-                logger.error("Detector failed: %s", result)
-                raise result
+                # Do not log or re-raise the original exception: detector
+                # libraries (and custom detectors) may put their input text in
+                # the message. The safe error keeps all callers fail-closed.
+                logger.error("PII detector failed; request will be blocked")
+                raise PIIProcessingError() from None
             all_entities.extend(result)
 
-        return merge_entities(
-            all_entities,
-            strategy=self.config.merge_strategy,
-            overlap_resolution=self.config.overlap_resolution,
-            source_text=text,
-        )
+        try:
+            return merge_entities(
+                all_entities,
+                strategy=self.config.merge_strategy,
+                overlap_resolution=self.config.overlap_resolution,
+                source_text=text,
+            )
+        except Exception:
+            # merge_entities receives source_text for overlap resolution; keep
+            # its errors safe for the same reason as detector errors.
+            logger.error("PII detection result processing failed; request will be blocked")
+            raise PIIProcessingError() from None

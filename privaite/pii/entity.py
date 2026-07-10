@@ -115,9 +115,7 @@ def _merge_intersection(
     return _merge_union(confirmed, "highest_score", source_text)
 
 
-def _resolve_overlap(
-    a: PIIEntity, b: PIIEntity, resolution: str
-) -> PIIEntity:
+def _resolve_overlap(a: PIIEntity, b: PIIEntity, resolution: str) -> PIIEntity:
     if resolution == "longest_span":
         return a if a.length >= b.length else b
     if resolution == "presidio_priority":

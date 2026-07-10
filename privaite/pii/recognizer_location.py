@@ -17,9 +17,7 @@ _RESIDENCE = (
     r")\s+" + _LOC_GROUP
 )
 
-_STRONG_PREP = (
-    r"(?:[àÀ]|[nN]ear|[vV]ia)\s+" + _LOC_GROUP
-)
+_STRONG_PREP = r"(?:[àÀ]|[nN]ear|[vV]ia)\s+" + _LOC_GROUP
 
 COMPILED = [
     re.compile(_RESIDENCE, re.UNICODE),

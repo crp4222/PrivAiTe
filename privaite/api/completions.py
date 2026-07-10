@@ -73,12 +73,14 @@ async def completions(
             lambda s: StreamingHandler.stream_text_response(
                 litellm_stream=s, mapping=mapping, deanonymizer_config=deanon_config
             ),
-            model, logger,
+            model,
+            logger,
         )
 
     response, error = await call_provider(
         lambda: provider_router.text_completion(model_alias=model, prompt=prompt, **kwargs),
-        model, logger,
+        model,
+        logger,
     )
     if error is not None:
         return error

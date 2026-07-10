@@ -59,13 +59,15 @@ async def test_bert_detector_scans_past_the_old_truncation_horizon():
         idx = chunk.find(email)
         if idx < 0:
             return []
-        return [{
-            "entity_group": "PER",  # mapped type in the default label_mapping
-            "score": 0.99,
-            "start": idx,
-            "end": idx + len(email),
-            "word": email,
-        }]
+        return [
+            {
+                "entity_group": "PER",  # mapped type in the default label_mapping
+                "score": 0.99,
+                "start": idx,
+                "end": idx + len(email),
+                "word": email,
+            }
+        ]
 
     detector = BertNERDetector(BertNERDetectorConfig(enabled=True))
     detector._classifier = classifier

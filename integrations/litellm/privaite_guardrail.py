@@ -62,14 +62,13 @@ class PrivaiteGuardrail(CustomGuardrail):
         self.languages = kwargs.pop("languages", None) or "en,fr"
         deanon = kwargs.pop("deanonymize", True)
         self.deanonymize = (
-            deanon if isinstance(deanon, bool)
+            deanon
+            if isinstance(deanon, bool)
             else str(deanon).strip().lower() not in ("false", "0", "no", "")
         )
         # PII TYPES to reject outright (empty = mask everything, the default).
         # Accepts a YAML list or a comma-separated string.
-        self.block_entities = self._parse_block_entities(
-            kwargs.pop("block_entities", None)
-        )
+        self.block_entities = self._parse_block_entities(kwargs.pop("block_entities", None))
         kwargs.setdefault(
             "supported_event_hooks",
             [GuardrailEventHooks.pre_call, GuardrailEventHooks.post_call],
@@ -302,7 +301,7 @@ class PrivaiteGuardrail(CustomGuardrail):
             value = getattr(message, field, None)
             if isinstance(value, str) and value:
                 setattr(message, field, await engine.process_response(value, mapping))
-        for tool_call in (getattr(message, "tool_calls", None) or []):
+        for tool_call in getattr(message, "tool_calls", None) or []:
             fn = getattr(tool_call, "function", None)
             if fn is None:
                 continue
@@ -333,7 +332,7 @@ class PrivaiteGuardrail(CustomGuardrail):
             mapping.add(original, fake, "PII")
 
         engine = await self._engine_for(self._languages())
-        for choice in (getattr(response, "choices", None) or []):
+        for choice in getattr(response, "choices", None) or []:
             message = getattr(choice, "message", None)
             if message is not None:
                 await self._restore_message(message, engine, mapping)
@@ -341,13 +340,11 @@ class PrivaiteGuardrail(CustomGuardrail):
         await self._restore_responses_output(response, engine, mapping)
         return response
 
-    async def _restore_responses_output(
-        self, response: Any, engine: Any, mapping: Any
-    ) -> None:
+    async def _restore_responses_output(self, response: Any, engine: Any, mapping: Any) -> None:
         """Restore originals in a Responses API result: output_text content
         blocks and any function_call output-item arguments (dict or object)."""
-        for item in (getattr(response, "output", None) or []):
-            for block in (_obj_get(item, "content") or []):
+        for item in getattr(response, "output", None) or []:
+            for block in _obj_get(item, "content") or []:
                 text = _obj_get(block, "text")
                 if isinstance(text, str) and text:
                     _obj_set(block, "text", await engine.process_response(text, mapping))
@@ -367,7 +364,7 @@ class PrivaiteGuardrail(CustomGuardrail):
             value = getattr(delta, field, None)
             if isinstance(value, str) and (value or finished):
                 setattr(delta, field, restore((field, index), value, finished))
-        for tool_call in (getattr(delta, "tool_calls", None) or []):
+        for tool_call in getattr(delta, "tool_calls", None) or []:
             fn = getattr(tool_call, "function", None)
             if fn is None:
                 continue
@@ -419,7 +416,7 @@ class PrivaiteGuardrail(CustomGuardrail):
         # The buffer holds back partial placeholders that span chunk boundaries.
         # Whatever remains is flushed onto the chunk that carries finish_reason.
         async for chunk in response:
-            for choice in (getattr(chunk, "choices", None) or []):
+            for choice in getattr(chunk, "choices", None) or []:
                 delta = getattr(choice, "delta", None)
                 if delta is None:
                     continue
@@ -429,7 +426,10 @@ class PrivaiteGuardrail(CustomGuardrail):
             yield chunk
 
     async def async_post_call_failure_hook(
-        self, request_data: Any, original_exception: Any, user_api_key_dict: Any,
+        self,
+        request_data: Any,
+        original_exception: Any,
+        user_api_key_dict: Any,
         traceback_str: Any = None,
     ) -> Any:
         # The success/streaming hooks pop the reversible map after restoring, but

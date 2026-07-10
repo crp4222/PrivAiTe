@@ -30,7 +30,7 @@ def test_validation_error_never_echoes_interpolated_secrets(monkeypatch):
     monkeypatch.setenv("TEST_PRIVAITE_SECRET", "sk-REAL-SECRET-VALUE-123")
     data = {
         "providers": [
-            {   # model_name missing -> ValidationError
+            {  # model_name missing -> ValidationError
                 "litellm_params": {
                     "model": "openai/gpt-4o",
                     "api_key": "${TEST_PRIVAITE_SECRET}",

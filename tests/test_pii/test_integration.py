@@ -28,9 +28,16 @@ def engine():
                 languages=["fr", "en"],
                 score_threshold=0.4,
                 entities=[
-                    "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD",
-                    "IBAN_CODE", "IP_ADDRESS", "LOCATION", "DATE_TIME",
-                    "US_SSN", "URL",
+                    "PERSON",
+                    "EMAIL_ADDRESS",
+                    "PHONE_NUMBER",
+                    "CREDIT_CARD",
+                    "IBAN_CODE",
+                    "IP_ADDRESS",
+                    "LOCATION",
+                    "DATE_TIME",
+                    "US_SSN",
+                    "URL",
                 ],
             ),
         ),
@@ -188,8 +195,7 @@ async def test_no_false_positives_on_clean_text(engine):
         msgs = [{"role": "user", "content": text}]
         anon_msgs, mapping = await engine.process_request(msgs)
         assert mapping.is_empty, (
-            f"False positive on: {text} → "
-            f"{list(mapping._original_to_fake.keys())}"
+            f"False positive on: {text} → {list(mapping._original_to_fake.keys())}"
         )
 
 
@@ -255,15 +261,11 @@ async def test_block_entities_rejects_real_email():
     await eng.initialize()
     try:
         with pytest.raises(PIIBlockedError) as ei:
-            await eng.process_request(
-                [{"role": "user", "content": "email me at bob@example.com"}]
-            )
+            await eng.process_request([{"role": "user", "content": "email me at bob@example.com"}])
         assert "EMAIL_ADDRESS" in str(ei.value)
         assert "bob@example.com" not in str(ei.value)  # value never in the error
         # a message without the blocked type still processes normally
-        anon, _ = await eng.process_request(
-            [{"role": "user", "content": "just saying hi"}]
-        )
+        anon, _ = await eng.process_request([{"role": "user", "content": "just saying hi"}])
         assert anon
     finally:
         await eng.shutdown()

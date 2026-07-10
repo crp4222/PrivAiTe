@@ -21,12 +21,14 @@ class _FakeGlinerModel:
 async def test_detect_maps_labels_offsets_and_filters_threshold():
     text = "Marie Dupont wrote to bob@acme.com"
     detector = GlinerDetector(GlinerDetectorConfig(enabled=True, score_threshold=0.5))
-    detector._model = _FakeGlinerModel([
-        {"label": "person", "start": 0, "end": 12, "score": 0.95},
-        {"label": "email", "start": 22, "end": 34, "score": 0.9},
-        {"label": "person", "start": 0, "end": 5, "score": 0.2},   # below threshold -> dropped
-        {"label": "job title", "start": 0, "end": 4, "score": 0.9},  # unmapped label -> dropped
-    ])
+    detector._model = _FakeGlinerModel(
+        [
+            {"label": "person", "start": 0, "end": 12, "score": 0.95},
+            {"label": "email", "start": 22, "end": 34, "score": 0.9},
+            {"label": "person", "start": 0, "end": 5, "score": 0.2},  # below threshold -> dropped
+            {"label": "job title", "start": 0, "end": 4, "score": 0.9},  # unmapped label -> dropped
+        ]
+    )
 
     entities = await detector.detect(text, "en")
 
@@ -35,7 +37,7 @@ async def test_detect_maps_labels_offsets_and_filters_threshold():
     assert ("EMAIL_ADDRESS", "bob@acme.com") in by_type
     assert len(entities) == 2  # low-score and unmapped were filtered
     for e in entities:
-        assert text[e.start:e.end] == e.text  # offsets point at the real substring
+        assert text[e.start : e.end] == e.text  # offsets point at the real substring
         assert e.source == "gliner"
 
 

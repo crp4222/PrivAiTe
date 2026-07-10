@@ -52,9 +52,7 @@ class Anonymizer:
         override = self.config.entity_overrides.get(entity_type)
         return override.method if override else self.config.method
 
-    def _make_placeholder(
-        self, entity_type: str, original: str, mapping: PIIMapping
-    ) -> str:
+    def _make_placeholder(self, entity_type: str, original: str, mapping: PIIMapping) -> str:
         override = self.config.entity_overrides.get(entity_type)
         method = override.method if override else self.config.method
         masking_char = override.masking_char if override else "*"
@@ -66,9 +64,7 @@ class Anonymizer:
         if method == "fake_replacement":
             fake = self.generator.generate(entity_type, original)
             retries = 0
-            while (
-                fake == original or mapping.get_original(fake) is not None
-            ) and retries < 10:
+            while (fake == original or mapping.get_original(fake) is not None) and retries < 10:
                 fake = self.generator.generate_variant(entity_type, original, retries)
                 retries += 1
             return fake

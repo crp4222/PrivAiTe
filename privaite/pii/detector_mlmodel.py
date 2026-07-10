@@ -36,7 +36,8 @@ class MLModelDetector(HFPipelineDetector):
 
             logger.info(
                 "Loading model weights (dtype=%s, device=%s)...",
-                self.config.torch_dtype, device,
+                self.config.torch_dtype,
+                device,
             )
 
             tokenizer = AutoTokenizer.from_pretrained(

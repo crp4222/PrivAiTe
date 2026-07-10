@@ -10,25 +10,20 @@ from privaite.pii.entity import PIIEntity
 
 class PIIDetector(ABC):
     @abstractmethod
-    async def detect(self, text: str, language: str = "en") -> list[PIIEntity]:
-        ...
+    async def detect(self, text: str, language: str = "en") -> list[PIIEntity]: ...
 
     @abstractmethod
-    async def initialize(self) -> None:
-        ...
+    async def initialize(self) -> None: ...
 
     async def shutdown(self) -> None:
         pass
 
     @property
     @abstractmethod
-    def name(self) -> str:
-        ...
+    def name(self) -> str: ...
 
 
-def chunk_text(
-    text: str, max_chars: int = 1500, overlap: int = 200
-) -> list[tuple[int, str]]:
+def chunk_text(text: str, max_chars: int = 1500, overlap: int = 200) -> list[tuple[int, str]]:
     """Split ``text`` into (offset, chunk) windows for detectors whose models
     silently truncate long inputs (the HF token-classification pipeline caps at
     model_max_length, so PII past that point was simply invisible). Chunks

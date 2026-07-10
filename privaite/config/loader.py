@@ -18,6 +18,7 @@ _ENV_VAR_PATTERN = re.compile(r"\$\{([^}]+)}")
 
 def _interpolate_env_vars(obj: object) -> object:
     if isinstance(obj, str):
+
         def _replace(match: re.Match) -> str:
             var_name = match.group(1)
             value = os.environ.get(var_name)
@@ -54,8 +55,8 @@ def load_config(path: str | Path | None = None) -> PrivAiTeConfig:
             # not silently degrade to an empty default config with 0 providers.
             raise FileNotFoundError(f"Config file not found: {path}")
         logger.warning(
-            "No config file at default path %s; starting with built-in defaults "
-            "(0 providers)", path,
+            "No config file at default path %s; starting with built-in defaults (0 providers)",
+            path,
         )
         return PrivAiTeConfig()
 

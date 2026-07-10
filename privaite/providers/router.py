@@ -17,9 +17,7 @@ class ProviderRouter:
             if p.model_name in self._model_map:
                 # A silent last-wins overwrite routes traffic to a different
                 # provider than the operator thinks; refuse to start instead.
-                raise ValueError(
-                    f"Duplicate provider model_name alias '{p.model_name}' in config"
-                )
+                raise ValueError(f"Duplicate provider model_name alias '{p.model_name}' in config")
             params = p.litellm_params.model_dump(exclude_none=True)
             self._model_map[p.model_name] = params
             logger.info("Registered model alias: %s -> %s", p.model_name, params.get("model"))
@@ -36,14 +34,10 @@ class ProviderRouter:
             raise KeyError(f"Model alias '{alias}' not configured")
         return dict(self._model_map[alias])
 
-    async def completion(
-        self, model_alias: str, messages: list[dict], **kwargs: Any
-    ) -> Any:
+    async def completion(self, model_alias: str, messages: list[dict], **kwargs: Any) -> Any:
         params = self.resolve_model(model_alias)
         model = params.pop("model")
-        return await litellm.acompletion(
-            model=model, messages=messages, **params, **kwargs
-        )
+        return await litellm.acompletion(model=model, messages=messages, **params, **kwargs)
 
     async def streaming_completion(
         self, model_alias: str, messages: list[dict], **kwargs: Any
@@ -63,9 +57,7 @@ class ProviderRouter:
         # from choices[].message.content it does not read.
         params = self.resolve_model(model_alias)
         model = params.pop("model")
-        return await litellm.atext_completion(
-            model=model, prompt=prompt, **params, **kwargs
-        )
+        return await litellm.atext_completion(model=model, prompt=prompt, **params, **kwargs)
 
     async def streaming_text_completion(
         self, model_alias: str, prompt: str | list[str], **kwargs: Any
@@ -76,11 +68,7 @@ class ProviderRouter:
             model=model, prompt=prompt, stream=True, **params, **kwargs
         )
 
-    async def embedding(
-        self, model_alias: str, input_text: str | list[str], **kwargs: Any
-    ) -> Any:
+    async def embedding(self, model_alias: str, input_text: str | list[str], **kwargs: Any) -> Any:
         params = self.resolve_model(model_alias)
         model = params.pop("model")
-        return await litellm.aembedding(
-            model=model, input=input_text, **params, **kwargs
-        )
+        return await litellm.aembedding(model=model, input=input_text, **params, **kwargs)

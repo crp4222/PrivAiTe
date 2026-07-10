@@ -55,9 +55,6 @@ class PIITracker:
 
     def _evict_expired(self) -> None:
         now = time.time()
-        expired = [
-            sid for sid, s in self._sessions.items()
-            if now - s.last_seen > self._ttl
-        ]
+        expired = [sid for sid, s in self._sessions.items() if now - s.last_seen > self._ttl]
         for sid in expired:
             del self._sessions[sid]

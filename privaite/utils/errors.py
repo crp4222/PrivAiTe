@@ -26,34 +26,46 @@ def provider_error_response(exc: Exception) -> JSONResponse:
     if "AuthenticationError" in exc_type:
         return openai_error(
             "Provider authentication failed. Check your API key.",
-            "auth_error", 401, "provider_auth_error",
+            "auth_error",
+            401,
+            "provider_auth_error",
         )
 
     if "RateLimitError" in exc_type:
         return openai_error(
             "Provider rate limit exceeded. Try again later.",
-            "rate_limit_error", 429, "rate_limit",
+            "rate_limit_error",
+            429,
+            "rate_limit",
         )
 
     if "Timeout" in exc_type:
         return openai_error(
             "Provider request timed out.",
-            "timeout_error", 504, "timeout",
+            "timeout_error",
+            504,
+            "timeout",
         )
 
     if "NotFoundError" in exc_type:
         return openai_error(
             "Model not found on provider.",
-            "not_found_error", 404, "model_not_found",
+            "not_found_error",
+            404,
+            "model_not_found",
         )
 
     if "ServiceUnavailableError" in exc_type:
         return openai_error(
             "Provider is temporarily unavailable.",
-            "service_unavailable", 503, "provider_unavailable",
+            "service_unavailable",
+            503,
+            "provider_unavailable",
         )
 
     return openai_error(
         "An error occurred with the provider.",
-        "server_error", 502, "provider_error",
+        "server_error",
+        502,
+        "provider_error",
     )

@@ -22,9 +22,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     config: PrivAiTeConfig = app.state.config
 
     app.state.provider_router = ProviderRouter(config.providers)
-    logger.info(
-        "Provider router ready with %d model(s)", len(config.providers)
-    )
+    logger.info("Provider router ready with %d model(s)", len(config.providers))
 
     if config.auth.enabled and not get_api_keys():
         logger.warning(
@@ -75,6 +73,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app(config: PrivAiTeConfig | None = None) -> FastAPI:
     if config is None:
         from privaite.config.loader import load_config
+
         config = load_config()
 
     setup_logging(level=config.logging.level, fmt=config.logging.format)
@@ -93,9 +92,7 @@ def create_app(config: PrivAiTeConfig | None = None) -> FastAPI:
     # Starlette runs the LAST added middleware first. Auth must be outermost:
     # it only reads headers, so an unauthenticated request is rejected before
     # the size limiter buffers up to max_request_bytes of body for it.
-    app.add_middleware(
-        RequestSizeLimitMiddleware, max_bytes=config.server.max_request_bytes
-    )
+    app.add_middleware(RequestSizeLimitMiddleware, max_bytes=config.server.max_request_bytes)
     app.add_middleware(AuthMiddleware)
     app.include_router(api_router)
 

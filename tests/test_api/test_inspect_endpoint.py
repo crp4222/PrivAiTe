@@ -93,9 +93,7 @@ def _make_app(
 
 
 async def _post(app, payload) -> object:
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         return await client.post("/v1/pii/inspect", json=payload)
 
 
@@ -121,7 +119,7 @@ async def test_inspect_returns_entities_spans_and_anonymized_preview():
     assert types == {"PERSON", "EMAIL_ADDRESS"}
     for entity in data["entities"]:
         # Span offsets point at the exact substring in the submitted text.
-        assert text[entity["start"]:entity["end"]] == entity["text"]
+        assert text[entity["start"] : entity["end"]] == entity["text"]
         # Each detected value maps to the placeholder the provider would see.
         assert entity["replacement"]
         assert entity["replacement"] in data["anonymized"]

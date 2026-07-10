@@ -64,6 +64,7 @@ pii:
     # onnx:
     #   enabled: true
     #   model_name: "openai/privacy-filter"
+    #   revision: "7ffa9a043d54d1be65afb281eddf0ffbe629385b" # immutable HF commit
     #   onnx_variant: "q4f16"     # quantized variant downloaded from Hugging Face
     #   device: "auto"            # auto, cpu, cuda, coreml/mps
     #   score_threshold: 0.5
@@ -71,15 +72,23 @@ pii:
     bert_ner:
       enabled: false
       model_name: "dslim/bert-base-NER"
+      revision: "d1a3e8f13f8c3566299d95fcfc9a8d2382a9affc"
       device: "auto"
       score_threshold: 0.5
 
     mlmodel:
       enabled: false
       model_name: "openai/privacy-filter"
+      revision: "7ffa9a043d54d1be65afb281eddf0ffbe629385b"
       device: "auto"
       torch_dtype: "float16"
       score_threshold: 0.5
+
+    # The max preset enables this automatically. Requires: pip install 'privaite[gliner]'.
+    gliner:
+      enabled: false
+      model_name: "urchade/gliner_multi_pii-v1"
+      revision: "1fcf13e85f4eef5394e1fcd406cf2ca9ea82351d"
 
   merge_strategy: "union"
   overlap_resolution: "highest_score"

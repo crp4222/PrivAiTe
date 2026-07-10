@@ -39,9 +39,7 @@ def test_deanonymize_empty_mapping():
 
 
 def test_deanonymize_fuzzy():
-    config = DeanonymizationConfig(
-        enabled=True, fuzzy_matching=True, fuzzy_threshold=0.75
-    )
+    config = DeanonymizationConfig(enabled=True, fuzzy_matching=True, fuzzy_threshold=0.75)
     deanon = DeAnonymizer(config)
 
     mapping = PIIMapping()
@@ -74,9 +72,7 @@ def test_deanonymize_fuzzy_preserves_whitespace_and_structure():
     # The old implementation rebuilt the text with split()/join(), flattening
     # every newline and indent in any response that carried PII. The fuzzy pass
     # must now splice replacements into the original string.
-    config = DeanonymizationConfig(
-        enabled=True, fuzzy_matching=True, fuzzy_threshold=0.75
-    )
+    config = DeanonymizationConfig(enabled=True, fuzzy_matching=True, fuzzy_threshold=0.75)
     deanon = DeAnonymizer(config)
 
     mapping = PIIMapping()
@@ -106,9 +102,7 @@ def test_deanonymize_fuzzy_never_rewrites_unknown_placeholders():
     # not inject person 1's PII into a placeholder that never existed, and the
     # guard must hold with attached punctuation, different case, or parentheses
     # (the raw token is not the placeholder, its punctuation-stripped core is).
-    config = DeanonymizationConfig(
-        enabled=True, fuzzy_matching=True, fuzzy_threshold=0.85
-    )
+    config = DeanonymizationConfig(enabled=True, fuzzy_matching=True, fuzzy_threshold=0.85)
     deanon = DeAnonymizer(config)
 
     mapping = PIIMapping()
@@ -126,9 +120,7 @@ def test_deanonymize_fuzzy_never_rewrites_unknown_placeholders():
 
 def test_deanonymize_fuzzy_replaces_core_and_keeps_punctuation():
     # A legitimate near-match with a trailing comma: the comma must survive.
-    config = DeanonymizationConfig(
-        enabled=True, fuzzy_matching=True, fuzzy_threshold=0.85
-    )
+    config = DeanonymizationConfig(enabled=True, fuzzy_matching=True, fuzzy_threshold=0.85)
     deanon = DeAnonymizer(config)
 
     mapping = PIIMapping()
@@ -141,9 +133,7 @@ def test_deanonymize_fuzzy_replaces_core_and_keeps_punctuation():
 def test_deanonymize_fuzzy_catches_fake_retyped_across_whitespace():
     # The exact use case fuzzy exists for: the model re-typed the fake across a
     # newline or a double space. The ratio is computed whitespace-normalized.
-    config = DeanonymizationConfig(
-        enabled=True, fuzzy_matching=True, fuzzy_threshold=0.85
-    )
+    config = DeanonymizationConfig(enabled=True, fuzzy_matching=True, fuzzy_threshold=0.85)
     deanon = DeAnonymizer(config)
 
     mapping = PIIMapping()
