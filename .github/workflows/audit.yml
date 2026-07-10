@@ -4,6 +4,8 @@
 # resolve a version with a known CVE: raise the floor past the fixed release
 # (see pyproject.toml comments for the ones already raised). This is the
 # deliberate counterpart to Dependabot: it signals, a human bumps.
+# Advisories whose fix no floor of ours can reach get a commented
+# --ignore-vuln entry on the audit step instead of a permanently red run.
 name: Dependency audit
 
 on:
@@ -28,6 +30,11 @@ jobs:
           pip install -e ".[ml,gliner,dev]"
 
       - name: Audit resolved environment
+        # Ignored advisories (keep minimal, one justification per entry):
+        # GHSA-537c-gmf6-5ccf: cryptography wheels bundle a vulnerable OpenSSL,
+        # fixed only in cryptography 48.0.1. presidio-anonymizer (core dependency,
+        # latest 2.2.363) caps cryptography<47, so no floor of ours can reach the
+        # fix. Drop the ignore once presidio allows cryptography>=48.
         run: |
           pip install pip-audit
-          pip-audit --skip-editable
+          pip-audit --skip-editable --ignore-vuln GHSA-537c-gmf6-5ccf
