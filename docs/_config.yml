@@ -4,7 +4,3 @@ description: >-
   Self-hosted LLM proxy that reversibly redacts PII before your prompts leave
   the machine, including tool-call arguments and multimodal content.
 theme: jekyll-theme-cayman
-# Serve only the site pages; drafts and heavy assets referenced elsewhere stay out.
-exclude:
-  - openailogs.png
-  - opwui.png

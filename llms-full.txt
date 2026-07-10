@@ -1,305 +1,551 @@
-# PrivAiTe: self-hosted PII redaction proxy for LLM APIs
+# PrivAiTe, full documentation
 
-PrivAiTe is a self-hosted, OpenAI-compatible proxy that redacts personal data before
-it reaches an LLM provider and restores it in the reply. It sits between your app and
-OpenAI, Anthropic, Ollama, or any LiteLLM-supported backend, replaces every detected
-PII value with a reversible numbered placeholder before the request leaves your
-machine, forwards the redacted request, and swaps the real values back into the
-response. Detection runs locally with Microsoft Presidio plus the openai/privacy-filter
-ONNX model. Nothing phones home: zero telemetry. This is reversible pseudonymization,
-not anonymization, and detection is best-effort, not a compliance guarantee. Current
-version: privaite 0.2.13 on PyPI, Open WebUI filter v0.1.6.
+> Concatenated project documentation for LLM consumption. The map with
+> one-line summaries per page is in llms.txt. Regenerated at each release.
 
-Package: https://pypi.org/project/privaite/
-Source: https://github.com/crp4222/PrivAiTe
-License: BSD 3-Clause
 
-## The problem it solves (phrased the way users ask)
 
-- How do I stop the OpenAI API or ChatGPT from seeing customer emails and names?
-- How do I redact PII before sending prompts to an LLM?
-- Is there a self-hosted privacy layer for Open WebUI or LiteLLM?
-- How do I prevent PII from leaking through agent tool calls?
-- How do I keep names, phone numbers, credit cards, and IBANs out of an LLM API call
-  and still get a coherent answer back?
+---
+<!-- source: README.md -->
 
-PrivAiTe is built for exactly these. You keep running your normal OpenAI-compatible
-client. The proxy strips the personal data on the way out and puts it back on the way
-in, so the model provider only ever sees placeholders while your application still
-receives real, readable responses. It is aimed at self-hosters, developers, and teams
-who route prompts through third-party model APIs and do not want raw customer PII
-stored, logged, or trained on by the provider.
+# PrivAiTe
 
-Example:
+Self-hosted PII redaction proxy for LLM APIs.
 
-    You type:  "Je m'appelle Marie Dupont, email marie@acme.com"
-    LLM sees:  "Je m'appelle <PERSON_1>, email <EMAIL_ADDRESS_1>"
-    LLM says:  "Bonjour <PERSON_1>, votre email <EMAIL_ADDRESS_1> est noté."
-    You see:   "Bonjour Marie Dupont, votre email marie@acme.com est noté."
+[![CI](https://github.com/crp4222/PrivAiTe/actions/workflows/ci.yml/badge.svg)](https://github.com/crp4222/PrivAiTe/actions)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-BSD--3--Clause-green.svg)](LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/privaite.svg)](https://pypi.org/project/privaite/)
 
-## How it works
+**A drop-in LLM proxy that reversibly replaces PII before it reaches the provider, including inside tool-call arguments and multimodal content, with zero telemetry.**
 
-1. Detect. Each incoming request is scanned locally by two engines that run together
-   or separately.
-   First, Presidio (Microsoft): regex plus spaCy NER. Handles structured PII with
-   validators: emails, phone numbers (international format check), credit cards (Luhn),
-   IBAN (checksum), IP addresses, US SSN, capitalized person names, and FR/DE date
-   formats. Fast (tens of milliseconds per request) with very few false positives on
-   code, news, and technical text. It does not detect secrets or passwords, and it
-   misses names spaCy does not recognize.
-   Second, the openai/privacy-filter ONNX model: OpenAI's open-source PII model (1.5B
-   params, 50M active, Apache 2.0), run locally through ONNX Runtime (about 800MB, no
-   PyTorch required). It adds context-aware person names in any case, passwords and
-   secrets (for example "SuperSecret2024!" or API keys like "sk-proj-..."), account
-   numbers, personal addresses (as LOCATION), personal URLs (as URL), and dates in any
-   language. It downloads on first start.
-   The two cover each other's blind spots: Presidio validates structured formats, the
-   ONNX model handles context-dependent PII.
+<p align="center">
+  <img src="docs/demo.gif" alt="PrivAiTe demo: a tool call carrying an email, name and credit card has each value replaced with a placeholder before it reaches the LLM provider, with the JSON keys left intact, then de-anonymized in the reply" width="820">
+</p>
 
-2. Replace. Every detected span is swapped for a numbered placeholder such as
-   <PERSON_1>, <EMAIL_ADDRESS_1>, <CREDIT_CARD_1>. The same real value maps to the same
-   placeholder within a request, so the model can still reason about "the same person".
-   The real-to-placeholder map is per-request and held in memory only.
+```
+You type: "Je m'appelle Marie Dupont, email marie@acme.com"
+LLM sees: "Je m'appelle <PERSON_1>, email <EMAIL_ADDRESS_1>"
+LLM says: "Bonjour <PERSON_1>, votre email <EMAIL_ADDRESS_1> est noté."
+You  see: "Bonjour Marie Dupont, votre email marie@acme.com est noté."
+```
 
-3. Forward. Only the redacted text leaves the machine, to whichever provider you
-   configured.
+PrivAiTe sits between your app and the model provider. It finds names, emails, phones, cards, IBANs, secrets and more, swaps them for stand-ins before anything leaves your machine, and puts the real values back in the reply. Most tools scan only the plain message text; agent traffic hides PII inside tool-call JSON, and that is the gap PrivAiTe closes. Detection runs locally ([two engines](docs/detection.md), Presidio + OpenAI's open privacy-filter model), nothing phones home, and the same engine runs three ways: standalone proxy, [Open WebUI filter, or LiteLLM guardrail](#integrations).
 
-4. Restore. On the way back, the placeholders are rewritten to the original values in
-   message content, in tool_calls[].function.arguments and the legacy
-   function_call.arguments, and in reasoning traces (reasoning_content / reasoning).
-   Restoration works for both non-streaming and streaming responses, including
-   placeholders split across streamed deltas.
+This is local pseudonymization, not anonymization, and detection is best-effort rather than a guarantee. You remain the data controller. The [Threat model](#threat-model) spells out exactly what it protects against and what it does not.
 
-PrivAiTe scans places most flat-text scrubbers skip: tool-call arguments (parsed as
-JSON and scrubbed value by value, including numeric leaves with at least 7 digits, so
-a card number sent as a bare JSON number is caught) and multimodal content (text parts
-of a content list are scrubbed; images and audio pass through untouched). This is why
-it matters for agentic and multimodal traffic.
+## Quick start
 
-## Anonymization methods
+**Docker (fastest):** the detection model is baked in, so it runs offline from the first request.
 
-Configured under pii.anonymization.method:
+```bash
+docker run -d -p 8400:8400 \
+  -e PRIVAITE_API_KEYS=change-me \
+  -e OPENAI_API_KEY=sk-... \
+  ghcr.io/crp4222/privaite
+```
 
-- placeholder (default): <PERSON_1>, <EMAIL_ADDRESS_1>. Reversible, restored in
-  responses.
-- fake_replacement: realistic fakes via Faker (Jean becomes Michel). Reversible.
-- redact: [PERSON], [EMAIL_ADDRESS]. Irreversible, never restored.
-- mask: ********. Irreversible, never restored.
+Two keys, two roles: `PRIVAITE_API_KEYS` is the key your client sends to PrivAiTe (pick any value); `OPENAI_API_KEY` is your real provider key, which stays in the container and never reaches your client. This exposes `gpt-4o-mini` and `gpt-4o`; for any other provider (Ollama, Azure, anything LiteLLM supports), mount a config: [configuration](docs/configuration.md#docker-with-a-custom-config).
 
-redact and mask are lossy on purpose: the original never enters the reversible map, so
-nothing is restored for those types and two values that mask to the same string can
-never cross-restore. Per-entity overrides are supported, for example mask credit cards
-and redact secrets while placeholdering everything else.
+**pip:**
 
-## Install and quickstart
+```bash
+pip install privaite
+# One spaCy model per scanned language; the default preset scans EN + FR.
+python -m spacy download en_core_web_lg && python -m spacy download fr_core_news_md
 
-From PyPI:
+cat > privaite.yaml <<'EOF'
+providers:
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: ${OPENAI_API_KEY}
+pii:
+  enabled: true
+  preset: onnx    # or "light": faster, no model download, classic PII only
+EOF
 
-    pip install privaite
+PRIVAITE_API_KEYS=change-me python -m privaite --config privaite.yaml
+```
 
-Then run the proxy and point any OpenAI-compatible client at http://localhost:8400/v1
-using your proxy API key.
+**Connect:** point any OpenAI-compatible client at `http://localhost:8400/v1` with the key `change-me`. For Open WebUI: Admin → Settings → Connections → OpenAI API, URL `http://localhost:8400/v1` (or `http://host.docker.internal:8400/v1` if Open WebUI runs in Docker), key = your `PRIVAITE_API_KEYS` value. Client snippets (curl, Python, Node) are in [`examples/`](examples/). Prefer no separate proxy? Use the in-process [Open WebUI filter](#integrations).
 
-With Docker (image pre-downloads the ONNX model so it starts fast and works offline):
+## Prove it on your machine
 
-    docker compose up -d
+[`examples/demo_tool_call_leak.py`](examples/demo_tool_call_leak.py) starts a fake provider that records what it receives, then sends the same agent request without and with PrivAiTe. Nothing leaves 127.0.0.1:
 
-From source (development):
+```bash
+python examples/demo_tool_call_leak.py
+```
 
-    pip install -e .
-    python -m spacy download en_core_web_lg
-    python -m spacy download fr_core_news_md
-    python -m privaite               # add --reload for auto-reload in dev
+```text
+ WITHOUT PrivAiTe, the provider receives:
+  {'to': 'marie.dupont@acme-corp.com', 'body': "... Card on file: 4111 1111 1111 1111."}
+ WITH PrivAiTe, the same request arrives as:
+  {'to': '<EMAIL_ADDRESS_1>', 'body': "... Card on file: <CREDIT_CARD_1>."}
+ and the client still gets the real values back, restored in the reply.
+```
 
-Any OpenAI-compatible client works without code changes. For Open WebUI (Docker), set
-the OpenAI API connection URL to http://host.docker.internal:8400/v1 and the key to
-your PRIVAITE_API_KEYS value. Any LiteLLM-supported provider can be configured as a
-backend (openai/gpt-4o, ollama/llama3.1, and so on).
+The first panel is also what text-only guardrails forward: they scrub message text but pass tool-call JSON through untouched. To audit it on your own data, see [verify what gets redacted](docs/verify.md).
+
+## Benchmark
+
+Measured on 120 real documents from the open [AI4Privacy `pii-masking-200k`](https://huggingface.co/datasets/ai4privacy/pii-masking-200k) dataset (458 PII items, labeled by 10 independent auditor agents and cross-checked against the dataset's own mask) across DE, EN, FR, IT, plus 14 clean documents for false positives.
+
+| Solution | Recall (span) | Recall (strict) | False positives | Tool-call protection |
+|---|---|---|---|---|
+| `onnx` (default) | **84.5%** | **80.6%** | 2 / 14 | **100%** |
+| `light` (full Presidio) | 62.4% | 57.9% | 3 / 14 | **100%** |
+| LiteLLM Presidio guardrail | 70.3% | 65.3% | 3 / 14 | 0.0% |
+| LLM Guard (Anonymize) | 76.9% | 74.9% | 5 / 14 | 0.0% |
+
+The competitor rows are the REAL integrations at their genuine best, not a strawman baseline. Both scan message text but neither parses tool-call JSON, so 100% of the same PII survives inside a tool-call argument, even values they detect and scrub in plain text.
+
+Read the 100% precisely, it is structural, not absolute: of the PII PrivAiTe detects in plain text, 100% is also removed from tool-call JSON. End to end, its tool-call leak equals its detection misses (15.5% on this corpus with the `onnx` preset), the same misses flat text has.
+
+Two honesty notes, both favoring caution. LLM Guard's detection model is fine-tuned on the exact dataset behind this corpus, so its recall here is optimistic; PrivAiTe's default model is not (OpenAI's model card states it did not train on it). An out-of-distribution cross-check on two independent corpora confirms the default generalizes: ~84% held on Gretel finance text while the AI4Privacy-tuned model drops to ~62% ([OOD_COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md)).
+
+Per-language and per-entity tables, competitor configs, methodology, reproduction: [privaite-bench](https://github.com/crp4222/privaite-bench). Feature comparison: [docs/comparison.md](docs/comparison.md).
 
 ## Presets
 
-Set under pii.preset. onnx is the default and works out of the box because onnxruntime
-and the tokenizer ship as core dependencies.
+| Preset | What runs | Recall\* | False positives | Latency | Secrets |
+|--------|-----------|----------|-----------------|---------|---------|
+| `onnx` (default) | Presidio + Privacy Filter | **84.5%** | 2 / 14 | ~0.5s | **yes** |
+| `light` | Presidio only | 62.4% | 3 / 14 | ~60ms | no |
+| `max` | onnx + GLiNER | higher OOD | more | ~0.7s | **yes** |
 
-    Preset  What runs                     Span recall*  False positives  Latency  Secrets
-    onnx    Presidio + Privacy Filter     84.5%         2 / 14           ~0.5s    yes  (default)
-    light   Presidio only                 62.4%         3 / 14           ~60ms    no
-    max     onnx + GLiNER                  higher OOD**  more             ~0.7s    yes  (opt-in)
+\*Span recall on the AI4Privacy benchmark above. `max` adds GLiNER (trained on data independent of AI4Privacy): on out-of-distribution corpora it raises recall by several points at the cost of more false positives and a torch dependency (`pip install 'privaite[gliner]'`); with it selected but not installed, the proxy fails at startup with an install hint rather than silently degrading.
 
-*Span-level recall on the 120-document AI4Privacy benchmark. Strict token-level recall
-is 80.6% for onnx and 57.9% for light. Latency is hardware-dependent.
+**`onnx`** = maximum coverage: secrets, passwords, API keys, unusual names, addresses. **`light`** = fastest, near-zero false positives, classic PII only, no addresses/URLs/secrets. How the engines work and what stays off by default: [docs/detection.md](docs/detection.md).
 
-**max adds GLiNER (urchade/gliner_multi_pii-v1), a PII model trained on data
-independent of AI4Privacy. On an out-of-distribution corpus it raises recall from about
-84% to about 89% where the default already generalizes well, at the cost of more false
-positives and a torch dependency. It needs pip install 'privaite[gliner]'; with max
-selected but the package absent, the proxy fails to start with an install hint rather
-than running with detection silently reduced. onnx stays the default.
+> **Footgun:** do not pin `detectors.presidio.entities` to a short allowlist on the `light` path. It restricts detection to only those types and roughly halves recall (to ~35%). Leave `entities` unset; the proxy logs a warning at startup if it detects a low-recall configuration.
 
-Guidance: use onnx (default) for maximum coverage including secrets, passwords, API
-keys, account numbers, and unusual names, accepting occasional false positives on
-technical identifiers. Use light for the fastest path with near-zero false positives
-when you only care about classic PII (names, emails, phones, cards, IBANs). Do not pin
-detectors.presidio.entities to a short allowlist on the light path: it restricts
-detection to only those types and roughly halves recall, and the proxy logs a startup
-warning if it detects that configuration. Two further presets (standard, full) add BERT
-NER and pull in PyTorch but do not improve much over spaCy.
+## What it scans
 
-## Endpoints
+Before anything is forwarded: `messages[].content` (plain string or multimodal text parts), `tool_calls[].function.arguments` and the legacy `function_call.arguments` (parsed as JSON, scrubbed value by value including bare numeric leaves, keys and function names intact), `/v1/completions` `prompt`, `/v1/embeddings` `input`. On the way back, values are restored in content, tool calls and reasoning traces, streaming included.
 
-OpenAI-compatible HTTP API on port 8400:
+NOT scanned (know your surface): `messages[].name`, top-level `user`/`metadata`, `tools` definitions, JSON object keys. Keep PII out of those fields. Endpoints, strict mode and passthrough caveats: [docs/api.md](docs/api.md).
 
-- POST /v1/chat/completions : chat, streaming and non-streaming.
-- POST /v1/completions      : text completions, streaming and non-streaming.
-- POST /v1/embeddings       : embeddings (input is anonymized; embeddings are not
-  de-anonymized).
-- POST /v1/pii/inspect      : dry-run inspection (off by default). Returns the
-  detections and anonymized preview for a submitted text and forwards nothing to any
-  provider. New in 0.2.13.
-- GET  /v1/models           : list configured models.
-- GET  /health, GET /ready  : health and readiness checks.
-- GET  /stats               : PII detection counts per session (never stores values;
-  the session id is stored as a salted hash).
+## Threat model
 
-## Verify what gets redacted
+PrivAiTe performs **local pseudonymization**, not guaranteed anonymization. Detection runs on your machine; the real ↔ placeholder mapping lives in memory only for the duration of a request and is dropped afterwards.
 
-Do not trust the proxy blindly. Two built-in, fully local ways to check on your own
-data:
+**What it protects against:** the LLM provider storing, training on, or logging your raw PII. The provider receives placeholders (`<PERSON_1>`, …) for everything the detector catches, across message content, tool-call arguments, and multimodal text.
 
-1. See exactly what the provider receives. Set:
+**What it does NOT protect against:**
 
-       pii:
-         deanonymization:
-           enabled: false
+- **PII the detector misses.** Detection is statistical and never 100% (see the [benchmark](#benchmark)). A name it doesn't recognize reaches the provider. Treat the output as best-effort, not a guarantee.
+- **Re-identification from context.** Even with names replaced, the surrounding text can stay identifying ("the CEO of `<ORG_1>` who resigned in March").
+- **A compromised local machine.** The mapping and raw text live in local memory; this is not a defense against a local attacker.
+- **The provider correlating** requests within a session.
 
-   The response comes back without the real values restored, so what you read is
-   literally what left for the provider (<PERSON_1>, <EMAIL_ADDRESS_1>, ...). Diff it
-   against your input: every placeholder is a catch, every real value still visible is
-   a miss. Works for tool-call arguments and streaming too.
+For GDPR/HIPAA: treat this as pseudonymization + transfer minimization, not anonymization. If you need irreversible removal, use `method: "redact"`. Audit it on your own data: [docs/verify.md](docs/verify.md).
 
-2. Dry-run inspection endpoint. Enable it explicitly (off by default):
+## Alternatives
 
-       pii:
-         inspect:
-           enabled: true
+Keeping PII out of LLM calls is a crowded space, and PrivAiTe is not always the right pick. Based on each project's public docs as of June 2026:
 
-   Then submit text and get the detections back. Nothing is forwarded to any provider,
-   nothing is logged, nothing is counted in /stats, and no mapping outlives the
-   request:
+- LiteLLM has a built-in Presidio guardrail, the natural choice if you already run the LiteLLM proxy and want PII handling inline (there are a few open bugs around scrubbing requests and responses).
+- Managed/cloud options exist too, such as Microsoft PII Shield and [LangChain's gateway redaction](https://docs.langchain.com/langsmith/llm-gateway-redaction).
 
-       curl -s localhost:8400/v1/pii/inspect -H 'Content-Type: application/json' \
-         -d '{"text": "Contact Marie Dupont at marie@acme.com"}'
-
-   The response lists each entity (type, exact span, score, source detector, and its
-   replacement), an "anonymized" field that is the exact string the provider would have
-   seen, and "would_block", the types your block_entities policy would reject.
-
-## Configuration highlights
-
-- block_entities (hard policy gate): list PII types that must never leave your network
-  even as a placeholder. A request containing any listed type is rejected with HTTP 400
-  and nothing is forwarded; the error names the type(s), never the value. Empty by
-  default. Enforced at the single anonymization choke point, so it covers message
-  content, multimodal text, and tool-call arguments alike.
-- on_error: block (default). Anonymization fails closed: on an internal detector error
-  the request is blocked, never forwarded with raw PII.
-- Languages: seven supported through spaCy NER and contextual patterns. FR, EN, DE, ES,
-  IT are benchmarked; PT and NL are best-effort. Each language needs its spaCy model.
-- custom_patterns: add your own regex PII patterns (for example a CUSTOMER_ID or
-  REFERENCE format) in YAML without touching code.
-- passthrough.system_messages and passthrough.tool_calls skip the engine for those
-  parts (and therefore skip block_entities). Both false by default.
+Where PrivAiTe differs: it anonymizes PII **inside tool-call arguments and multimodal content**, not just message text (LangChain's gateway docs, for instance, note that tool-call arguments are not scanned), it **restores** the original values in the response, and it ships a [reproducible benchmark](https://github.com/crp4222/privaite-bench). If your traffic is agentic or multimodal, that gap is the reason this exists.
 
 ## Integrations
 
-If you do not want to run a separate proxy, PrivAiTe's engine runs in-process inside
-two popular tools.
+- **Open WebUI filter** ([setup](integrations/openwebui/README.md), [hub listing](https://openwebui.com/posts/privaite_pii_anonymizer_351aa088)): an Open WebUI Filter Function running the engine in-process, no separate proxy. Admin Panel → Functions → paste `integrations/openwebui/privaite_filter.py`, enable, pick preset and languages in its valves. Covers message text, tool calls and multimodal.
+- **LiteLLM guardrail** ([setup](integrations/litellm/README.md)): a custom guardrail for teams already on the LiteLLM proxy. Mount `integrations/litellm/privaite_guardrail.py` next to your `config.yaml` to anonymize requests and restore responses inline, including tool-call arguments, which LiteLLM's built-in Presidio guardrail does not scan.
 
-Open WebUI filter (integrations/openwebui/privaite_filter.py, v0.1.6). An Open WebUI
-Filter Function: Admin Panel, Functions, "+", paste the file, save, enable, then open
-its valves to pick the preset and languages. It anonymizes the outgoing request and
-restores PII in the reply, covering message text, tool-call arguments, and multimodal
-text. Requires privaite>=0.2.12. Also published on the Open WebUI community hub:
-https://openwebui.com/posts/privaite_pii_anonymizer_351aa088
+## Docs
 
-LiteLLM guardrail (integrations/litellm/privaite_guardrail.py). A LiteLLM custom
-guardrail: mount it next to your config.yaml and reference it by dot-notation
-(privaite_guardrail.PrivaiteGuardrail) with mode [pre_call, post_call]. It anonymizes
-requests and restores responses inline, including inside tool-call arguments and the
-legacy function_call, which LiteLLM's built-in Presidio guardrail does not cover. Chat
-streaming restore is included. Requires privaite>=0.2.12.
+- [How detection works](docs/detection.md): the two engines, what each catches, what stays off by default, known limitations
+- [Configuration reference](docs/configuration.md): providers, Docker with custom config, anonymization methods, `block_entities`, custom patterns, languages, pinned model revisions
+- [API reference](docs/api.md): endpoints, the exact scanned/unscanned surface, strict mode, passthrough caveats
+- [Verify what gets redacted](docs/verify.md): audit the proxy on your own data, dry-run inspect endpoint
+- [Feature comparison](docs/comparison.md) and the [reproducible benchmark](https://github.com/crp4222/privaite-bench)
+- [Changelog](CHANGELOG.md)
 
-Both integrations honor block_entities and fail closed if the installed privaite is too
-old to enforce the gate, rather than silently forwarding PII.
+## Development
 
-## Benchmark (honest summary)
+```bash
+git clone https://github.com/crp4222/PrivAiTe && cd PrivAiTe
+pip install -e ".[dev]"
+python -m spacy download en_core_web_lg && python -m spacy download fr_core_news_md
 
-Measured on 120 real documents from the open AI4Privacy pii-masking-200k dataset on
-Hugging Face (458 PII items across DE, EN, FR, IT, labeled by independent auditor
-agents and cross-checked against the dataset's own sensitive mask), plus 14 clean
-documents for false positives. The competitor rows are the real integrations at their
-genuine best, not a strawman.
+cp .env.example .env                                    # keys
+cp config/privaite.example.yaml config/privaite.yaml    # providers
+python -m privaite --reload                             # dev mode (auto-reload)
 
-    Solution                       Recall (span)  Recall (strict)  False positives  Tool-call protection
-    PrivAiTe onnx (default)        84.5%          80.6%            2 / 14           100%
-    PrivAiTe light (full Presidio) 62.4%          57.9%            3 / 14           100%
-    LiteLLM Presidio guardrail     70.3%          65.3%            3 / 14           0.6%
-    LLM Guard (Anonymize)          76.9%          74.9%            5 / 14           0.6%
+python -m pytest tests/ -v
+```
 
-Span recall credits a multi-token span as caught when its exact full string disappears;
-strict recall requires every token removed. On tool-call arguments, PrivAiTe removes
-everything it detects (100% protection, 15.5% leak) while the others do not parse
-tool-call JSON, so about 99% of the same PII survives inside a tool-call argument
-(0.6% protection, 99.1% leak).
+## License
 
-Two honesty notes, both favoring caution. LLM Guard's detection model is fine-tuned on
-the exact dataset family behind this corpus, so its recall here is optimistic;
-PrivAiTe's default model is not (OpenAI's model card states it did not train on it). An
-out-of-distribution cross-check on a non-AI4Privacy corpus confirms this: the PrivAiTe
-onnx stack holds about 84% recall while the AI4Privacy-tuned model drops to about 62%.
+BSD 3-Clause. See [LICENSE](LICENSE).
 
-Full tables, competitor configs, methodology, and reproduction:
-https://github.com/crp4222/privaite-bench
-Out-of-distribution detail:
-https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md
-Head-to-head feature comparison:
-https://github.com/crp4222/PrivAiTe/blob/main/docs/comparison.md
 
-## Limitations (read before relying on it)
+---
+<!-- source: docs/detection.md -->
 
-- Pseudonymization, not anonymization. The real-to-placeholder mapping is reversible by
-  design (that is how responses are restored). Treat this as pseudonymization plus
-  transfer minimization, not guaranteed anonymization and not a GDPR or HIPAA compliance
-  guarantee. You remain the data controller. For irreversible removal use method redact
-  or mask.
-- Detection is best-effort. It is statistical and never 100%. A name the detector does
-  not recognize reaches the provider. onnx has the best recall; treat the output as
-  best-effort.
-- Re-identification from context. Even with names replaced, surrounding text can stay
-  identifying ("the CEO of <ORG_1> who resigned in March").
-- Not scanned by default: messages[].name, top-level user and metadata, tools and
-  functions definitions, JSON object keys inside tool arguments (renaming them would
-  break the tool schema), and tokenized integer-array inputs. Keep PII out of those
-  fields or strip them upstream. Set pii.strict: true to reject uninspectable content
-  with a 400 instead of forwarding it.
-- Informal dates ("last Tuesday", "il y a deux ans") are not detected. On the light
-  (Presidio-only) preset, addresses, URLs, secrets, and passwords are not detected;
-  those need the onnx preset.
-- Not a defense against a compromised local machine (the mapping and raw text live in
-  local memory) or against the provider correlating requests within a session.
+# How detection works
 
-## Links
+PrivAiTe uses two detection engines that can run together or separately.
 
-- PyPI: https://pypi.org/project/privaite/
-- GitHub: https://github.com/crp4222/PrivAiTe
-- README: https://github.com/crp4222/PrivAiTe/blob/main/README.md
-- Changelog: https://github.com/crp4222/PrivAiTe/blob/main/CHANGELOG.md
-- Feature comparison: https://github.com/crp4222/PrivAiTe/blob/main/docs/comparison.md
-- Open WebUI filter: https://github.com/crp4222/PrivAiTe/blob/main/integrations/openwebui/README.md
-- Open WebUI hub listing: https://openwebui.com/posts/privaite_pii_anonymizer_351aa088
-- LiteLLM guardrail: https://github.com/crp4222/PrivAiTe/blob/main/integrations/litellm/README.md
-- Benchmark repo: https://github.com/crp4222/privaite-bench
-- Benchmark comparison: https://github.com/crp4222/privaite-bench/blob/main/COMPARISON.md
-- Out-of-distribution comparison: https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md
-- AI4Privacy dataset: https://huggingface.co/datasets/ai4privacy/pii-masking-200k
-- openai/privacy-filter model: https://openai.com/index/introducing-openai-privacy-filter/
+## Presidio (Microsoft): regex + spaCy NER
+
+The default engine. Handles structured PII through pattern matching and basic NER.
+
+| What it detects | How |
+|---|---|
+| Emails | Regex |
+| Phone numbers | Regex + international format validation |
+| Credit cards | Regex + Luhn checksum |
+| IBAN | Regex + checksum validation |
+| IP addresses | Regex |
+| US SSN | Regex + format validation |
+| Person names (capitalized, 2+ words) | spaCy NER, only kept if all words are capitalized |
+| Person names (lowercase or single word) | Contextual regex, only after "je m'appelle X", "my name is X", "ich heiße X", "Nom: X", etc. |
+| Dates (FR/DE) | Custom regex, "15 mars 1987", "3. März 1990" |
+
+Presidio is fast (tens of ms/request) and produces very few false positives on code, news articles, and technical text. The tradeoff: it misses names that spaCy doesn't recognize (unusual names, single-word names without context) and doesn't detect secrets/passwords.
+
+## OpenAI Privacy Filter: contextual ML model
+
+[OpenAI's open-source PII model](https://openai.com/index/introducing-openai-privacy-filter/) (1.5B params, 50M active, Apache 2.0). Runs locally via ONNX Runtime (~800MB, no PyTorch needed).
+
+| What it adds over Presidio | How |
+|---|---|
+| Person names (any format, any case) | ML NER, understands context, not just capitalization |
+| Passwords and secrets | Detects "SuperSecret2024!", API keys like "sk-proj-..." |
+| Account numbers | Detects bank account numbers, policy numbers, etc. |
+| Dates (all languages) | ML-based, not limited to FR/DE regex |
+
+The Privacy Filter is slower (~400ms/request) and occasionally flags technical identifiers as account numbers (e.g., "CMD-2024-98765"). It runs as a second pass alongside Presidio, which handles the regex-based entities while the Privacy Filter handles contextual NER.
+
+## Why two engines?
+
+Neither is perfect alone:
+
+- **Presidio alone** misses names that spaCy doesn't recognize, and can't detect secrets. But it has very few false positives.
+- **Privacy Filter alone** misses some names in credit/list formats, and doesn't have regex validators for IBAN/credit card checksums.
+- **Both together** cover each other's blind spots. Presidio handles structured formats with validation, the Privacy Filter handles context-dependent PII.
+
+## What's NOT detected by default
+
+The default `onnx` preset does detect personal addresses (as `LOCATION`) and personal URLs (as `URL`) through the Privacy Filter model, and replaces them. What stays off by default are Presidio's broad recognizers for those types, because they cause heavy false positives:
+
+- **Generic place names (the Presidio LOCATION recognizer):** "Paris" or "London" on their own aren't PII, and spaCy flags ordinary words ("Kubernetes", "Saturday") as locations. The `onnx` preset keeps this recognizer off and relies on the model's context-aware address detection instead.
+- **The Presidio URL regex:** it matches code like `logging.getLogger` because `.ge` is a valid TLD. The `onnx` preset keeps it off, and the model still catches genuine personal URLs.
+
+On the `light` preset (Presidio only), addresses and URLs are not detected. Secrets and passwords are detected only by the `onnx` preset. Any recognizer can be turned on in the YAML config.
+
+## Known limitations
+
+- **Single-word names** from spaCy are dropped (too many false positives). Caught by contextual patterns ("Nom: X") or the `onnx` preset.
+- **Lowercase names** need intro patterns ("je m'appelle X"). The `onnx` preset catches them without patterns.
+- **Informal dates** ("last Tuesday", "il y a deux ans") are not detected.
+- **Unscanned request fields**: see [the scanned surface](api.md#what-gets-anonymized).
+
+
+---
+<!-- source: docs/configuration.md -->
+
+# Configuration reference
+
+Everything below goes in your `privaite.yaml` (`python -m privaite --config privaite.yaml`).
+The [README quick start](https://github.com/crp4222/PrivAiTe#quick-start) has the minimal
+working file; this page covers every knob.
+
+## Server
+
+```yaml
+server:
+  host: "0.0.0.0"   # default
+  port: 8400        # default
+```
+
+Both can also be overridden at launch: `python -m privaite --config privaite.yaml --host 127.0.0.1 --port 8452`.
+
+## LLM providers
+
+Any [LiteLLM-supported provider](https://docs.litellm.ai/docs/providers) works:
+
+```yaml
+providers:
+  - model_name: "gpt-4o"
+    litellm_params:
+      model: "openai/gpt-4o"
+      api_key: "${OPENAI_API_KEY}"
+
+  - model_name: "local-llama"
+    litellm_params:
+      model: "ollama/llama3.1"
+      api_base: "http://localhost:11434"
+```
+
+A `${VAR}` whose environment variable is unset fails startup on purpose, so a
+missing key is caught at boot rather than at the first request.
+
+## Docker with a custom config
+
+With just `OPENAI_API_KEY` set, the image exposes `gpt-4o-mini` and `gpt-4o`. For
+any other provider (Ollama, Azure, a self-hosted endpoint, or your own LiteLLM
+proxy), mount a config:
+
+```bash
+docker run -d -p 8400:8400 \
+  -e PRIVAITE_API_KEYS=change-me \
+  -v $PWD/privaite.yaml:/app/config/privaite.yaml:ro \
+  ghcr.io/crp4222/privaite
+```
+
+A minimal `privaite.yaml`:
+
+```yaml
+providers:
+  - model_name: my-model
+    litellm_params:
+      model: openai/gpt-4o-mini   # any litellm model string, e.g. ollama/llama3
+      api_base: https://api.openai.com/v1
+      api_key: ${OPENAI_API_KEY}
+pii:
+  enabled: true
+  preset: onnx
+```
+
+Auth is on by default, so `PRIVAITE_API_KEYS` is required. From a clone you can
+also `docker compose up -d`; put the key in a `.env` file to keep it off the
+command line.
+
+## Anonymization method
+
+```yaml
+pii:
+  anonymization:
+    method: "placeholder"        # <PERSON_1>, <EMAIL_ADDRESS_1> (recommended)
+    # method: "fake_replacement" # Realistic fakes via Faker (Jean → Michel)
+    # method: "redact"           # [PERSON], [EMAIL_ADDRESS] (irreversible)
+    # method: "mask"             # ******** (irreversible)
+```
+
+`redact` and `mask` are lossy on purpose: the original never enters the reversible
+map, so nothing is restored in responses for those types (and two values that mask
+to the same string can never cross-restore).
+
+## Blocking specific PII types (hard policy gate)
+
+By default every detected PII item is pseudonymized and the request goes through.
+If some PII types must **never** leave your network at all, even as a placeholder,
+list them under `block_entities`. A request containing any listed type is rejected
+with `400` and nothing is forwarded to the provider. The error names the type(s),
+never the value.
+
+```yaml
+pii:
+  block_entities: []                     # default: block nothing, mask everything
+  # block_entities: ["US_SSN", "CREDIT_CARD"]  # opt-in: reject these outright
+```
+
+Types not listed are still masked as usual, so blocking is purely additive on top
+of the default behavior.
+
+## Custom regex patterns
+
+Add your own PII patterns without touching code:
+
+```yaml
+pii:
+  custom_patterns:
+    - pattern: "KD-\\d{6}"
+      entity_type: "CUSTOMER_ID"
+    - pattern: "REF-[A-Z]{3}-\\d+"
+      entity_type: "REFERENCE"
+```
+
+## Languages
+
+7 languages supported with spaCy NER and contextual patterns: FR, EN, DE, ES, IT
+(benchmarked), plus PT and NL (best-effort, not yet in the benchmark).
+
+```yaml
+pii:
+  detectors:
+    presidio:
+      languages: ["fr", "en"]  # the default; add "de", "es", etc.
+```
+
+Each language needs its spaCy model: `python -m spacy download de_core_news_md`.
+The default list is `["fr", "en"]`, so a fresh install fetches `fr_core_news_md`
+on first boot if it is missing; set `languages: ["en"]` for an English-only,
+no-surprise-download setup.
+
+## Detector model revisions
+
+The built-in Hugging Face detector models are pinned to immutable commits, so a
+fresh install does not silently pick up different weights from a moving `main`
+branch:
+
+- [`openai/privacy-filter`](https://huggingface.co/openai/privacy-filter/commit/7ffa9a043d54d1be65afb281eddf0ffbe629385b): `7ffa9a043d54d1be65afb281eddf0ffbe629385b` (the default ONNX detector and the optional torch detector)
+- [`dslim/bert-base-NER`](https://huggingface.co/dslim/bert-base-NER/commit/d1a3e8f13f8c3566299d95fcfc9a8d2382a9affc): `d1a3e8f13f8c3566299d95fcfc9a8d2382a9affc`
+- [`urchade/gliner_multi_pii-v1`](https://huggingface.co/urchade/gliner_multi_pii-v1/commit/1fcf13e85f4eef5394e1fcd406cf2ca9ea82351d): `1fcf13e85f4eef5394e1fcd406cf2ca9ea82351d`
+
+When changing a detector's `model_name`, also set `revision` to a commit SHA
+from that model's repository. A default SHA from a different repository fails to
+load instead of silently using different weights. `revision: null` intentionally
+follows the mutable default branch and is not reproducible.
+
+
+---
+<!-- source: docs/api.md -->
+
+# API reference
+
+OpenAI-compatible:
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /v1/chat/completions` | Chat (streaming + non-streaming) |
+| `POST /v1/completions` | Text completions |
+| `POST /v1/embeddings` | Embeddings (anonymized, no de-anonymization) |
+| `POST /v1/pii/inspect` | Dry-run detection preview (off by default, see [verify.md](verify.md)) |
+| `GET /v1/models` | List configured models |
+| `GET /health` | Health check |
+| `GET /ready` | Readiness check |
+| `GET /stats` | PII detection stats per session |
+
+## What gets anonymized
+
+Scanned before anything is forwarded to the provider:
+
+- `messages[].content`, whether a plain string or a multimodal list of parts (text parts are scrubbed, images and audio are left alone).
+- `tool_calls[].function.arguments` and the legacy `function_call.arguments`: parsed as JSON and scrubbed value by value, including numeric values (a card number sent as a bare JSON number is detected too; on a hit the leaf becomes the masked string). Object keys and the function name stay intact. Arguments that are not valid JSON are scrubbed as free text.
+- `/v1/completions` `prompt` and `/v1/embeddings` `input`, as a string or a list of strings.
+
+NOT scanned (know your surface): `messages[].name`, top-level fields like `user` and `metadata`, and `tools`/`functions` definitions are forwarded as-is; JSON object keys inside tool arguments are never rewritten (masking parameter names would break the tool schema). Keep PII out of those fields, or strip them upstream.
+
+On the way back, the original values are restored in `message.content` and in returned `tool_calls` (including the legacy `function_call`), in both non-streaming and streaming responses. Set `pii.passthrough.tool_calls: true` to forward tool-call arguments unchanged.
+
+## Strict mode
+
+For a stricter posture, set `pii.strict: true`: any request whose content can't be inspected (a shape that is neither text nor a known media part, e.g. tokenized `input` arrays) is rejected with `400` instead of being forwarded.
+
+## Passthrough caveat
+
+`passthrough.system_messages` and `passthrough.tool_calls` skip the engine entirely for those parts, which also skips `block_entities`. Both are `false` by default; do not enable them together with a block policy you rely on.
+
+
+---
+<!-- source: docs/verify.md -->
+
+# Verify what gets redacted
+
+Do not trust the proxy blindly: check it on your own data. Two built-in ways, both
+local. For the quickest proof, run the
+[tool-call leak demo](https://github.com/crp4222/PrivAiTe/blob/main/examples/demo_tool_call_leak.py)
+first: it shows you exactly what a provider receives, without and with PrivAiTe.
+
+## 1. See exactly what the provider receives
+
+Turn de-anonymization off and send test traffic:
+
+```yaml
+pii:
+  deanonymization:
+    enabled: false
+```
+
+The response comes back without the real values restored, so what you read is
+literally what left for the provider (`<PERSON_1>`, `<EMAIL_ADDRESS_1>`, ...).
+Diff it against your input: every placeholder is a catch, every real value still
+visible is a miss. Works for tool-call arguments and streaming too.
+
+## 2. Dry-run inspection endpoint
+
+Enable it explicitly (off by default), then submit text and get the detections
+back. Nothing is forwarded to any provider, nothing is logged, nothing is counted
+in `/stats`:
+
+```yaml
+pii:
+  inspect:
+    enabled: true
+```
+
+```bash
+curl -s localhost:8400/v1/pii/inspect -H 'Content-Type: application/json' \
+  -d '{"text": "Contact Marie Dupont at marie@acme.com"}'
+```
+
+```json
+{
+  "language": "en",
+  "entities": [
+    {"type": "PERSON", "text": "Marie Dupont", "start": 8, "end": 20,
+     "score": 0.99, "source": "onnx", "replacement": "<PERSON_1>"},
+    {"type": "EMAIL_ADDRESS", "text": "marie@acme.com", "start": 24, "end": 38,
+     "score": 1.0, "source": "presidio", "replacement": "<EMAIL_ADDRESS_1>"}
+  ],
+  "anonymized": "Contact <PERSON_1> at <EMAIL_ADDRESS_1>",
+  "would_block": []
+}
+```
+
+`anonymized` is the exact string the provider would have seen, and `would_block`
+lists any types your `block_entities` policy would have rejected outright. There
+is deliberately no admin view of live traffic: the reversible map is per-request
+and in-memory only, never logged or persisted.
+
+
+---
+<!-- source: docs/comparison.md -->
+
+# PrivAiTe vs Presidio, LLM Guard, and LiteLLM PII masking
+
+PrivAiTe is a drop-in, self-hosted LLM proxy that redacts PII before it reaches the provider and restores it in the reply. Unlike Microsoft Presidio (a library you assemble), Protect AI LLM Guard, or LiteLLM's built-in Presidio guardrail, it also redacts PII inside **tool-call arguments** (the part every tested competitor misses, ~99% measured leak) and multimodal content, reversibly and with zero telemetry.
+
+This is local pseudonymization, not anonymization, and detection is best-effort. You remain the data controller. See the [threat model](../README.md#threat-model).
+
+## Feature comparison
+
+| | PrivAiTe | Microsoft Presidio | Protect AI LLM Guard | LiteLLM PII guardrail |
+|---|---|---|---|---|
+| Shape | Drop-in OpenAI-compatible proxy | Python library | Python library | Gateway feature |
+| Setup | Point your client at it | Assemble it yourself | Assemble it yourself | Config in the LiteLLM proxy |
+| Reversible (restore on reply) | Yes | Manual | Yes (anonymize/deanonymize) | Limited |
+| Redacts PII in tool-call arguments | Yes | No | No | No |
+| Redacts PII in multimodal text | Yes | OCR only | No | Yes (text parts) |
+| Streaming de-anonymization | Yes | n/a | n/a | n/a |
+| Secrets and passwords | Yes (ONNX preset) | No | Yes | Partial |
+| Detection engine | Presidio + local ONNX model | Presidio | Own scanners | Presidio |
+| Self-hosted, zero telemetry | Yes | Yes | Yes | Yes |
+
+Presidio is excellent and PrivAiTe builds on it. The point of this table is not that PrivAiTe detects better than Presidio in isolation; it is that PrivAiTe is the ready-to-run proxy around it that also covers the structured and multimodal cases, and restores the original values on the way back.
+
+## The tool-call gap, measured
+
+The [reproducible benchmark](https://github.com/crp4222/privaite-bench) runs the REAL competitor integrations, configured at their genuine best, and places the same PII inside a tool-call argument and a multimodal text part. Measured results on 120 real documents labeled by independent auditors:
+
+| | Recall (flat text) | Tool-call leak | Multimodal leak |
+|---|---|---|---|
+| PrivAiTe `onnx` (default) | **84.5%** | **15.5%** | **15.5%** |
+| LLM Guard (Anonymize) | 76.9% | 100% | 100% |
+| LiteLLM Presidio guardrail | 70.3% | 100% | 29.7% |
+
+LiteLLM's guardrail does scrub multimodal text parts (hence its low multimodal leak), and LLM Guard's DeBERTa model actually out-recalls it on flat text. But neither parses tool-call JSON, so **100%** of the same PII survives inside a tool-call argument, even values they detect in plain text; PrivAiTe removes everything it detects from the tool call (**100% vs 0%** tool-call protection).
+
+Contamination note, in the competitors' favor and still insufficient: LLM Guard's detection model is fine-tuned on the exact dataset family behind this corpus, so its 76.9% is an optimistic upper bound, while PrivAiTe's default model did not train on it. On an out-of-distribution corpus (non-AI4Privacy), the PrivAiTe onnx stack holds ~84% recall while the AI4Privacy-tuned model drops to ~62%: see [OOD_COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md).
+
+## When to pick which
+
+- **Pick Presidio** if you want a detection library to embed in your own pipeline and you will handle the proxying, reversal, and tool-call cases yourself.
+- **Pick LLM Guard** if you want a broader prompt-security toolkit (prompt injection, toxicity) and PII is one part of it.
+- **Pick LiteLLM's guardrail** if you already run the LiteLLM proxy and only need flat message-text PII handling.
+- **Pick PrivAiTe** if you want a drop-in proxy that protects the whole prompt-egress path, including tool-call arguments and multimodal content, reversibly, with zero telemetry, and works with any OpenAI-compatible client.
+
+## Reproduce it
+
+```bash
+pip install privaite
+python solutions/ai4privacy_loader.py   # in the privaite-bench repo
+python -m solutions.compare
+```

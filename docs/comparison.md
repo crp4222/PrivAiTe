@@ -27,10 +27,10 @@ The [reproducible benchmark](https://github.com/crp4222/privaite-bench) runs the
 | | Recall (flat text) | Tool-call leak | Multimodal leak |
 |---|---|---|---|
 | PrivAiTe `onnx` (default) | **84.5%** | **15.5%** | **15.5%** |
-| LLM Guard (Anonymize) | 76.9% | 99.1% | 100% |
-| LiteLLM Presidio guardrail | 70.3% | 99.1% | 29.7% |
+| LLM Guard (Anonymize) | 76.9% | 100% | 100% |
+| LiteLLM Presidio guardrail | 70.3% | 100% | 29.7% |
 
-LiteLLM's guardrail does scrub multimodal text parts (hence its low multimodal leak), and LLM Guard's DeBERTa model actually out-recalls it on flat text. But neither parses tool-call JSON, so about **99%** of the same PII survives inside a tool-call argument; PrivAiTe removes everything it detects from the tool call (**100% vs 0.6%** tool-call protection).
+LiteLLM's guardrail does scrub multimodal text parts (hence its low multimodal leak), and LLM Guard's DeBERTa model actually out-recalls it on flat text. But neither parses tool-call JSON, so **100%** of the same PII survives inside a tool-call argument, even values they detect in plain text; PrivAiTe removes everything it detects from the tool call (**100% vs 0%** tool-call protection).
 
 Contamination note, in the competitors' favor and still insufficient: LLM Guard's detection model is fine-tuned on the exact dataset family behind this corpus, so its 76.9% is an optimistic upper bound, while PrivAiTe's default model did not train on it. On an out-of-distribution corpus (non-AI4Privacy), the PrivAiTe onnx stack holds ~84% recall while the AI4Privacy-tuned model drops to ~62%: see [OOD_COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md).
 

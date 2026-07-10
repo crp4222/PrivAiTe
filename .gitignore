@@ -27,5 +27,3 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-.claude/
-docs/.posts.md
