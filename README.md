@@ -9,10 +9,6 @@ Self-hosted PII redaction proxy for LLM APIs.
 
 **A drop-in LLM proxy that reversibly replaces PII before it reaches the provider, including inside tool-call arguments and multimodal content, with zero telemetry.**
 
-<p align="center">
-  <img src="docs/demo.gif" alt="PrivAiTe demo: a tool call carrying an email, name and credit card has each value replaced with a placeholder before it reaches the LLM provider, with the JSON keys left intact, then de-anonymized in the reply" width="820">
-</p>
-
 ```
 You type: "Je m'appelle Marie Dupont, email marie@acme.com"
 LLM sees: "Je m'appelle <PERSON_1>, email <EMAIL_ADDRESS_1>"
@@ -20,7 +16,7 @@ LLM says: "Bonjour <PERSON_1>, votre email <EMAIL_ADDRESS_1> est noté."
 You  see: "Bonjour Marie Dupont, votre email marie@acme.com est noté."
 ```
 
-PrivAiTe sits between your app and the model provider. It finds names, emails, phones, cards, IBANs, secrets and more, swaps them for stand-ins before anything leaves your machine, and puts the real values back in the reply. Most tools scan only the plain message text; agent traffic hides PII inside tool-call JSON, and that is the gap PrivAiTe closes. Detection runs locally ([two engines](docs/detection.md), Presidio + OpenAI's open privacy-filter model), nothing phones home, and the same engine runs three ways: standalone proxy, [Open WebUI filter, or LiteLLM guardrail](#integrations).
+PrivAiTe sits between your app and the model provider. It finds names, emails, phones, cards, IBANs, secrets and more, swaps them for stand-ins before anything leaves your machine, and puts the real values back in the reply. Most tools scan only the plain message text; agent traffic hides PII inside tool-call JSON, and that is the gap PrivAiTe closes. Detection runs locally ([two engines](docs/detection.md), Presidio + OpenAI's open privacy-filter model), and the engine runs three ways: standalone proxy, [Open WebUI filter, or LiteLLM guardrail](#integrations).
 
 This is local pseudonymization, not anonymization, and detection is best-effort rather than a guarantee. You remain the data controller. The [Threat model](#threat-model) spells out exactly what it protects against and what it does not.
 
@@ -57,28 +53,11 @@ pii:
   preset: onnx    # or "light": faster, no model download, classic PII only
 EOF
 
-PRIVAITE_API_KEYS=change-me python -m privaite --config privaite.yaml
+PRIVAITE_API_KEYS=change-me
+python -m privaite --config privaite.yaml
 ```
 
 **Connect:** point any OpenAI-compatible client at `http://localhost:8400/v1` with the key `change-me`. For Open WebUI: Admin → Settings → Connections → OpenAI API, URL `http://localhost:8400/v1` (or `http://host.docker.internal:8400/v1` if Open WebUI runs in Docker), key = your `PRIVAITE_API_KEYS` value. Client snippets (curl, Python, Node) are in [`examples/`](examples/). Prefer no separate proxy? Use the in-process [Open WebUI filter](#integrations).
-
-## Prove it on your machine
-
-[`examples/demo_tool_call_leak.py`](examples/demo_tool_call_leak.py) starts a fake provider that records what it receives, then sends the same agent request without and with PrivAiTe. Nothing leaves 127.0.0.1:
-
-```bash
-python examples/demo_tool_call_leak.py
-```
-
-```text
- WITHOUT PrivAiTe, the provider receives:
-  {'to': 'marie.dupont@acme-corp.com', 'body': "... Card on file: 4111 1111 1111 1111."}
- WITH PrivAiTe, the same request arrives as:
-  {'to': '<EMAIL_ADDRESS_1>', 'body': "... Card on file: <CREDIT_CARD_1>."}
- and the client still gets the real values back, restored in the reply.
-```
-
-The first panel is also what text-only guardrails forward: they scrub message text but pass tool-call JSON through untouched. To audit it on your own data, see [verify what gets redacted](docs/verify.md).
 
 ## Benchmark
 
@@ -90,8 +69,6 @@ Measured on 120 real documents from the open [AI4Privacy `pii-masking-200k`](htt
 | `light` (full Presidio) | 62.4% | 57.9% | 3 / 14 | **100%** |
 | LiteLLM Presidio guardrail | 70.3% | 65.3% | 3 / 14 | 0.0% |
 | LLM Guard (Anonymize) | 76.9% | 74.9% | 5 / 14 | 0.0% |
-
-The competitor rows are the REAL integrations at their genuine best, not a strawman baseline. Both scan message text but neither parses tool-call JSON, so 100% of the same PII survives inside a tool-call argument, even values they detect and scrub in plain text.
 
 Read the 100% precisely, it is structural, not absolute: of the PII PrivAiTe detects in plain text, 100% is also removed from tool-call JSON. End to end, its tool-call leak equals its detection misses (15.5% on this corpus with the `onnx` preset), the same misses flat text has.
 
