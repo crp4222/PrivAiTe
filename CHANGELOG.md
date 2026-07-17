@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.2] - 2026-07-17
+
+### Fixed
+- ONNX detector no longer selects the CoreML execution provider under
+  `device: "auto"` on Apple Silicon. CoreML ran only a fraction of the model
+  graph, was slower than CPU at every input size, and grew memory per input
+  shape until the host process was killed. Because the Open WebUI filter and the
+  LiteLLM guardrail run the engine in-process, a large request could take the
+  host down with it. `auto` now uses CPU (or CUDA when present); `device: "coreml"`
+  stays available as an explicit opt-in.
+
+### Changed
+- ONNX detector scans long inputs through overlapping token windows instead of a
+  single full-sequence pass. Large tool outputs and file contents that used to
+  run multi-minute inferences at multi-GB peak memory (or were silently truncated
+  past 128k tokens) are now scanned whole in bounded time and memory. Detection
+  spans are identical to full inference on the benchmark corpus, so recall is
+  unchanged.
+
 ## [0.3.1] - 2026-07-10
 
 ### Security
