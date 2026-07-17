@@ -419,6 +419,44 @@ class PIIEngine:
             return [await self._walk_anonymize(item, mapping, language) for item in value]
         return value
 
+    async def scrub_document(
+        self, value: Any, mapping: PIIMapping | None = None
+    ) -> tuple[Any, PIIMapping]:
+        """Anonymize an arbitrary JSON document (or bare string), for the gateway.
+
+        Public wrapper around the request walker so callers never touch the
+        private walkers. Every string leaf (and numeric leaf with >=7 digits)
+        still flows through the single choke point (_anonymize_text), including
+        the block_entities gate. Pass an existing mapping to share placeholders
+        across several subtrees of one request. Failure policy matches
+        process_request: only the safe policy errors cross this boundary, never
+        an exception that may carry raw input.
+        """
+        if mapping is None:
+            mapping = PIIMapping()
+        try:
+            return await self._walk_anonymize(value, mapping, self._language()), mapping
+        except (PIIBlockedError, UnsupportedContentError, PIIProcessingError):
+            raise
+        except Exception:
+            logger.error("PII document processing failed; request will be blocked")
+            raise PIIProcessingError() from None
+
+    def restore_document(self, value: Any, mapping: PIIMapping | None) -> Any:
+        """Restore originals in an arbitrary JSON document (or bare string).
+
+        Respects deanonymization.enabled. A restore failure raises the safe
+        PIIProcessingError: the mapping's originals must never reach a log via
+        an exception message.
+        """
+        if not self.config.deanonymization.enabled or mapping is None or mapping.is_empty:
+            return value
+        try:
+            return self._walk_deanonymize(value, mapping)
+        except Exception:
+            logger.error("PII document deanonymization failed")
+            raise PIIProcessingError() from None
+
     async def inspect_text(self, text: str) -> list[PIIEntity]:
         """Detections for one text, exactly as the request path would see them.
 

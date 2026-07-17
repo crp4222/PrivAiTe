@@ -291,9 +291,39 @@ class LoggingConfig(BaseModel):
     level: str = "info"
 
 
+class GatewayUpstreamConfig(BaseModel):
+    # The provider API root INCLUDING its version prefix; the gateway appends the
+    # protocol's own suffix ("/messages", "/responses"). Codex subscription
+    # traffic is served from https://chatgpt.com/backend-api/codex.
+    base_url: str
+    # Which client request headers to relay upstream. None (the default) is
+    # transparent: every header is forwarded except the ones httpx derives from
+    # the connection (host, content-length, and the encoding/keep-alive set). A
+    # transparent relay is required because some providers select their request
+    # schema from a header, so an allowlist that drops it breaks a valid body.
+    # Set an explicit list only to deliberately restrict what leaves the machine.
+    forward_headers: list[str] | None = None
+
+
+class GatewayConfig(BaseModel):
+    # Opt-in agent-CLI gateway: relays Anthropic Messages and OpenAI Responses
+    # traffic through the same scrub/restore engine. The client authenticates
+    # itself to the upstream with its own token; PrivAiTe neither injects nor
+    # validates credentials on gateway routes. Off by default so nothing about
+    # the proxy changes when disabled.
+    enabled: bool = False
+    anthropic: GatewayUpstreamConfig = Field(
+        default_factory=lambda: GatewayUpstreamConfig(base_url="https://api.anthropic.com/v1")
+    )
+    openai_responses: GatewayUpstreamConfig = Field(
+        default_factory=lambda: GatewayUpstreamConfig(base_url="https://api.openai.com/v1")
+    )
+
+
 class PrivAiTeConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     providers: list[ProviderConfig] = Field(default_factory=list)
     pii: PIIConfig = Field(default_factory=PIIConfig)
+    gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)

@@ -24,6 +24,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.provider_router = ProviderRouter(config.providers)
     logger.info("Provider router ready with %d model(s)", len(config.providers))
 
+    if config.gateway.enabled:
+        from privaite.gateway.relay import create_gateway_client
+
+        app.state.gateway_client = create_gateway_client()
+        logger.info("Gateway mode enabled")
+
     if config.auth.enabled and not get_api_keys():
         logger.warning(
             "Auth is enabled but PRIVAITE_API_KEYS is empty; all requests will be "
@@ -65,6 +71,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     yield
 
+    gateway_client = getattr(app.state, "gateway_client", None)
+    if gateway_client is not None:
+        await gateway_client.aclose()
     if app.state.pii_engine is not None:
         await app.state.pii_engine.shutdown()
     logger.info("PrivAiTe shutdown complete")
@@ -95,5 +104,11 @@ def create_app(config: PrivAiTeConfig | None = None) -> FastAPI:
     app.add_middleware(RequestSizeLimitMiddleware, max_bytes=config.server.max_request_bytes)
     app.add_middleware(AuthMiddleware)
     app.include_router(api_router)
+
+    from privaite.gateway import build_gateway_router
+
+    gateway_router = build_gateway_router(config)
+    if gateway_router is not None:
+        app.include_router(gateway_router)
 
     return app

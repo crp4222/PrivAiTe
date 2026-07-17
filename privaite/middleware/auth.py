@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 
+from privaite.gateway.protocols import GATEWAY_ROUTE_PATHS
 from privaite.utils.security import get_api_keys, verify_api_key
 
 _PUBLIC_PATHS = {"/health", "/ready", "/docs", "/openapi.json", "/redoc"}
@@ -18,6 +19,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         if request.url.path in _PUBLIC_PATHS:
+            return await call_next(request)
+
+        # Gateway routes carry the CLIENT'S provider token (subscription or API
+        # key), which the gateway relays verbatim so the upstream authenticates
+        # the user; there is no PrivAiTe key in that Authorization header to
+        # verify. The paths are resolved from the protocol specs, and only
+        # bypassed when gateway mode is actually enabled (otherwise they do not
+        # exist and stay under the normal auth check).
+        if config.gateway.enabled and request.url.path in GATEWAY_ROUTE_PATHS:
             return await call_next(request)
 
         allowed_keys = get_api_keys()
