@@ -92,7 +92,7 @@ The benchmark is public and reproducible. Run it yourself.
 
 ---
 
-## Two ways to run it
+## Ways to run it
 
 - **Standalone proxy.** Run it next to your app, point your client at it. Best
   when you want one place to protect every model and client.
@@ -100,6 +100,9 @@ The benchmark is public and reproducible. Run it yourself.
   no separate service.
 - **LiteLLM guardrail.** A custom guardrail for teams already running the
   LiteLLM proxy: it runs the engine in process, no separate service.
+- **Agent CLI gateway.** Point Claude Code or Codex at PrivAiTe with their own
+  login: the traffic to the provider is scrubbed and the reply restored.
+  Opt-in, off by default. [Setup and limits](gateway.md).
 
 ---
 

@@ -58,6 +58,43 @@ PRIVAITE_API_KEYS=change-me python -m privaite --config privaite.yaml
 
 **Connect:** point any OpenAI-compatible client at `http://localhost:8400/v1` with the key `change-me`. For Open WebUI: Admin → Settings → Connections → OpenAI API, URL `http://localhost:8400/v1` (or `http://host.docker.internal:8400/v1` if Open WebUI runs in Docker), key = your `PRIVAITE_API_KEYS` value. Client snippets (curl, Python, Node) are in [`examples/`](examples/). Prefer no separate proxy? Use the in-process [Open WebUI filter](#integrations).
 
+## Use it with your agent CLI (Claude Code, Codex)
+
+Opt-in gateway mode (off by default): your agent CLI points its base URL at PrivAiTe, which scrubs PII and secrets out of each request (tool-call arguments included) with the same local, benchmarked detection, relays your CLI's own auth token verbatim upstream, and restores the real values in the response, streaming included. Verified live with Claude Code (Anthropic Messages API) and Codex (OpenAI Responses API), both on their regular subscription logins. Any OpenAI-compatible app already works through the standard proxy above; the gateway adds the native protocols these CLIs speak.
+
+```yaml
+gateway:
+  enabled: true
+  anthropic:
+    base_url: "https://api.anthropic.com/v1"
+  openai_responses:
+    base_url: "https://api.openai.com/v1"                 # API-key mode
+    # base_url: "https://chatgpt.com/backend-api/codex"   # Codex on a ChatGPT subscription
+```
+
+```bash
+ANTHROPIC_BASE_URL=http://localhost:8400 claude   # Claude Code
+```
+
+```toml
+# Codex (~/.codex/config.toml); Codex only speaks the Responses API
+model_provider = "privaite"
+
+[model_providers.privaite]
+name = "PrivAiTe"
+base_url = "http://localhost:8400/v1"
+wire_api = "responses"
+requires_openai_auth = true   # ChatGPT subscription; for API-key mode use env_key = "OPENAI_API_KEY" instead
+```
+
+Three things to know before relying on it:
+
+- **Your own login, relayed verbatim.** PrivAiTe injects and validates nothing on gateway routes. This relays your own subscription traffic for your own use; it is not a provider-supported integration, and the ChatGPT Codex backend is undocumented and could change. API-key mode is the durable path.
+- **It protects the egress, not the agent.** Claude Code and Codex still hold the real values in their own context and local transcripts; only what reaches the provider is scrubbed.
+- **The agent's own prompt is deliberately not scanned.** The Anthropic `system` field and the Responses `instructions` field pass through as-is, and Claude Code injects your `CLAUDE.md` and project context there.
+
+Full setup, scanned surface and limits: [docs/gateway.md](docs/gateway.md).
+
 ## Benchmark
 
 Measured on 120 real documents from the open [AI4Privacy `pii-masking-200k`](https://huggingface.co/datasets/ai4privacy/pii-masking-200k) dataset (458 PII items, labeled by 10 independent auditor agents and cross-checked against the dataset's own mask) across DE, EN, FR, IT, plus 14 clean documents for false positives.
@@ -74,6 +111,10 @@ Read the 100% precisely, it is structural, not absolute: of the PII PrivAiTe det
 Two honesty notes, both favoring caution. LLM Guard's detection model is fine-tuned on the exact dataset behind this corpus, so its recall here is optimistic; PrivAiTe's default model is not (OpenAI's model card states it did not train on it). An out-of-distribution cross-check on two independent corpora confirms the default generalizes: ~84% held on Gretel finance text while the AI4Privacy-tuned model drops to ~62% ([OOD_COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md)).
 
 Per-language and per-entity tables, competitor configs, methodology, reproduction: [privaite-bench](https://github.com/crp4222/privaite-bench). Feature comparison: [docs/comparison.md](docs/comparison.md).
+
+A live agent-workflow benchmark (a repository with planted PII and secrets, driven through real Claude Code and Codex sessions, measuring what actually reaches the provider with and without PrivAiTe) is in progress; results will be added here.
+
+<!-- AGENT_WORKFLOW_BENCHMARK: fill from privaite-bench agent_workflow/RESULTS.md once the run completes -->
 
 ## Presets
 
@@ -107,6 +148,7 @@ PrivAiTe performs **local pseudonymization**, not guaranteed anonymization. Dete
 - **Re-identification from context.** Even with names replaced, the surrounding text can stay identifying ("the CEO of `<ORG_1>` who resigned in March").
 - **A compromised local machine.** The mapping and raw text live in local memory; this is not a defense against a local attacker.
 - **The provider correlating** requests within a session.
+- **The agent itself, in [gateway mode](docs/gateway.md).** The CLI keeps the real values in its own context and local transcripts; only the traffic to the provider is scrubbed. And the agent's own prompt (the Anthropic `system` field, the Responses `instructions` field) is relayed unscanned, so PII in your `CLAUDE.md` or injected project context reaches the provider.
 
 For GDPR/HIPAA: treat this as pseudonymization + transfer minimization, not anonymization. If you need irreversible removal, use `method: "redact"`. Audit it on your own data: [docs/verify.md](docs/verify.md).
 
@@ -133,6 +175,7 @@ Also browsable as a site: [crp4222.github.io/PrivAiTe](https://crp4222.github.io
 - [API reference](docs/api.md): endpoints, the exact scanned/unscanned surface, strict mode, passthrough caveats
 - [Verify what gets redacted](docs/verify.md): audit the proxy on your own data, dry-run inspect endpoint
 - [Feature comparison](docs/comparison.md) and the [reproducible benchmark](https://github.com/crp4222/privaite-bench)
+- [Agent CLI gateway](docs/gateway.md): Claude Code and Codex setup, what gateway routes scan, honest limits
 - [Changelog](CHANGELOG.md)
 
 ## Development
