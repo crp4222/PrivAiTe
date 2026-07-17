@@ -170,6 +170,42 @@ async def test_outlet_restores_structured_output_items():
     # A new object is returned so Open WebUI detects the change and persists it.
     assert restored is not original_output
     assert original_output[1]["content"][0]["text"] == f"Hello {placeholder}"
+    # The 0.10 frontend applies the chat:outlet sync only when content differs,
+    # so the restored text of "message" items (never reasoning) must be mirrored
+    # into the empty content or the on-screen reply keeps the placeholders.
+    assert out["messages"][0]["content"] == "Hello Marie Dupont"
+
+
+@pytest.mark.asyncio
+async def test_outlet_output_mirror_never_overwrites_existing_content():
+    # When the message already carries its own content, that content is restored
+    # by the content branch and must NOT be replaced by the output items' text.
+    module = _load_filter()
+    flt = module.Filter()
+    flt.valves.preset = "light"
+    flt.valves.languages = "en"
+
+    meta: dict = {}
+    body = await flt.inlet({"messages": [{"role": "user", "content": "I am Marie Dupont"}]}, meta)
+    placeholder = body["messages"][0]["content"].replace("I am ", "")
+
+    reply = {
+        "messages": [
+            {
+                "role": "assistant",
+                "content": f"Reply for {placeholder}",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": f"Other {placeholder}"}],
+                    }
+                ],
+            }
+        ]
+    }
+    out = await flt.outlet(reply, meta)
+    assert out["messages"][0]["content"] == "Reply for Marie Dupont"
+    assert out["messages"][0]["output"][0]["content"][0]["text"] == "Other Marie Dupont"
 
 
 @pytest.mark.asyncio
@@ -202,6 +238,8 @@ async def test_outlet_restores_structured_function_call_arguments():
     # the original provider object must not be mutated behind its back.
     assert restored is not original_output
     assert json.loads(original_output[0]["arguments"]) == {"recipient": placeholder}
+    # No "message" items here, so there is no reply text to mirror into content.
+    assert out["messages"][0]["content"] == ""
 
 
 @pytest.mark.asyncio

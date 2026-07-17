@@ -2,7 +2,7 @@
 title: PrivAiTe PII Anonymizer
 author: crp4222
 author_url: https://github.com/crp4222/PrivAiTe
-version: 0.1.7
+version: 0.1.8
 required_open_webui_version: 0.5.0
 requirements: privaite>=0.3.1
 description: Anonymize or block PII (text, tool calls, multimodal) before it reaches the provider.
@@ -206,7 +206,34 @@ class Filter:
                 restored_output = await self._restore_output_items(output, engine, mapping)
                 if restored_output is not None:
                     message["output"] = restored_output
+                    # Open WebUI 0.10 runs outlet inline at stream end and syncs
+                    # the frontend with a chat:outlet event, but the frontend
+                    # applies that event only when message["content"] differs
+                    # from what it has. Output-shaped replies keep content ""
+                    # on both sides, so the restored reply would never reach
+                    # the screen until a full reload. Mirror the restored text
+                    # into the empty content so the sync is not dropped.
+                    if not message.get("content"):
+                        text = self._output_message_text(restored_output)
+                        if text:
+                            message["content"] = text
         return body
+
+    @staticmethod
+    def _output_message_text(output: list[Any]) -> str:
+        # Concatenated text of "message" output items only: reasoning items are
+        # not part of the visible reply and must not leak into content.
+        texts: list[str] = []
+        for item in output:
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            content = item.get("content")
+            if not isinstance(content, list):
+                continue
+            for part in content:
+                if isinstance(part, dict) and isinstance(part.get("text"), str) and part["text"]:
+                    texts.append(part["text"])
+        return "\n\n".join(texts)
 
     async def _restore_output_items(
         self, output: list[Any], engine: Any, mapping: Any
