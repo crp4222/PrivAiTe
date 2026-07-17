@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 from typing import Any
 
 from privaite.config.schema import PIIConfig
 from privaite.pii.anonymizer import Anonymizer
+from privaite.pii.cache import DetectionCache, entities_from_spans, spans_from_entities
 from privaite.pii.deanonymizer import DeAnonymizer
 from privaite.pii.detector_base import PIIDetector
 from privaite.pii.entity import PIIEntity, merge_entities
@@ -56,6 +58,16 @@ class PIIEngine:
         self.deanonymizer = DeAnonymizer(config.deanonymization)
         # Types that cause a hard reject (empty = default: mask everything).
         self._blocked: set[str] = set(config.block_entities or [])
+        # Opt-in detection cache (spans only, never values); None when disabled
+        # so the disabled path is byte-for-byte the pre-cache code path.
+        self._cache: DetectionCache | None = (
+            DetectionCache(
+                config.detection_cache.max_entries,
+                config.detection_cache.ttl_seconds,
+            )
+            if config.detection_cache.enabled
+            else None
+        )
         self._ready = False
 
     @property
@@ -550,9 +562,38 @@ class PIIEngine:
             return [self._walk_deanonymize(v, mapping) for v in value]
         return value
 
+    def _detector_fingerprint(self) -> bytes:
+        """Fingerprint of everything that shapes a detection result, so a
+        configuration change can never serve stale cached spans. Recomputed on
+        every lookup (a few microseconds) rather than frozen at init: detectors
+        read parts of their config per call (e.g. score_threshold), so even an
+        in-place mutation of a live config must invalidate."""
+        cfg = self.config
+        payload = "\x1f".join(
+            (
+                cfg.detectors.model_dump_json(),
+                json.dumps([p.model_dump() for p in cfg.custom_patterns], sort_keys=True),
+                cfg.merge_strategy,
+                cfg.overlap_resolution,
+            )
+        )
+        return hashlib.blake2b(payload.encode("utf-8"), digest_size=16).digest()
+
     async def _detect_all(self, text: str, language: str = "en") -> list[PIIEntity]:
         if not self.detectors:
             return []
+
+        cache = self._cache
+        cache_key: bytes | None = None
+        if cache is not None:
+            cache_key = cache.key(text, language, self._detector_fingerprint())
+            cached = cache.get(cache_key)
+            if cached is not None:
+                # Rebuild entities against the LIVE text: the cache stores span
+                # metadata only, never values. The block_entities gate and the
+                # anonymizer both run downstream on every request, cached or
+                # not, so a hit changes latency and nothing else.
+                return entities_from_spans(cached, text)
 
         tasks = [detector.detect(text, language) for detector in self.detectors]
         try:
@@ -572,7 +613,7 @@ class PIIEngine:
             all_entities.extend(result)
 
         try:
-            return merge_entities(
+            merged = merge_entities(
                 all_entities,
                 strategy=self.config.merge_strategy,
                 overlap_resolution=self.config.overlap_resolution,
@@ -583,3 +624,9 @@ class PIIEngine:
             # its errors safe for the same reason as detector errors.
             logger.error("PII detection result processing failed; request will be blocked")
             raise PIIProcessingError() from None
+
+        # Only a fully successful merge is cached: any failure above raised, so
+        # an error can never be replayed as an empty (fail-open) result.
+        if cache is not None and cache_key is not None:
+            cache.put(cache_key, spans_from_entities(merged))
+        return merged

@@ -117,6 +117,16 @@ pii:
     fuzzy_matching: false
     fuzzy_threshold: 0.85
 
+  # Detection cache for clients that resend the whole conversation every turn
+  # (agent CLIs: Claude Code, Codex). Caches merged detection spans per exact
+  # text leaf: salted hashes and span metadata only, never text or PII values.
+  # Off by default; enabling it lets PII-derived metadata live in process
+  # memory up to ttl_seconds after a request ends. See the README threat model.
+  detection_cache:
+    enabled: false
+    max_entries: 4096
+    ttl_seconds: 1800
+
   # Dry-run inspection endpoint (POST /v1/pii/inspect): returns the detections
   # for a text you submit, without forwarding anything to any provider and
   # without logging any value. For testing what gets redacted. Off by default.

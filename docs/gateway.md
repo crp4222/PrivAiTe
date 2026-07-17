@@ -27,6 +27,18 @@ Gateway routes carry the client's own provider credentials: PrivAiTe neither
 injects nor validates any key there (`PRIVAITE_API_KEYS` applies to the
 OpenAI-compatible endpoints only).
 
+Agent CLIs resend the whole conversation every turn, so also enable the
+[detection cache](configuration.md#detection-cache-agent-sessions) unless the
+stricter memory posture described in the
+[threat model](https://github.com/crp4222/PrivAiTe#threat-model) matters more
+to you than latency; without it, every turn re-scans the entire history:
+
+```yaml
+pii:
+  detection_cache:
+    enabled: true
+```
+
 ## Claude Code
 
 ```bash

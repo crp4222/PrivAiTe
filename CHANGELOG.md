@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Opt-in engine-level detection cache (`pii.detection_cache`) for clients that
+  resend conversation history every turn (agent CLIs). Caches merged detection
+  spans per exact text leaf, keyed by salted hash, bounded LRU with TTL; stores
+  span metadata only, never text or values. Output is byte-identical with the
+  cache on or off, and `block_entities` still blocks on cache hits. Off by
+  default; the README threat model documents what enabling it changes.
+
 ## [0.3.3] - 2026-07-19
 
 ### Fixed

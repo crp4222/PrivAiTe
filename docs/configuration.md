@@ -113,6 +113,44 @@ rule that can never fire would be silently unenforceable. Fix it by removing the
 type or enabling a detector that produces it (a `label_mapping` value, a Presidio
 entity, or a `custom_patterns` entity type).
 
+## Detection cache (agent sessions)
+
+Agent CLIs (Claude Code, Codex) resend the entire growing conversation on every
+turn, so the proxy re-scans mostly identical bytes: O(n) detector work per turn,
+O(n^2) per session. The detection cache remembers the merged detection result
+for each exact text leaf, so a resent leaf skips the detectors entirely. On a
+real captured 11-turn Codex session with the `onnx` preset, per-turn scrub time
+drops to well under a second from turn 2 on, with byte-identical output.
+
+```yaml
+pii:
+  detection_cache:
+    enabled: false      # default: off (see the README threat model)
+    max_entries: 4096   # LRU bound
+    ttl_seconds: 1800   # entries expire after 30 minutes
+```
+
+What it stores and what it never stores:
+
+- Stored: salted BLAKE2b hashes of scanned text leaves (the salt is random per
+  process and never leaves it), plus span metadata (start, end, entity type,
+  score, detector source) for each hash.
+- Never stored: the text itself, the matched PII values, the anonymized output,
+  or any placeholder mapping. Placeholder numbering stays per-request.
+
+The `block_entities` gate and the anonymizer run on every request, cached or
+not, so a cached detection still blocks and still fails closed. A change to any
+detector setting changes the cache key fingerprint, so stale results are never
+served after a config change.
+
+Why it is off by default: with the cache enabled, PII-derived metadata (hashes,
+positions, types) survives in process memory up to `ttl_seconds` after a
+request ends, instead of nothing outliving the request. The full delta,
+including the multi-user dedup timing side channel, is spelled out in the
+[README threat model](../README.md#threat-model). Enable it if you use the
+[agent CLI gateway](gateway.md) or any client that resends conversation
+history; leave it off if the stricter memory posture matters more than latency.
+
 ## Custom regex patterns
 
 Add your own PII patterns without touching code:

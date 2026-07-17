@@ -27,6 +27,10 @@ them as invariants, not suggestions.
 5. **Never log or echo PII.** Errors name entity **types**, never values
    (`PIIBlockedError`, `UnsupportedContentError`). No logger call may emit message
    content or entity values. The reversible map is per-request, in-memory only.
+   The opt-in detection cache (`privaite/pii/cache.py`) may hold only salted
+   hashes and span metadata (offsets, types, scores, sources): never text,
+   values, anonymized output, or mapping state. Its privacy delta is documented
+   in the README threat model; keep that section in sync if you touch it.
 6. **Startup fails fast on unsafe config**, it never degrades silently: `pii.enabled`
    with 0 detectors, `merge_strategy: intersection` with <2 detectors, a Presidio
    language with no spaCy model, duplicate provider `model_name` aliases, and a

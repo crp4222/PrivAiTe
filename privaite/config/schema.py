@@ -180,6 +180,27 @@ class DeanonymizationConfig(BaseModel):
     fuzzy_threshold: float = 0.85
 
 
+class DetectionCacheConfig(BaseModel):
+    # Engine-level cache of merged detection results, keyed on the exact leaf
+    # text. Agent CLIs (Claude Code, Codex) resend the whole conversation every
+    # turn, so without it the proxy re-scans mostly identical bytes: O(n^2)
+    # detector work per session. The cache stores span METADATA only (salted
+    # text hashes, offsets, entity types, scores, sources): never the text,
+    # never the matched values, never the anonymized output. The block_entities
+    # gate still runs on every request, cached or not.
+    #
+    # Off by default (invariant #7: defaults are the safety posture). Enabling
+    # it means PII-derived metadata survives in process memory up to
+    # ttl_seconds after a request ends, instead of nothing outliving the
+    # request. See the README threat model before enabling in multi-user
+    # deployments (dedup timing side channel across auth keys).
+    enabled: bool = False
+    max_entries: int = Field(default=4096, ge=1)
+    # 30 minutes: long enough to span an agent session's think time between
+    # turns, short enough that the metadata does not linger for hours.
+    ttl_seconds: int = Field(default=1800, ge=1)
+
+
 class InspectConfig(BaseModel):
     # Dry-run inspection endpoint (POST /v1/pii/inspect): returns the detections
     # for a caller-supplied text WITHOUT forwarding anything to any provider and
@@ -242,6 +263,7 @@ class PIIConfig(BaseModel):
     deanonymization: DeanonymizationConfig = Field(default_factory=DeanonymizationConfig)
     passthrough: PassthroughConfig = Field(default_factory=PassthroughConfig)
     inspect: InspectConfig = Field(default_factory=InspectConfig)
+    detection_cache: DetectionCacheConfig = Field(default_factory=DetectionCacheConfig)
 
     def model_post_init(self, __context: object) -> None:
         if self.preset is None:
