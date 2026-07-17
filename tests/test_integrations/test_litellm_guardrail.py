@@ -396,6 +396,270 @@ async def test_responses_function_call_arguments_enforce_block_gate():
 
 
 @pytest.mark.asyncio
+async def test_responses_custom_tool_call_input_and_list_output_are_scanned():
+    # Codex's shell tool is a custom tool: the command travels in
+    # custom_tool_call.input and the file contents come back as a
+    # custom_tool_call_output whose `output` is a LIST of {type, text} parts.
+    # Both were forwarded raw before the gateway parity sync; the list-output
+    # shape is the exact leak class that let file contents through.
+    gr = _guardrail()
+    input_items = [
+        {
+            "type": "custom_tool_call",
+            "call_id": "c1",
+            "name": "shell",
+            "input": "grep marie.dupont@acme.com notes.txt",
+        },
+        {
+            "type": "custom_tool_call_output",
+            "call_id": "c1",
+            "output": [
+                {"type": "input_text", "text": "I am Marie Dupont, email marie.dupont@acme.com"}
+            ],
+        },
+    ]
+    body = {"input": input_items}
+    data = {"input": input_items, "proxy_server_request": {"body": body}}
+    data = await gr.async_pre_call_hook(None, None, data, "aresponses")
+    serialized = json.dumps(data["input"])
+
+    assert "Marie Dupont" not in serialized
+    assert "marie.dupont@acme.com" not in serialized
+    # the body snapshot aliases the same list: anonymized there too
+    assert "marie.dupont@acme.com" not in json.dumps(body["input"])
+    # structure preserved: part type, call ids, item types
+    assert data["input"][0]["call_id"] == "c1"
+    assert data["input"][1]["output"][0]["type"] == "input_text"
+    assert data["metadata"]["privaite_map"]
+
+
+@pytest.mark.asyncio
+async def test_responses_mcp_call_scrubs_both_arguments_and_output():
+    # Regression: the old scan stopped at the FIRST text field it found, so an
+    # mcp_call carrying both `arguments` and `output` leaked one of them.
+    gr = _guardrail()
+    data = {
+        "input": [
+            {
+                "type": "mcp_call",
+                "id": "m1",
+                "server_label": "crm",
+                "name": "lookup",
+                "arguments": json.dumps({"email": "marie.dupont@acme.com"}),
+                "output": "found carol.smith@example.net",
+            }
+        ]
+    }
+    data = await gr.async_pre_call_hook(None, None, data, "aresponses")
+    item = data["input"][0]
+
+    assert "marie.dupont@acme.com" not in item["arguments"]
+    assert "carol.smith@example.net" not in item["output"]
+    # arguments are JSON-parsed and walked, so they stay valid JSON
+    assert "email" in json.loads(item["arguments"])
+
+
+@pytest.mark.asyncio
+async def test_responses_computer_call_action_scrubbed_screenshot_untouched():
+    # A typed action carrier is scanned (action AND actions), while the paired
+    # computer_call_output screenshot is binary: rewriting its base64 corrupts
+    # it, so it must be relayed byte-for-byte.
+    gr = _guardrail()
+    screenshot_item = {
+        "type": "computer_call_output",
+        "call_id": "c1",
+        "output": {
+            "type": "computer_screenshot",
+            "image_url": "data:image/png;base64,bytes-marie.dupont@acme.com-bytes",
+        },
+    }
+    data = {
+        "input": [
+            {
+                "type": "computer_call",
+                "call_id": "c1",
+                "action": {"type": "type", "text": "email marie.dupont@acme.com"},
+                "actions": [{"type": "type", "text": "cc carol.smith@example.net"}],
+                "status": "completed",
+            },
+            dict(screenshot_item),
+        ]
+    }
+    data = await gr.async_pre_call_hook(None, None, data, "aresponses")
+
+    assert "marie.dupont@acme.com" not in data["input"][0]["action"]["text"]
+    assert "carol.smith@example.net" not in data["input"][0]["actions"][0]["text"]
+    assert data["input"][1] == screenshot_item
+
+
+@pytest.mark.asyncio
+async def test_responses_typed_action_carriers_are_scanned():
+    # The remaining typed carriers: shell command, patch diff, file-search
+    # queries/results, interpreter code/logs. None of these were scanned before
+    # the gateway parity sync.
+    gr = _guardrail()
+    data = {
+        "input": [
+            {
+                "type": "local_shell_call",
+                "call_id": "s1",
+                "action": {"type": "exec", "command": ["echo", "marie.dupont@acme.com"]},
+            },
+            {
+                "type": "apply_patch_call",
+                "call_id": "p1",
+                "operation": {
+                    "type": "update_file",
+                    "path": "notes.txt",
+                    "diff": "+contact marie.dupont@acme.com",
+                },
+            },
+            {
+                "type": "file_search_call",
+                "id": "f1",
+                "queries": ["contract of marie.dupont@acme.com"],
+                "results": [
+                    {"file_id": "file-1", "score": 0.9, "text": "signed by carol.smith@example.net"}
+                ],
+            },
+            {
+                "type": "code_interpreter_call",
+                "id": "ci1",
+                "code": "send('marie.dupont@acme.com')",
+                "outputs": [{"type": "logs", "logs": "emailed carol.smith@example.net"}],
+            },
+        ]
+    }
+    data = await gr.async_pre_call_hook(None, None, data, "aresponses")
+    serialized = json.dumps(data["input"])
+
+    assert "marie.dupont@acme.com" not in serialized
+    assert "carol.smith@example.net" not in serialized
+    # typed fields keep their structure around the scrubbed leaves
+    assert data["input"][0]["action"]["type"] == "exec"
+    assert data["input"][1]["operation"]["path"] == "notes.txt"
+    assert data["input"][2]["results"][0]["file_id"] == "file-1"
+    assert data["input"][3]["outputs"][0]["type"] == "logs"
+
+
+@pytest.mark.asyncio
+async def test_responses_prompt_variables_scrubbed_binary_variable_untouched():
+    # prompt.variables carry user data (the template id/version do not); a
+    # variables-only request must not slip past the pre-call early return. File
+    # variables are binary payloads: relayed whole.
+    gr = _guardrail()
+    file_variable = {
+        "type": "input_file",
+        "file_data": "AAmarie.dupont@acme.comAA",
+        "filename": "x.pdf",
+    }
+    prompt = {
+        "id": "pmpt_1",
+        "version": "2",
+        "variables": {
+            "customer": "our customer is Marie Dupont",
+            "note": {"type": "input_text", "text": "email marie.dupont@acme.com"},
+            "attachment": dict(file_variable),
+        },
+    }
+    body = {"prompt": prompt}
+    data = {"prompt": prompt, "proxy_server_request": {"body": body}}
+    data = await gr.async_pre_call_hook(None, None, data, "aresponses")
+    variables = data["prompt"]["variables"]
+
+    assert "Marie Dupont" not in variables["customer"]
+    assert "marie.dupont@acme.com" not in variables["note"]["text"]
+    assert variables["attachment"] == file_variable
+    assert data["prompt"]["id"] == "pmpt_1"
+    # the snapshot aliases the same prompt dict, so it is anonymized too
+    assert body["prompt"] is data["prompt"]
+    assert "Marie Dupont" not in json.dumps(body["prompt"])
+    assert data["metadata"]["privaite_map"]
+
+
+@pytest.mark.asyncio
+async def test_responses_opaque_and_binary_items_relayed_byte_for_byte():
+    # Encrypted reasoning is validated by the provider and an image part is
+    # base64: scrubbing either corrupts the item without removing anything a
+    # text detector could find. The sibling text part is still scanned.
+    gr = _guardrail()
+    reasoning_item = {
+        "type": "reasoning",
+        "id": "rs1",
+        "encrypted_content": "gAAAA-marie.dupont@acme.com-opaque",
+        "summary": [],
+    }
+    image_part = {
+        "type": "input_image",
+        "image_url": "data:image/png;base64,marie.dupont@acme.com",
+    }
+    data = {
+        "input": [
+            dict(reasoning_item),
+            {
+                "type": "function_call_output",
+                "call_id": "c1",
+                "output": [
+                    {"type": "input_text", "text": "sent to carol.smith@example.net"},
+                    dict(image_part),
+                ],
+            },
+        ]
+    }
+    data = await gr.async_pre_call_hook(None, None, data, "aresponses")
+
+    assert data["input"][0] == reasoning_item
+    output = data["input"][1]["output"]
+    assert "carol.smith@example.net" not in output[0]["text"]
+    assert output[1] == image_part
+
+
+@pytest.mark.asyncio
+async def test_pre_call_string_prompt_still_early_returns(monkeypatch):
+    # /v1/completions sends `prompt` as a string: that is not the Responses
+    # prompt-variables surface, so the hook must keep returning early without
+    # spinning up the engine.
+    gr = _guardrail()
+
+    async def _boom(_languages):
+        raise AssertionError("engine must not be built for a string prompt")
+
+    monkeypatch.setattr(gr, "_engine_for", _boom)
+    data = {"prompt": "say hello"}
+    out = await gr.async_pre_call_hook(None, None, data, "atext_completion")
+    assert out is data
+    assert "metadata" not in out
+
+
+@pytest.mark.asyncio
+async def test_responses_custom_tool_output_list_enforces_block_gate():
+    # The hard policy gate must cover the newly scanned list-of-parts output
+    # path too, not only string outputs.
+    from fastapi import HTTPException
+
+    module = _load()
+    gr = module.PrivaiteGuardrail(
+        guardrail_name="privaite",
+        preset="light",
+        languages="en",
+        block_entities=["EMAIL_ADDRESS"],
+    )
+    data = {
+        "input": [
+            {
+                "type": "custom_tool_call_output",
+                "call_id": "c1",
+                "output": [{"type": "input_text", "text": "bob@leak.com"}],
+            }
+        ]
+    }
+    with pytest.raises(HTTPException) as ei:
+        await gr.async_pre_call_hook(None, None, data, "aresponses")
+    assert ei.value.status_code == 400
+    assert "bob@leak.com" not in str(ei.value.detail)
+
+
+@pytest.mark.asyncio
 async def test_pre_call_failure_clears_map_and_aborts_before_returning_data(monkeypatch):
     # A detector error has no allow-through path in the guardrail. The hook
     # propagates it before returning a request to LiteLLM and discards any

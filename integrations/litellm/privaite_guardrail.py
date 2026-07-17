@@ -5,8 +5,10 @@ Runs PrivAiTe's engine in-process inside LiteLLM. The pre-call hook anonymizes t
 request and stashes the reversible map in the request metadata (consumed and popped
 by the post-call hook); the post-call hook restores the real values in the response,
 including inside tool-call arguments and the legacy function_call, which LiteLLM's
-built-in Presidio guardrail does not touch. It also anonymizes Responses API
-`input` and restores Responses `output_text` / function_call output. Chat
+built-in Presidio guardrail does not touch. It also anonymizes the Responses API
+request surface with the same coverage as the gateway (role items, tool calls and
+their outputs, typed action carriers, `prompt.variables`; opaque/binary items
+relayed whole) and restores Responses `output_text` / function_call output. Chat
 streaming is restored too: text content, streamed tool-call arguments, and the
 streamed function_call. (Responses API streaming restore is not yet implemented.)
 On the failure path the map is dropped from metadata as well (best-effort), so it
@@ -167,11 +169,6 @@ class PrivaiteGuardrail(CustomGuardrail):
             self._engine_key = key
             return engine
 
-    # Text-bearing fields on non-message Responses input items: a tool output, a
-    # streamed/echoed tool call, and a bare input_text/output_text content part.
-    # Scanned individually so a mixed input list is not left raw.
-    _ITEM_TEXT_FIELDS = ("output", "arguments", "text")
-
     def _overwrite_snapshot_input(self, data: dict, new_input: Any) -> None:
         # A plain `data["input"] = ...` rebind leaks for string input: the proxy
         # snapshots the request body by shallow-copying data before this hook,
@@ -183,80 +180,68 @@ class PrivaiteGuardrail(CustomGuardrail):
         if isinstance(body, dict) and "input" in body:
             body["input"] = new_input
 
-    def _responses_item_repr(self, item: Any) -> tuple:
-        """Map ONE Responses `input` list item to (engine_message, field) so it
-        can be scanned. field=None means the item IS a message (replace it whole
-        with the anonymized copy); a field name means write the scrubbed content
-        back into item[field]; "__str__" means the item is a bare string. Returns
-        (None, None) for a shape with no scannable text."""
-        if isinstance(item, str):
-            return ({"role": "user", "content": item}, "__str__") if item else (None, None)
-        if isinstance(item, dict):
-            if "role" in item:
-                # A message item; the engine scans its content (str or parts)
-                # natively, so hand it over unchanged.
-                return item, None
-            for field in self._ITEM_TEXT_FIELDS:
-                if isinstance(item.get(field), str) and item[field]:
-                    return {"role": "user", "content": item[field]}, field
-            if isinstance(item.get("content"), (str, list)) and item["content"]:
-                return {"role": "user", "content": item["content"]}, "content"
-        return None, None
+    @staticmethod
+    def _prompt_variables(data: dict) -> dict | None:
+        """Responses prompt-template variables carry user data (the template
+        id/version do not). None when the request has no scannable variables;
+        /v1/completions sends `prompt` as a string, which is not this surface."""
+        prompt = data.get("prompt")
+        if isinstance(prompt, dict) and isinstance(prompt.get("variables"), dict):
+            return prompt["variables"]
+        return None
 
     async def _anonymize_request(self, data: dict, engine: Any) -> Any:
-        """Anonymize chat `messages` AND Responses `input` in place using the
-        engine (span-precise), sharing ONE mapping so neither is left untouched
-        when a crafted request carries both. Every Responses input item is scanned
-        item by item (message, tool output, tool call, bare string), so a mixed
-        input list no longer slips past detection and the block gate. Returns the
-        mapping, or None if there was nothing to anonymize."""
+        """Anonymize chat `messages` AND the Responses request surface (`input`
+        plus `prompt.variables`) in place, sharing ONE mapping so no source is
+        left untouched when a crafted request carries several. Responses items
+        are scanned by the gateway's item scrubber, so the two integrations
+        cover the exact same surface (role content, tool calls and outputs
+        including list-of-parts, typed action carriers, mcp fields; opaque and
+        binary payloads relayed whole). Every scanned string still flows through
+        the engine's single choke point, so the block gate and the fail-closed
+        policy apply unchanged. Returns the mapping, or None if there was
+        nothing to anonymize."""
+        # privaite.gateway.scrub is the reference implementation for WHAT a
+        # Responses request exposes (AGENTS.md: integrations stay in sync with
+        # the core). Reusing its scrubbers, private as they are, beats a local
+        # mirror that would silently drift behind the next gateway hardening.
+        from privaite.gateway.scrub import _scrub_data_value, _scrub_responses_item
+        from privaite.pii.mapping import PIIMapping
+
         messages = data.get("messages")
         msg_list = messages if isinstance(messages, list) else []
-        batch: list[Any] = list(msg_list)
+        scanned = bool(msg_list)
+        if msg_list:
+            anonymized, mapping = await engine.process_request(msg_list)
+            # msg_list is data["messages"] (same object) -> mutate it in place so
+            # the proxy's shallow body snapshot holds the anonymized copy too.
+            msg_list[:] = anonymized
+        else:
+            mapping = PIIMapping()
 
         input_value = data.get("input")
-        # targets: how to write each input-derived anonymized message back.
-        targets: list[tuple] = []
         if isinstance(input_value, str) and input_value:
-            batch.append({"role": "user", "content": input_value})
-            targets.append(("str", None))
+            scanned = True
+            new_text, _ = await engine.scrub_document(input_value, mapping)
+            data["input"] = new_text
+            self._overwrite_snapshot_input(data, new_text)
         elif isinstance(input_value, list):
+            scanned = True
+            # Slot-by-slot rewrite of the SAME list object: the body snapshot
+            # aliases it, so the anonymized items land in the snapshot too.
             for idx, item in enumerate(input_value):
-                rep, field = self._responses_item_repr(item)
-                if rep is None:
-                    continue  # no scannable text on this item shape
-                batch.append(rep)
-                targets.append((idx, field))
+                input_value[idx] = await _scrub_responses_item(engine, item, mapping)
 
-        if not batch:
-            return None
+        variables = self._prompt_variables(data)
+        if variables is not None:
+            scanned = True
+            # Rebind the key on the SAME prompt dict (aliased by the snapshot).
+            data["prompt"]["variables"] = {
+                key: await _scrub_data_value(engine, value, mapping)
+                for key, value in variables.items()
+            }
 
-        anonymized, mapping = await engine.process_request(batch)
-
-        n = len(msg_list)
-        if msg_list:
-            # msg_list is data["messages"] (same object) -> mutate it in place.
-            msg_list[:] = anonymized[:n]
-
-        for (target, field), anon in zip(targets, anonymized[n:]):
-            if target == "str":
-                new_text = anon.get("content", input_value)
-                data["input"] = new_text
-                self._overwrite_snapshot_input(data, new_text)
-                continue
-            # every non-"str" target came from the `isinstance(input_value, list)`
-            # branch above, so input_value is a list here.
-            if not isinstance(input_value, list):
-                continue
-            if field is None:
-                input_value[target] = anon  # message item: replace whole
-            elif field == "__str__":
-                input_value[target] = anon.get("content", input_value[target])
-            else:
-                new_item = dict(input_value[target])
-                new_item[field] = anon.get("content", new_item[field])
-                input_value[target] = new_item
-        return mapping
+        return mapping if scanned else None
 
     async def async_pre_call_hook(
         self, user_api_key_dict: Any, cache: Any, data: dict, call_type: str
@@ -271,7 +256,11 @@ class PrivaiteGuardrail(CustomGuardrail):
         if isinstance(metadata, dict):
             metadata.pop("privaite_map", None)
 
-        if not data.get("messages") and not data.get("input"):
+        if (
+            not data.get("messages")
+            and not data.get("input")
+            and self._prompt_variables(data) is None
+        ):
             return data
 
         engine = await self._engine_for(self._languages())
