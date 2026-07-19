@@ -48,12 +48,14 @@ class FakeProviderRouter:
 
     def __init__(self) -> None:
         self.received_messages: list[dict] | None = None
+        self.received_kwargs: dict | None = None
 
     def has_model(self, model: str) -> bool:
         return True
 
     async def completion(self, model_alias, messages, **kwargs):
         self.received_messages = messages
+        self.received_kwargs = kwargs
         last = messages[-1]
         message: dict = {"role": "assistant", "content": None}
         if isinstance(last.get("content"), str):
@@ -254,6 +256,101 @@ async def test_block_entities_rejects_and_forwards_nothing():
     assert "EMAIL_ADDRESS" in body["error"]["message"]
     assert "marie@acme.com" not in body["error"]["message"]  # value never leaked
     assert router.received_messages is None
+
+
+@pytest.mark.asyncio
+async def test_prediction_content_string_scrubbed_before_forward():
+    # OpenAI predicted outputs (`prediction.content`) carry the client's current
+    # document. It used to ride the kwargs passthrough to the provider verbatim.
+    app, router = _make_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "m",
+                "messages": [{"role": "user", "content": "update the doc"}],
+                "temperature": 0.2,
+                "prediction": {
+                    "type": "content",
+                    "content": "Report written by Marie Dupont (marie@acme.com).",
+                },
+            },
+        )
+
+    assert resp.status_code == 200
+    sent = router.received_kwargs["prediction"]["content"]
+    assert "Marie Dupont" not in sent
+    assert "marie@acme.com" not in sent
+    assert "<PERSON_1>" in sent
+    assert router.received_kwargs["prediction"]["type"] == "content"
+    assert router.received_kwargs["temperature"] == 0.2  # other kwargs still pass
+
+
+@pytest.mark.asyncio
+async def test_prediction_content_part_list_scrubbed_before_forward():
+    # prediction.content may also be an array of {"type": "text", "text": ...}.
+    app, router = _make_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "m",
+                "messages": [{"role": "user", "content": "update the doc"}],
+                "prediction": {
+                    "type": "content",
+                    "content": [{"type": "text", "text": "Author: Marie Dupont"}],
+                },
+            },
+        )
+
+    assert resp.status_code == 200
+    parts = router.received_kwargs["prediction"]["content"]
+    assert "Marie Dupont" not in json.dumps(parts)
+    assert parts[0]["type"] == "text"
+
+
+@pytest.mark.asyncio
+async def test_web_search_user_location_scrubbed_before_forward():
+    app, router = _make_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "m",
+                "messages": [{"role": "user", "content": "search the news"}],
+                "web_search_options": {
+                    "user_location": {
+                        "type": "approximate",
+                        "approximate": {"city": "chez Marie Dupont", "country": "FR"},
+                    }
+                },
+            },
+        )
+
+    assert resp.status_code == 200
+    sent = router.received_kwargs["web_search_options"]["user_location"]
+    assert "Marie Dupont" not in json.dumps(sent)
+    assert sent["approximate"]["country"] == "FR"
+
+
+@pytest.mark.asyncio
+async def test_block_entities_gate_covers_prediction_content():
+    # The block gate is part of the single choke point, so a blocked type found
+    # ONLY in prediction.content must reject the whole request.
+    app, router = _make_app(block_entities=["EMAIL_ADDRESS"])
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "m",
+                "messages": [{"role": "user", "content": "no pii here"}],
+                "prediction": {"type": "content", "content": "reach marie@acme.com"},
+            },
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "pii_blocked"
+    assert router.received_messages is None  # nothing reached the provider
 
 
 @pytest.mark.asyncio

@@ -39,7 +39,10 @@ them as invariants, not suggestions.
 Scanned: `messages[].content` (string, multimodal text parts, or bare strings in a
 list); `tool_calls`/`function_call` arguments parsed as JSON and scrubbed value by
 value **including numeric leaves with >=7 digits** (a card number sent as a bare
-number is caught); `/v1/completions` `prompt`; `/v1/embeddings` `input`.
+number is caught); `/v1/completions` `prompt` and `suffix`; `/v1/embeddings`
+`input`; chat `prediction.content` and `web_search_options.user_location`
+(auxiliary request fields, scrubbed input-side via `process_request_value`, no
+restore path needed).
 
 NOT scanned (documented limitation, keep it documented if you change it):
 `messages[].name`, top-level `user`/`metadata`, `tools`/`functions` definitions,

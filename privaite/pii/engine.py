@@ -203,6 +203,28 @@ class PIIEngine:
         langs = self.config.detectors.presidio.languages
         return langs[0] if langs else "en"
 
+    async def process_request_value(self, value: Any, mapping: PIIMapping) -> Any:
+        """Anonymize one auxiliary request-side value (a string, or a JSON-like
+        dict/list structure whose string and long-numeric leaves are scrubbed)
+        into an existing per-request mapping.
+
+        Used for text-bearing request fields outside ``messages`` that would
+        otherwise be forwarded verbatim by the kwargs passthrough: chat
+        ``prediction.content`` (predicted outputs carry the client's current
+        document), ``web_search_options.user_location``, and the completions
+        ``suffix``. These are request inputs, so they only need scrubbing, never
+        a dedicated restore path. Same single choke point (``_anonymize_text``,
+        so the block gate applies) and same safe-error policy as
+        ``process_request``.
+        """
+        try:
+            return await self._walk_anonymize(value, mapping, self._language())
+        except (PIIBlockedError, UnsupportedContentError, PIIProcessingError):
+            raise
+        except Exception:
+            logger.error("PII request processing failed; request will be blocked")
+            raise PIIProcessingError() from None
+
     async def _anonymize_text(self, text: Any, mapping: PIIMapping, language: str) -> Any:
         if not text or not isinstance(text, str):
             return text

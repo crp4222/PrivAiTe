@@ -58,6 +58,7 @@ class FakeRouter:
 
     def __init__(self) -> None:
         self.prompt = None
+        self.kwargs: dict | None = None
         self.embedding_input = None
         self.stream_texts: list[str] | None = None
 
@@ -66,6 +67,7 @@ class FakeRouter:
 
     async def text_completion(self, model_alias, prompt, **kwargs):
         self.prompt = prompt
+        self.kwargs = kwargs
         echoed = prompt if isinstance(prompt, str) else json.dumps(prompt)
         return {
             "object": "text_completion",
@@ -204,6 +206,44 @@ async def test_completions_streaming_restores_split_placeholder():
     assert placeholder not in text
     # provider chunk fields survive (the handler rewrites text only)
     assert json.loads(payloads[0])["object"] == "text_completion"
+
+
+@pytest.mark.asyncio
+async def test_completions_suffix_scrubbed_before_forward():
+    # Fill-in-the-middle: `suffix` is user text and used to ride the kwargs
+    # passthrough to the provider verbatim.
+    app, router = _make_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/v1/completions",
+            json={
+                "model": "m",
+                "prompt": "def send_mail():",
+                "suffix": "# ping Marie Dupont at marie@acme.com",
+                "max_tokens": 16,
+            },
+        )
+
+    assert resp.status_code == 200
+    sent = router.kwargs["suffix"]
+    assert "Marie Dupont" not in sent
+    assert "marie@acme.com" not in sent
+    assert "<PERSON_1>" in sent
+    assert router.kwargs["max_tokens"] == 16  # other kwargs still pass
+
+
+@pytest.mark.asyncio
+async def test_block_entities_gate_covers_suffix():
+    app, router = _make_app(block_entities=["EMAIL_ADDRESS"])
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/v1/completions",
+            json={"model": "m", "prompt": "no pii", "suffix": "mail marie@acme.com"},
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "pii_blocked"
+    assert router.prompt is None  # nothing ever reached the provider
 
 
 @pytest.mark.asyncio

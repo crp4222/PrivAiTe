@@ -26,6 +26,29 @@ logger = logging.getLogger("privaite.api.chat")
 router = APIRouter(prefix="/v1")
 
 
+async def _scrub_forwarded_fields(kwargs: dict, pii_engine: Any, mapping: Any) -> dict:
+    """Scrub the text-bearing auxiliary request fields that the kwargs
+    passthrough would otherwise forward verbatim: `prediction.content` (OpenAI
+    predicted outputs carry the client's current document) and
+    `web_search_options.user_location`. Request inputs only, nothing to restore."""
+    out = dict(kwargs)
+    prediction = out.get("prediction")
+    if isinstance(prediction, dict) and "content" in prediction:
+        new_prediction = dict(prediction)
+        new_prediction["content"] = await pii_engine.process_request_value(
+            prediction["content"], mapping
+        )
+        out["prediction"] = new_prediction
+    web_search = out.get("web_search_options")
+    if isinstance(web_search, dict) and "user_location" in web_search:
+        new_web_search = dict(web_search)
+        new_web_search["user_location"] = await pii_engine.process_request_value(
+            web_search["user_location"], mapping
+        )
+        out["web_search_options"] = new_web_search
+    return out
+
+
 async def _restore_message(msg: dict, pii_engine: Any, mapping: Any) -> None:
     """De-anonymize one response message in place: content, the reasoning trace,
     and tool/function call arguments (restore parity with the streaming path)."""
@@ -64,18 +87,23 @@ async def chat_completions(
     if error is not None:
         return error
 
-    async def _anonymize() -> tuple[list, Any]:
-        anon, mapping = await pii_engine.process_request(messages)
-        record_pii_stats(request, mapping)
-        return anon, mapping
+    kwargs = {k: v for k, v in body.items() if k not in ("model", "messages", "stream")}
 
-    messages, mapping, error = await resolve_input(
-        config.pii.enabled and pii_engine is not None, messages, _anonymize, config, logger
+    async def _anonymize() -> tuple[tuple[list, dict], Any]:
+        anon, mapping = await pii_engine.process_request(messages)
+        anon_kwargs = await _scrub_forwarded_fields(kwargs, pii_engine, mapping)
+        record_pii_stats(request, mapping)
+        return (anon, anon_kwargs), mapping
+
+    (messages, kwargs), mapping, error = await resolve_input(
+        config.pii.enabled and pii_engine is not None,
+        (messages, kwargs),
+        _anonymize,
+        config,
+        logger,
     )
     if error is not None:
         return error
-
-    kwargs = {k: v for k, v in body.items() if k not in ("model", "messages", "stream")}
 
     if stream:
         from privaite.streaming.handler import StreamingHandler

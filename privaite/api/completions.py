@@ -42,7 +42,9 @@ async def completions(
     if error is not None:
         return error
 
-    async def _anonymize() -> tuple[Any, Any]:
+    kwargs = {k: v for k, v in body.items() if k not in ("model", "prompt", "stream")}
+
+    async def _anonymize() -> tuple[tuple[Any, dict], Any]:
         if isinstance(prompt, list) and all(isinstance(p, str) for p in prompt):
             msgs = [{"role": "user", "content": p} for p in prompt]
             msgs, mapping = await pii_engine.process_request(msgs)
@@ -51,16 +53,25 @@ async def completions(
             msgs = [{"role": "user", "content": prompt}]
             msgs, mapping = await pii_engine.process_request(msgs)
             anon_prompt = msgs[0]["content"]
+        anon_kwargs = dict(kwargs)
+        # Fill-in-the-middle: `suffix` is user text and would otherwise ride the
+        # kwargs passthrough to the provider unscrubbed. Input-side, no restore.
+        if isinstance(anon_kwargs.get("suffix"), str):
+            anon_kwargs["suffix"] = await pii_engine.process_request_value(
+                anon_kwargs["suffix"], mapping
+            )
         record_pii_stats(request, mapping)
-        return anon_prompt, mapping
+        return (anon_prompt, anon_kwargs), mapping
 
-    prompt, mapping, error = await resolve_input(
-        config.pii.enabled and pii_engine is not None, prompt, _anonymize, config, logger
+    (prompt, kwargs), mapping, error = await resolve_input(
+        config.pii.enabled and pii_engine is not None,
+        (prompt, kwargs),
+        _anonymize,
+        config,
+        logger,
     )
     if error is not None:
         return error
-
-    kwargs = {k: v for k, v in body.items() if k not in ("model", "prompt", "stream")}
 
     if stream:
         from privaite.streaming.handler import StreamingHandler
