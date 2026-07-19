@@ -386,6 +386,78 @@ def test_span_round_trip_rebuilds_against_live_text():
     assert rebuilt == [entity]
 
 
+def test_expired_entries_swept_by_the_next_write_not_just_on_lookup():
+    # The documented residency bound: expired metadata must leave memory on
+    # the first cache write after expiry, without its own key ever being
+    # looked up again. Lazy per-key expiry alone kept it resident until
+    # process exit under low traffic.
+    clock = {"now": 0.0}
+    cache = DetectionCache(max_entries=64, ttl_seconds=60, time_fn=lambda: clock["now"])
+    fp = b"fp"
+    span = ((0, 3, "EMAIL_ADDRESS", 0.9, "stub"),)
+
+    k1 = cache.key("one", "en", fp)
+    cache.put(k1, span)
+    # A hit at t=50 moves k1 to the most-recent end: the sweep must go by age
+    # (stored_at), not by access order.
+    clock["now"] = 50.0
+    assert cache.get(k1) == span
+    k2 = cache.key("two", "en", fp)
+    cache.put(k2, span)
+
+    clock["now"] = 61.0  # k1 expired (stored at 0), k2 not (stored at 50)
+    k3 = cache.key("three", "en", fp)
+    cache.put(k3, span)
+    assert k1 not in cache._entries
+    assert k2 in cache._entries
+    assert k3 in cache._entries
+
+
+@pytest.mark.asyncio
+async def test_expired_engine_entries_purged_by_a_later_request():
+    clock = {"now": 0.0}
+    engine, _det = make_engine()
+    engine._cache = DetectionCache(max_entries=64, ttl_seconds=60, time_fn=lambda: clock["now"])
+    old_text = "ping henry.ford@example.test"
+    await engine.process_request([{"role": "user", "content": old_text}])
+    old_key = engine._cache.key(old_text, engine._language(), engine._detector_fingerprint())
+    assert old_key in engine._cache._entries
+
+    clock["now"] = 61.0
+    # A DIFFERENT text arrives: its write sweeps the stale entry out.
+    await engine.process_request([{"role": "user", "content": "cc lisa.ray@example.test"}])
+    assert old_key not in engine._cache._entries
+    assert len(engine._cache) == 1
+
+
+@pytest.mark.asyncio
+async def test_shutdown_clears_the_cache():
+    engine, _det = make_engine()
+    await engine.process_request([{"role": "user", "content": "mail noor.khan@example.test"}])
+    assert engine._cache is not None and len(engine._cache) > 0
+
+    await engine.shutdown()
+    assert len(engine._cache) == 0
+
+
+@pytest.mark.asyncio
+async def test_shutdown_clears_the_cache_even_if_a_detector_fails_to_stop():
+    class BoomShutdownDetector(RegexEmailDetector):
+        async def shutdown(self) -> None:
+            raise RuntimeError("stuck")
+
+    det = BoomShutdownDetector()
+    engine, _ = make_engine(detector=det)
+    await engine.process_request([{"role": "user", "content": "mail omar.aziz@example.test"}])
+    assert engine._cache is not None and len(engine._cache) > 0
+
+    with pytest.raises(RuntimeError):
+        await engine.shutdown()
+    # The cache is dropped BEFORE the detectors shut down: a stuck detector
+    # cannot leave PII-derived metadata behind.
+    assert len(engine._cache) == 0
+
+
 CAPTURE_ENV = "PRIVAITE_CAPTURE_TAP"
 
 
