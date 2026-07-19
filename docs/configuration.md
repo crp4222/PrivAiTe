@@ -1,3 +1,10 @@
+---
+description: >-
+  PrivAiTe configuration reference: providers, presets, anonymization methods,
+  block_entities, custom regex patterns, languages, Docker with a custom
+  config, pinned model revisions.
+---
+
 # Configuration reference
 
 Everything below goes in your `privaite.yaml` (`python -m privaite --config privaite.yaml`).

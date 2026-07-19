@@ -1,3 +1,10 @@
+---
+description: >-
+  How PrivAiTe detects PII: Microsoft Presidio (regex + spaCy NER) and the
+  openai/privacy-filter ONNX model, what each engine catches, presets and known
+  limitations.
+---
+
 # How detection works
 
 PrivAiTe uses two detection engines that can run together or separately.

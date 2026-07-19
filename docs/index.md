@@ -1,3 +1,10 @@
+---
+description: >-
+  Self-hosted, OpenAI-compatible proxy that redacts PII (names, emails, cards,
+  secrets) from LLM requests, including tool-call arguments and multimodal
+  content, then restores it in the reply. Zero telemetry.
+---
+
 # PrivAiTe
 
 **Keep personal data out of your LLM calls.**
@@ -129,6 +136,16 @@ python -m spacy download en_core_web_lg
 Then point your client at `http://localhost:8400/v1` with the key you chose. The
 full quickstart, config reference, and threat model are in the
 [README](https://github.com/crp4222/PrivAiTe#readme).
+
+---
+
+## Docs
+
+- [How detection works](detection.md): the two engines, what each catches, known limitations
+- [Configuration reference](configuration.md): providers, presets, anonymization methods, `block_entities`, custom patterns
+- [API reference](api.md): endpoints and the exact scanned/unscanned request surface
+- [Verify what gets redacted](verify.md): audit the proxy on your own data
+- [PrivAiTe vs Presidio, LLM Guard, LiteLLM](comparison.md): feature and benchmark comparison
 
 ---
 

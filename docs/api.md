@@ -1,3 +1,9 @@
+---
+description: >-
+  PrivAiTe API reference: OpenAI-compatible endpoints, exactly which request
+  fields are scanned or left untouched, strict mode, and passthrough caveats.
+---
+
 # API reference
 
 OpenAI-compatible:

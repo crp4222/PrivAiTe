@@ -1,3 +1,10 @@
+---
+description: >-
+  Audit what PrivAiTe redacts on your own data: the dry-run /v1/pii/inspect
+  endpoint and a runnable local tool-call leak demo. No data leaves your
+  machine.
+---
+
 # Verify what gets redacted
 
 Do not trust the proxy blindly: check it on your own data. Two built-in ways, both

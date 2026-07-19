@@ -126,6 +126,8 @@ Where PrivAiTe differs: it anonymizes PII **inside tool-call arguments and multi
 
 ## Docs
 
+Also browsable as a site: [crp4222.github.io/PrivAiTe](https://crp4222.github.io/PrivAiTe/).
+
 - [How detection works](docs/detection.md): the two engines, what each catches, what stays off by default, known limitations
 - [Configuration reference](docs/configuration.md): providers, Docker with custom config, anonymization methods, `block_entities`, custom patterns, languages, pinned model revisions
 - [API reference](docs/api.md): endpoints, the exact scanned/unscanned surface, strict mode, passthrough caveats

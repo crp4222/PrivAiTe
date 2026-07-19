@@ -4,3 +4,5 @@ description: >-
   Self-hosted LLM proxy that reversibly redacts PII before your prompts leave
   the machine, including tool-call arguments and multimodal content.
 theme: jekyll-theme-cayman
+plugins:
+  - jekyll-sitemap
