@@ -97,11 +97,11 @@ class PresidioDetector(PIIDetector):
 
         primary_lang = self.config.languages[0] if self.config.languages else "fr"
         allowed = set(self.config.entities) if self.config.entities else None
-        if allowed and self._custom_patterns:
+        if allowed is not None:
             # Custom patterns are an explicit operator opt-in; the entity
             # allowlist (set by the onnx/max presets) must not silently filter
             # them out, or they would never fire under the default preset.
-            allowed |= {p.entity_type for p in self._custom_patterns}
+            allowed.update(p.entity_type for p in self._custom_patterns)
 
         all_results = []
         seen_spans: set[tuple[int, int, str]] = set()

@@ -62,20 +62,12 @@ class PIIEngine:
     def is_ready(self) -> bool:
         return self._ready
 
-    def _validate_block_entities(self) -> None:
-        """Refuse to start when block_entities lists a type that no enabled
-        detector can emit: the gate would silently never fire, which is
-        fail-open by configuration.
-
-        Deliberately conservative to never reject a working config: whenever a
-        detector's producible set cannot be determined precisely (Presidio
-        without an entity allowlist, or an ML detector with an empty
-        label_mapping), that detector is treated as able to emit anything and
-        validation is skipped. When no detector is enabled at all, the
-        dedicated zero-detector startup check reports it instead.
-        """
-        if not self._blocked:
-            return
+    def _producible_entity_types(self) -> set[str] | None:
+        """The union of entity types the ENABLED detectors can emit, from config
+        alone. None means "cannot be determined precisely" (Presidio without an
+        entity allowlist, an ML detector with an empty label_mapping, or no
+        detector enabled at all): callers must then skip validation rather than
+        risk rejecting a working config."""
         detectors = self.config.detectors
         enabled_ml = [
             cfg
@@ -88,19 +80,32 @@ class PIIEngine:
             if cfg.enabled
         ]
         if not detectors.presidio.enabled and not enabled_ml:
-            return
+            return None  # the dedicated zero-detector startup check reports it
         producible: set[str] = set()
         if detectors.presidio.enabled:
             if not detectors.presidio.entities:
-                return  # full Presidio registry: could emit nearly any type
+                return None  # full Presidio registry: could emit nearly any type
             producible |= set(detectors.presidio.entities)
             # Custom patterns run inside the Presidio detector and are exempt
             # from its entity allowlist.
             producible |= {p.entity_type for p in self.config.custom_patterns}
         for cfg in enabled_ml:
             if not cfg.label_mapping:
-                return  # unknown label set: treat as able to emit anything
+                return None  # unknown label set: treat as able to emit anything
             producible |= set(cfg.label_mapping.values())
+        return producible
+
+    def _validate_block_entities(self) -> None:
+        """Refuse to start when block_entities lists a type that no enabled
+        detector can emit: the gate would silently never fire, which is
+        fail-open by configuration. Deliberately conservative: skipped whenever
+        the producible set is unknown (better to under-warn than to break a
+        legitimate startup)."""
+        if not self._blocked:
+            return
+        producible = self._producible_entity_types()
+        if producible is None:
+            return
         unenforceable = sorted(self._blocked - producible)
         if unenforceable:
             raise ValueError(
