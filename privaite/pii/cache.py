@@ -115,10 +115,25 @@ class DetectionCache:
     def put(self, key: bytes, spans: tuple[CachedSpan, ...]) -> None:
         now = self._time()
         with self._lock:
+            self._purge_expired(now)
             self._entries[key] = (now, spans)
             self._entries.move_to_end(key)
             while len(self._entries) > self._max_entries:
                 self._entries.popitem(last=False)
+
+    def _purge_expired(self, now: float) -> None:
+        """Eager TTL sweep, called under the lock on every write. Expired
+        metadata must not reside in memory until its exact key happens to be
+        looked up again: the documented residency bound (README threat model,
+        docs/configuration.md) depends on this. Cost is one pass over at most
+        max_entries timestamps, orders of magnitude cheaper than the detector
+        run every put() follows. The order of the entry map is by last access,
+        not by age, so a partial scan could not prove completeness."""
+        expired = [
+            key for key, (stored_at, _) in self._entries.items() if now - stored_at > self._ttl
+        ]
+        for key in expired:
+            del self._entries[key]
 
     def clear(self) -> None:
         with self._lock:

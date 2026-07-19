@@ -192,7 +192,11 @@ class DetectionCacheConfig(BaseModel):
     # Off by default (invariant #7: defaults are the safety posture). Enabling
     # it means PII-derived metadata survives in process memory up to
     # ttl_seconds after a request ends, instead of nothing outliving the
-    # request. See the README threat model before enabling in multi-user
+    # request. An expired entry can never be served again; it is removed from
+    # memory on the first cache write after its expiry, and the engine clears
+    # the whole cache at shutdown, so only a process that goes completely idle
+    # holds its last (expired, unusable) entries longer, until that next write
+    # or shutdown. See the README threat model before enabling in multi-user
     # deployments (dedup timing side channel across auth keys).
     enabled: bool = False
     max_entries: int = Field(default=4096, ge=1)

@@ -127,7 +127,7 @@ pii:
   detection_cache:
     enabled: false      # default: off (see the README threat model)
     max_entries: 4096   # LRU bound
-    ttl_seconds: 1800   # entries expire after 30 minutes
+    ttl_seconds: 1800   # entries expire after 30 minutes (swept on the next write)
 ```
 
 What it stores and what it never stores:
@@ -145,7 +145,11 @@ served after a config change.
 
 Why it is off by default: with the cache enabled, PII-derived metadata (hashes,
 positions, types) survives in process memory up to `ttl_seconds` after a
-request ends, instead of nothing outliving the request. The full delta,
+request ends, instead of nothing outliving the request. An expired entry is
+never served again; it is removed from memory on the first cache write after
+its expiry, and the whole cache is cleared at engine shutdown, so only a
+process that goes completely idle holds its last (expired, unusable) entries
+longer, until that next write or shutdown. The full delta,
 including the multi-user dedup timing side channel, is spelled out in the
 [README threat model](../README.md#threat-model). Enable it if you use the
 [agent CLI gateway](gateway.md) or any client that resends conversation

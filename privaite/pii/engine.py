@@ -213,6 +213,10 @@ class PIIEngine:
             logger.warning("PII engine warmup pass failed (non-fatal)")
 
     async def shutdown(self) -> None:
+        # Drop the cached detection metadata FIRST: even if a detector refuses
+        # to shut down cleanly, nothing PII-derived may outlive the engine.
+        if self._cache is not None:
+            self._cache.clear()
         for detector in self.detectors:
             await detector.shutdown()
         self._ready = False
