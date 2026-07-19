@@ -29,6 +29,24 @@ All notable changes to this project are documented here. The format follows
   `message.refusal` and `message.audio.transcript` are restored in both the
   non-streaming and streaming paths. This fix also ships on its own as the
   0.3.4 patch, so it is not new to this release.
+## [0.3.4] - 2026-07-19
+
+### Fixed
+- LiteLLM guardrail: the auxiliary request fields the core proxy already
+  scrubs were forwarded raw by the guardrail, and a `/v1/completions` request
+  reached the model with its whole `prompt` intact (live-reachable through
+  LiteLLM text completions, whose pre-call hook received the top-level
+  `prompt` and returned early). The guardrail now scrubs the completions
+  `prompt` (string and batch list-of-strings shapes; tokenized integer-array
+  prompts stay unscanned as documented) and `suffix`, chat `prediction.content`
+  (string or content-part list) and `web_search_options.user_location` through
+  the same engine choke point, so masking and the `block_entities` gate apply,
+  and the proxy's shallow body snapshot is overwritten for the top-level
+  string fields. A request whose only user text sits in these fields no longer
+  bypasses the pre-call scan.
+- LiteLLM guardrail restore parity with the core: `message.refusal` and
+  `message.audio.transcript` are now restored in both the non-streaming and
+  streaming paths.
 
 ## [0.3.3] - 2026-07-19
 
