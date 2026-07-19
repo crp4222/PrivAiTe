@@ -49,6 +49,7 @@ class FakeProviderRouter:
     def __init__(self) -> None:
         self.received_messages: list[dict] | None = None
         self.received_kwargs: dict | None = None
+        self.response_message_extra: dict = {}
 
     def has_model(self, model: str) -> bool:
         return True
@@ -62,6 +63,7 @@ class FakeProviderRouter:
             message["content"] = f"Echo: {last['content']}"
         if last.get("tool_calls"):
             message["tool_calls"] = last["tool_calls"]
+        message.update(self.response_message_extra)
         return {
             "id": "fake",
             "object": "chat.completion",
@@ -256,6 +258,31 @@ async def test_block_entities_rejects_and_forwards_nothing():
     assert "EMAIL_ADDRESS" in body["error"]["message"]
     assert "marie@acme.com" not in body["error"]["message"]  # value never leaked
     assert router.received_messages is None
+
+
+@pytest.mark.asyncio
+async def test_refusal_and_audio_transcript_restored_in_response():
+    # Restore parity: a refusal or an audio transcript that echoes a placeholder
+    # must come back with the real value, like content and reasoning do.
+    app, router = _make_app()
+    router.response_message_extra = {
+        "refusal": "I cannot email <PERSON_1>",
+        "audio": {"id": "a1", "transcript": "sorry <PERSON_1>", "data": "abc"},
+    }
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "m",
+                "messages": [{"role": "user", "content": "I am Marie Dupont"}],
+            },
+        )
+
+    assert resp.status_code == 200
+    message = resp.json()["choices"][0]["message"]
+    assert message["refusal"] == "I cannot email Marie Dupont"
+    assert message["audio"]["transcript"] == "sorry Marie Dupont"
+    assert message["audio"]["data"] == "abc"  # non-text audio fields untouched
 
 
 @pytest.mark.asyncio

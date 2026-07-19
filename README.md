@@ -92,7 +92,7 @@ Per-language and per-entity tables, competitor configs, methodology, reproductio
 
 ## What it scans
 
-Before anything is forwarded: `messages[].content` (plain string or multimodal text parts), `tool_calls[].function.arguments` and the legacy `function_call.arguments` (parsed as JSON, scrubbed value by value including bare numeric leaves, keys and function names intact), `/v1/completions` `prompt` and `suffix`, `/v1/embeddings` `input`, chat `prediction.content` (predicted outputs) and `web_search_options.user_location`. On the way back, values are restored in content, tool calls and reasoning traces, streaming included.
+Before anything is forwarded: `messages[].content` (plain string or multimodal text parts), `tool_calls[].function.arguments` and the legacy `function_call.arguments` (parsed as JSON, scrubbed value by value including bare numeric leaves, keys and function names intact), `/v1/completions` `prompt` and `suffix`, `/v1/embeddings` `input`, chat `prediction.content` (predicted outputs) and `web_search_options.user_location`. On the way back, values are restored in content, tool calls, reasoning traces, refusals and audio transcripts, streaming included.
 
 NOT scanned (know your surface): `messages[].name`, top-level `user`/`metadata`, `tools` definitions, JSON object keys. Keep PII out of those fields. Endpoints, strict mode and passthrough caveats: [docs/api.md](docs/api.md).
 

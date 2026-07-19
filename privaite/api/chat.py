@@ -51,16 +51,22 @@ async def _scrub_forwarded_fields(kwargs: dict, pii_engine: Any, mapping: Any) -
 
 async def _restore_message(msg: dict, pii_engine: Any, mapping: Any) -> None:
     """De-anonymize one response message in place: content, the reasoning trace,
-    and tool/function call arguments (restore parity with the streaming path)."""
+    the refusal, the audio transcript, and tool/function call arguments (restore
+    parity with the streaming path)."""
     content = msg.get("content")
     if content:
         msg["content"] = await pii_engine.process_response(content, mapping)
-    # Reasoning models echo placeholders in their traces too; the streaming path
-    # restores these, keep parity here.
-    for field in ("reasoning_content", "reasoning"):
+    # Reasoning models echo placeholders in their traces too, and a refusal can
+    # quote the request; the streaming path restores these, keep parity here.
+    for field in ("reasoning_content", "reasoning", "refusal"):
         value = msg.get(field)
         if isinstance(value, str) and value:
             msg[field] = await pii_engine.process_response(value, mapping)
+    audio = msg.get("audio")
+    if isinstance(audio, dict) and isinstance(audio.get("transcript"), str) and audio["transcript"]:
+        new_audio = dict(audio)
+        new_audio["transcript"] = await pii_engine.process_response(audio["transcript"], mapping)
+        msg["audio"] = new_audio
     tool_calls = msg.get("tool_calls")
     if tool_calls:
         msg["tool_calls"] = await pii_engine.process_response_tool_calls(tool_calls, mapping)

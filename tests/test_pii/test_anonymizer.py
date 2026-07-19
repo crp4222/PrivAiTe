@@ -1,5 +1,7 @@
+import pytest
+
 from privaite.config.schema import AnonymizationConfig, EntityOverride
-from privaite.pii.anonymizer import Anonymizer
+from privaite.pii.anonymizer import Anonymizer, FakeReplacementExhaustedError
 from privaite.pii.entity import PIIEntity
 from privaite.pii.mapping import PIIMapping
 
@@ -240,3 +242,49 @@ def test_override_fake_replacement_uses_entity_type():
     assert "a@b.com" not in result
     assert "@" in fake
     assert not fake.startswith("<")
+
+
+def test_fake_replacement_exhaustion_fails_closed_on_identity():
+    # If every candidate equals the original, returning it would forward raw
+    # PII. Exhaustion must raise (the engine turns it into a blocked request),
+    # and the error must name the TYPE, never the value.
+    config = AnonymizationConfig(faker_locale=["en_US"], method="fake_replacement")
+    anon = Anonymizer(config)
+    anon.generator.generate = lambda etype, original: original
+    anon.generator.generate_variant = lambda etype, original, variant: original
+    mapping = PIIMapping()
+
+    with pytest.raises(FakeReplacementExhaustedError) as ei:
+        anon.anonymize("Hi John Smith", [_entity("PERSON", "John Smith", 3, 13)], mapping)
+    assert "PERSON" in str(ei.value)
+    assert "John Smith" not in str(ei.value)
+
+
+def test_fake_replacement_exhaustion_fails_closed_on_collision():
+    # If every candidate collides with a fake already mapped to a DIFFERENT
+    # original, returning it would cross-restore the two values.
+    config = AnonymizationConfig(faker_locale=["en_US"], method="fake_replacement")
+    anon = Anonymizer(config)
+    anon.generator.generate = lambda etype, original: "Jane Roe"
+    anon.generator.generate_variant = lambda etype, original, variant: "Jane Roe"
+    mapping = PIIMapping()
+    mapping.add("Alice Wong", "Jane Roe", "PERSON")
+
+    with pytest.raises(FakeReplacementExhaustedError):
+        anon.anonymize("Hi John Smith", [_entity("PERSON", "John Smith", 3, 13)], mapping)
+    # the poisoned candidate never entered the map for the new original
+    assert mapping.get_original("Jane Roe") == "Alice Wong"
+    assert mapping.get_fake("John Smith") is None
+
+
+def test_fake_replacement_recovers_via_variant_before_exhaustion():
+    # A collision on the first candidate but a clean variant must still succeed.
+    config = AnonymizationConfig(faker_locale=["en_US"], method="fake_replacement")
+    anon = Anonymizer(config)
+    anon.generator.generate = lambda etype, original: original
+    anon.generator.generate_variant = lambda etype, original, variant: "Safe Fake"
+    mapping = PIIMapping()
+
+    result = anon.anonymize("Hi John Smith", [_entity("PERSON", "John Smith", 3, 13)], mapping)
+    assert result == "Hi Safe Fake"
+    assert mapping.get_original("Safe Fake") == "John Smith"

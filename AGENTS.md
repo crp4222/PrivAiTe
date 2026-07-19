@@ -18,7 +18,8 @@ them as invariants, not suggestions.
    forward it directly.
 3. **Restore parity.** Whatever is anonymized must be restored on the way back, in
    **both streaming and non-streaming**: `content`, `tool_calls[].function.arguments`,
-   legacy `function_call.arguments`, and `reasoning_content`/`reasoning`.
+   legacy `function_call.arguments`, `reasoning_content`/`reasoning`, `refusal`,
+   and the audio `transcript`.
 4. **`mask` and `redact` are irreversible.** They must NOT enter the reversible
    mapping (`mapping.note()`, not `mapping.add()`). Two values that mask to the same
    string must never cross-restore. Only `placeholder` and `fake_replacement` are

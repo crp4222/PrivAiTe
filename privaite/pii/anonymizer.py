@@ -6,6 +6,19 @@ from privaite.pii.faker_providers import FakerReplacementGenerator
 from privaite.pii.mapping import PIIMapping
 
 
+class FakeReplacementExhaustedError(RuntimeError):
+    """Raised when fake_replacement cannot produce a usable fake after retrying:
+    every candidate either equaled the original (returning it would forward raw
+    PII) or collided with a fake already mapped to a DIFFERENT original (which
+    would cross-restore two values). Fail closed instead. The message names the
+    entity TYPE only, never a value."""
+
+    def __init__(self, entity_type: str) -> None:
+        super().__init__(
+            f"fake replacement generation exhausted for entity type {entity_type}; request blocked"
+        )
+
+
 class Anonymizer:
     def __init__(self, config: AnonymizationConfig) -> None:
         self.config = config
@@ -67,6 +80,12 @@ class Anonymizer:
             while (fake == original or mapping.get_original(fake) is not None) and retries < 10:
                 fake = self.generator.generate_variant(entity_type, original, retries)
                 retries += 1
+            if fake == original or mapping.get_original(fake) is not None:
+                # Retry exhaustion used to return the colliding value anyway,
+                # silently forwarding the original or cross-restoring another
+                # mapping entry. Fail closed: the engine turns this into a
+                # blocked request.
+                raise FakeReplacementExhaustedError(entity_type)
             return fake
 
         # "placeholder" (the default) and any unknown method fall back to a

@@ -24,7 +24,7 @@ Scanned before anything is forwarded to the provider:
 
 NOT scanned (know your surface): `messages[].name`, top-level fields like `user` and `metadata`, and `tools`/`functions` definitions are forwarded as-is; JSON object keys inside tool arguments are never rewritten (masking parameter names would break the tool schema). Keep PII out of those fields, or strip them upstream.
 
-On the way back, the original values are restored in `message.content` and in returned `tool_calls` (including the legacy `function_call`), in both non-streaming and streaming responses. Set `pii.passthrough.tool_calls: true` to forward tool-call arguments unchanged.
+On the way back, the original values are restored in `message.content`, the reasoning trace, `message.refusal`, the audio `transcript`, and in returned `tool_calls` (including the legacy `function_call`), in both non-streaming and streaming responses. Set `pii.passthrough.tool_calls: true` to forward tool-call arguments unchanged.
 
 ## Strict mode
 

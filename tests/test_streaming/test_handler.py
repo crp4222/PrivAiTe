@@ -470,3 +470,113 @@ async def test_reasoning_content_is_restored():
     )
     assert "Marie Dupont" in reasoning
     assert "<PERSON_1>" not in reasoning
+
+
+@pytest.mark.asyncio
+async def test_refusal_delta_is_restored_even_split_across_chunks():
+    # A refusal can quote the request; placeholders in it must be restored like
+    # content, including one split across chunk boundaries.
+    mapping = PIIMapping()
+    mapping.add("Marie Dupont", "<PERSON_1>", "PERSON")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [
+        FakeDeltaChunk({"refusal": "I cannot help <PER"}),
+        FakeDeltaChunk({"refusal": "SON_1> with that"}),
+        FakeChunk("", finish_reason="stop"),
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    refusal = "".join(
+        choice.get("delta", {}).get("refusal") or ""
+        for payload in _payloads(events)
+        for choice in payload.get("choices", [])
+    )
+    assert refusal == "I cannot help Marie Dupont with that"
+
+
+@pytest.mark.asyncio
+async def test_refusal_remainder_flushes_when_stream_ends_without_finish():
+    mapping = PIIMapping()
+    mapping.add("Marie Dupont", "<PERSON_1>", "PERSON")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [FakeDeltaChunk({"refusal": "no can do <PERSON_1"})]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    refusal = "".join(
+        choice.get("delta", {}).get("refusal") or ""
+        for payload in _payloads(events)
+        for choice in payload.get("choices", [])
+    )
+    # The held-back partial placeholder is flushed verbatim after the stream.
+    assert refusal == "no can do <PERSON_1"
+
+
+@pytest.mark.asyncio
+async def test_audio_transcript_delta_is_restored():
+    mapping = PIIMapping()
+    mapping.add("Marie Dupont", "<PERSON_1>", "PERSON")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [
+        FakeDeltaChunk({"audio": {"id": "a1", "transcript": "hello <PER"}}),
+        FakeDeltaChunk({"audio": {"id": "a1", "transcript": "SON_1>, hi"}}),
+        FakeChunk("", finish_reason="stop"),
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    transcript = "".join(
+        (choice.get("delta", {}).get("audio") or {}).get("transcript") or ""
+        for payload in _payloads(events)
+        for choice in payload.get("choices", [])
+    )
+    assert transcript == "hello Marie Dupont, hi"
+    # non-transcript audio fields survive untouched
+    ids = {
+        (choice.get("delta", {}).get("audio") or {}).get("id")
+        for payload in _payloads(events)
+        for choice in payload.get("choices", [])
+        if choice.get("delta", {}).get("audio")
+    }
+    assert ids == {"a1"}
+
+
+@pytest.mark.asyncio
+async def test_audio_transcript_remainder_flushes_onto_finish_chunk():
+    # The transcript ends on a partial placeholder; the held-back text must be
+    # appended on the finish chunk (whose delta has no audio dict of its own).
+    mapping = PIIMapping()
+    mapping.add("Marie Dupont", "<PERSON_1>", "PERSON")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [
+        FakeDeltaChunk({"audio": {"id": "a1", "transcript": "bye <PERSON_1"}}),
+        FakeChunk("", finish_reason="stop"),
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    transcript = "".join(
+        (choice.get("delta", {}).get("audio") or {}).get("transcript") or ""
+        for payload in _payloads(events)
+        for choice in payload.get("choices", [])
+    )
+    assert transcript == "bye <PERSON_1"
+
+
+@pytest.mark.asyncio
+async def test_audio_transcript_remainder_drains_when_stream_ends_without_finish():
+    mapping = PIIMapping()
+    mapping.add("Marie Dupont", "<PERSON_1>", "PERSON")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [FakeDeltaChunk({"audio": {"id": "a1", "transcript": "bye <PERSON_1"}})]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    transcript = "".join(
+        (choice.get("delta", {}).get("audio") or {}).get("transcript") or ""
+        for payload in _payloads(events)
+        for choice in payload.get("choices", [])
+    )
+    assert transcript == "bye <PERSON_1"
+    assert events[-1] == "data: [DONE]\n\n"

@@ -19,7 +19,32 @@ from privaite.streaming.sse import (
 logger = logging.getLogger("privaite.streaming.handler")
 
 
-_REASONING_FIELDS = ("reasoning_content", "reasoning")
+# Plain-string delta fields restored with one buffer per (choice, field):
+# reasoning traces and the refusal (a refusal can quote the request).
+_TEXT_DELTA_FIELDS = ("reasoning_content", "reasoning", "refusal")
+
+
+def _feed_audio_transcript(delta: dict, buf: Callable[[], StreamingDeAnonymizer]) -> None:
+    """Route a delta's audio transcript fragment through its restore buffer."""
+    audio = delta.get("audio")
+    if isinstance(audio, dict) and isinstance(audio.get("transcript"), str):
+        if audio["transcript"]:
+            audio["transcript"] = buf().feed(audio["transcript"])
+
+
+def _flush_audio_remainder(delta: dict, abuf: StreamingDeAnonymizer | None) -> None:
+    """Append whatever the audio buffer still holds onto this delta's transcript,
+    creating the audio dict when the finish chunk does not carry one."""
+    if abuf is None:
+        return
+    remaining = abuf.flush()
+    if not remaining:
+        return
+    audio = delta.get("audio")
+    if not isinstance(audio, dict):
+        audio = {}
+        delta["audio"] = audio
+    audio["transcript"] = (audio.get("transcript") or "") + remaining
 
 
 def _drain(
@@ -63,7 +88,8 @@ class StreamingHandler:
         )
 
         content_bufs: dict[int, StreamingDeAnonymizer] = {}
-        reasoning_bufs: dict[tuple[int, str], StreamingDeAnonymizer] = {}
+        text_field_bufs: dict[tuple[int, str], StreamingDeAnonymizer] = {}
+        audio_bufs: dict[int, StreamingDeAnonymizer] = {}
         tool_bufs: dict[tuple[int, int], StreamingDeAnonymizer] = {}
         func_bufs: dict[int, StreamingDeAnonymizer] = {}
         finished: set[int] = set()
@@ -84,12 +110,13 @@ class StreamingHandler:
                 remaining = buf.flush()
                 if remaining:
                     delta["content"] = (delta.get("content") or "") + remaining
-            for field in _REASONING_FIELDS:
-                rbuf = reasoning_bufs.get((idx, field))
+            for field in _TEXT_DELTA_FIELDS:
+                rbuf = text_field_bufs.get((idx, field))
                 if rbuf is not None:
                     remaining = rbuf.flush()
                     if remaining:
                         delta[field] = (delta.get(field) or "") + remaining
+            _flush_audio_remainder(delta, audio_bufs.get(idx))
             present = {
                 call.get("index", 0) or 0: call
                 for call in delta.get("tool_calls") or []
@@ -165,10 +192,11 @@ class StreamingHandler:
 
                     if content:
                         delta["content"] = _buf(content_bufs, idx).feed(content)
-                    for field in _REASONING_FIELDS:
+                    for field in _TEXT_DELTA_FIELDS:
                         value = delta.get(field)
                         if isinstance(value, str) and value:
-                            delta[field] = _buf(reasoning_bufs, (idx, field)).feed(value)
+                            delta[field] = _buf(text_field_bufs, (idx, field)).feed(value)
+                    _feed_audio_transcript(delta, lambda: _buf(audio_bufs, idx))
                     for call in delta.get("tool_calls") or []:
                         if not isinstance(call, dict):
                             continue
@@ -230,9 +258,17 @@ class StreamingHandler:
             ):
                 yield sse
             for sse in _drain(
-                reasoning_bufs,
+                text_field_bufs,
                 finished,
                 lambda key, r: create_delta_chunk({key[1]: r}, model=model_name, index=key[0]),
+            ):
+                yield sse
+            for sse in _drain(
+                audio_bufs,
+                finished,
+                lambda idx, r: create_delta_chunk(
+                    {"audio": {"transcript": r}}, model=model_name, index=idx
+                ),
             ):
                 yield sse
             for sse in _drain(
