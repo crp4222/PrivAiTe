@@ -53,8 +53,7 @@ pii:
   preset: onnx    # or "light": faster, no model download, classic PII only
 EOF
 
-PRIVAITE_API_KEYS=change-me
-python -m privaite --config privaite.yaml
+PRIVAITE_API_KEYS=change-me python -m privaite --config privaite.yaml
 ```
 
 **Connect:** point any OpenAI-compatible client at `http://localhost:8400/v1` with the key `change-me`. For Open WebUI: Admin → Settings → Connections → OpenAI API, URL `http://localhost:8400/v1` (or `http://host.docker.internal:8400/v1` if Open WebUI runs in Docker), key = your `PRIVAITE_API_KEYS` value. Client snippets (curl, Python, Node) are in [`examples/`](examples/). Prefer no separate proxy? Use the in-process [Open WebUI filter](#integrations).
