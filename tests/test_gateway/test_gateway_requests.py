@@ -90,6 +90,191 @@ async def test_anthropic_request_scrubbed_system_tools_thinking_untouched(gatewa
 
 
 @pytest.mark.asyncio
+async def test_anthropic_server_and_mcp_tool_blocks_scrubbed(gateway_app):
+    # Round-trip leak regression: restore rewrites every string leaf of the
+    # response (thinking excepted), so on turn N the client receives
+    # server_tool_use / mcp_tool_use input and mcp_tool_result content with
+    # REAL values, and echoes them back on turn N+1. Scrub coverage must match
+    # restore coverage or those echoes reach the provider raw.
+    app, upstream = gateway_app
+    thinking = {"type": "thinking", "thinking": "about Marie Dupont", "signature": "s"}
+    body = {
+        "model": "claude-test",
+        "max_tokens": 64,
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [
+                    thinking,
+                    {
+                        "type": "server_tool_use",
+                        "id": "srvtoolu_1",
+                        "name": "web_search",
+                        "input": {"query": "who is Marie Dupont"},
+                    },
+                    {
+                        "type": "mcp_tool_use",
+                        "id": "mcptoolu_1",
+                        "name": "lookup",
+                        "server_name": "crm",
+                        "input": {"email": "marie@acme.com"},
+                    },
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "mcp_tool_result",
+                        "tool_use_id": "mcptoolu_1",
+                        "is_error": False,
+                        "content": [{"type": "text", "text": "record of marie@acme.com"}],
+                    }
+                ],
+            },
+        ],
+    }
+    async with _client(app) as client:
+        resp = await client.post("/v1/messages", json=body)
+
+    assert resp.status_code == 200
+    sent = upstream.sent_json()
+    blocks = sent["messages"][0]["content"]
+    # Thinking stays untouched, exactly as before.
+    assert blocks[0] == thinking
+    assert blocks[1]["input"] == {"query": "who is <PERSON_1>"}
+    assert blocks[2]["input"] == {"email": "<EMAIL_ADDRESS_1>"}
+    result = sent["messages"][1]["content"][0]
+    assert result["content"][0]["text"] == "record of <EMAIL_ADDRESS_1>"
+    assert result["is_error"] is False
+    # The planted values reach the upstream nowhere outside the thinking block.
+    forwarded = json.dumps([blocks[1], blocks[2], sent["messages"][1]])
+    assert "Marie Dupont" not in forwarded
+    assert "marie@acme.com" not in forwarded
+
+
+@pytest.mark.asyncio
+async def test_anthropic_document_and_search_result_plaintext_scrubbed(gateway_app):
+    # document blocks with a text/content source and search_result blocks carry
+    # plaintext; binary document sources (base64) must stay byte-for-byte.
+    app, upstream = gateway_app
+    base64_source = {
+        "type": "base64",
+        "media_type": "application/pdf",
+        # The detector term INSIDE the payload proves the data is deliberately
+        # not walked: rewriting base64 would corrupt the document.
+        "data": "JVBERi-marie@acme.com-JVBERi",
+    }
+    body = {
+        "model": "claude-test",
+        "max_tokens": 64,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "text",
+                            "media_type": "text/plain",
+                            "data": "contact marie@acme.com",
+                        },
+                        "title": "notes on Marie Dupont",
+                        "context": "sent by Marie Dupont",
+                    },
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "content",
+                            "content": [{"type": "text", "text": "call Marie Dupont"}],
+                        },
+                    },
+                    {"type": "document", "source": base64_source, "title": "Marie Dupont file"},
+                    {
+                        "type": "search_result",
+                        "source": "https://intranet.example/people/marie@acme.com",
+                        "title": "Marie Dupont profile",
+                        "content": [{"type": "text", "text": "reach marie@acme.com"}],
+                    },
+                ],
+            }
+        ],
+    }
+    async with _client(app) as client:
+        resp = await client.post("/v1/messages", json=body)
+
+    assert resp.status_code == 200
+    blocks = upstream.sent_json()["messages"][0]["content"]
+    assert blocks[0]["title"] == "notes on <PERSON_1>"
+    assert blocks[0]["context"] == "sent by <PERSON_1>"
+    assert blocks[0]["source"]["data"] == "contact <EMAIL_ADDRESS_1>"
+    assert blocks[0]["source"]["media_type"] == "text/plain"
+    assert blocks[1]["source"]["content"][0]["text"] == "call <PERSON_1>"
+    # Binary source relayed whole; its sibling title is still plaintext.
+    assert blocks[2]["source"] == base64_source
+    assert blocks[2]["title"] == "<PERSON_1> file"
+    assert blocks[3]["title"] == "<PERSON_1> profile"
+    assert blocks[3]["source"] == "https://intranet.example/people/<EMAIL_ADDRESS_1>"
+    assert blocks[3]["content"][0]["text"] == "reach <EMAIL_ADDRESS_1>"
+    # Outside the binary payload, no planted value survives.
+    forwarded = json.dumps(blocks[:2] + blocks[3:])
+    assert "Marie Dupont" not in forwarded
+    assert "marie@acme.com" not in forwarded
+
+
+@pytest.mark.asyncio
+async def test_anthropic_edge_block_shapes_pass_through_without_corruption(gateway_app):
+    # Odd but legal shapes: blocks missing their payload field, a string
+    # mcp_tool_result content, a media block, a document without a dict
+    # source, and a non-dict part inside a result content list.
+    app, upstream = gateway_app
+    image_block = {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": "AA-marie@acme.com-AA"},
+    }
+    body = {
+        "model": "claude-test",
+        "max_tokens": 64,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "tool_use", "id": "t1", "name": "noop"},
+                    {"type": "tool_result", "tool_use_id": "t1"},
+                    {
+                        "type": "mcp_tool_result",
+                        "tool_use_id": "m1",
+                        "content": "found marie@acme.com",
+                    },
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "t2",
+                        "content": ["bare note for marie@acme.com", 7],
+                    },
+                    {"type": "tool_result", "tool_use_id": "t3", "content": 5},
+                    image_block,
+                    {"type": "document", "source": None, "title": "file of Marie Dupont"},
+                ],
+            }
+        ],
+    }
+    async with _client(app) as client:
+        resp = await client.post("/v1/messages", json=body)
+
+    assert resp.status_code == 200
+    blocks = upstream.sent_json()["messages"][0]["content"]
+    assert blocks[0] == {"type": "tool_use", "id": "t1", "name": "noop"}
+    assert blocks[1] == {"type": "tool_result", "tool_use_id": "t1"}
+    assert blocks[2]["content"] == "found <EMAIL_ADDRESS_1>"
+    # A bare string inside a result content list is user text: scanned, while
+    # the non-text 7 passes through.
+    assert blocks[3]["content"] == ["bare note for <EMAIL_ADDRESS_1>", 7]
+    assert blocks[4] == {"type": "tool_result", "tool_use_id": "t3", "content": 5}
+    assert blocks[5] == image_block
+    assert blocks[6] == {"type": "document", "source": None, "title": "file of <PERSON_1>"}
+
+
+@pytest.mark.asyncio
 async def test_count_tokens_scrubbed_and_query_relayed(gateway_app):
     app, upstream = gateway_app
     async with _client(app) as client:

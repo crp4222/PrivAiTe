@@ -28,16 +28,60 @@ def restore_tree(
 ) -> Any:
     """Restore every string leaf except inside skipped block types (thinking
     blocks must reach the client byte-for-byte). Restoration is pure replacement
-    of known fakes, so walking extra fields is harmless."""
+    of known fakes, so walking extra fields is harmless. The one non-leaf case:
+    an `arguments` string is JSON source text, restored on its parsed tree."""
     if isinstance(value, dict):
         if skip_types and value.get("type") in skip_types:
             return value
-        return {k: restore_tree(engine, v, mapping, skip_types) for k, v in value.items()}
+        return {
+            k: _restore_json_arguments(engine, v, mapping)
+            if k == "arguments" and isinstance(v, str)
+            else restore_tree(engine, v, mapping, skip_types)
+            for k, v in value.items()
+        }
     if isinstance(value, list):
         return [restore_tree(engine, v, mapping, skip_types) for v in value]
     if isinstance(value, str):
         return engine.restore_document(value, mapping)
     return value
+
+
+def _restore_json_arguments(engine: PIIEngine, arguments: str, mapping: PIIMapping) -> Any:
+    """Restore a function/MCP call's `arguments`: a JSON document inside a
+    string. Plain substitution would splice a raw quote, backslash or newline
+    from the original into a JSON string literal and the client's json.loads
+    of the arguments would fail; restore on the parsed tree and re-encode
+    instead. When nothing changes (or the string is not JSON) the current
+    byte-identical passthrough is kept."""
+    plain = engine.restore_document(arguments, mapping)
+    if plain == arguments:
+        return arguments
+    try:
+        parsed = json.loads(arguments)
+    except ValueError:
+        # Not JSON: the plain string restore is all there is.
+        return plain
+    restored = restore_tree(engine, parsed, mapping, frozenset())
+    return json.dumps(restored, ensure_ascii=False)
+
+
+def _json_escape(value: str) -> str:
+    """The JSON string-literal encoding of value, without the surrounding
+    quotes: what a restored original must look like when spliced into streamed
+    JSON fragments."""
+    return json.dumps(value, ensure_ascii=False)[1:-1]
+
+
+def _json_escaped_mapping(mapping: PIIMapping) -> PIIMapping:
+    """A derived mapping whose originals are JSON-string-escaped, for holdback
+    buffers restoring inside JSON source text. The fakes are left as-is:
+    placeholders contain no JSON-escaping characters, so they appear literally
+    in the fragments (a fake that does escape would never match either way,
+    with or without this derivation)."""
+    escaped = PIIMapping()
+    for fake, original in mapping.get_all_fakes().items():
+        escaped.add(_json_escape(original), fake, mapping.get_entity_type(original) or "")
+    return escaped
 
 
 def _sse_block(lines: list[str]) -> str:
@@ -54,10 +98,14 @@ class _SSERestorer:
         self._spec = spec
         self._buffers: dict[Channel, StreamingDeAnonymizer] = {}
 
-    def _feed(self, channel: Channel, fragment: str) -> str:
+    def _feed(self, channel: Channel, fragment: str, json_fragment: bool) -> str:
         buffer = self._buffers.get(channel)
         if buffer is None:
-            buffer = self._buffers[channel] = StreamingDeAnonymizer(self._mapping)
+            # A JSON-fragment channel (streamed tool arguments) restores with
+            # escaped originals, so the spliced value stays a valid piece of
+            # the JSON string literal it lands in.
+            mapping = _json_escaped_mapping(self._mapping) if json_fragment else self._mapping
+            buffer = self._buffers[channel] = StreamingDeAnonymizer(mapping)
         return buffer.feed(fragment)
 
     def flush(self, channels: tuple[Channel, ...] = (), flush_all: bool = False) -> list[str]:
@@ -113,7 +161,7 @@ class _SSERestorer:
         leaf = plan.path[-1]
         if isinstance(parent, dict) and isinstance(parent.get(leaf), str):
             assert plan.channel is not None
-            parent[leaf] = self._feed(plan.channel, parent[leaf])
+            parent[leaf] = self._feed(plan.channel, parent[leaf], plan.json_fragment)
 
     @staticmethod
     def _replace_data(lines: list[str], data_indices: list[int], new_payload: str) -> list[str]:

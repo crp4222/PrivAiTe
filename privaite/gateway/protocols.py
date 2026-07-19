@@ -24,7 +24,10 @@ class EventPlan:
     at ``path`` through the channel's holdback buffer, "restore" rewrites the
     whole payload as a complete value (no holdback needed). ``flush`` names the
     channels whose holdback must be emitted BEFORE this event; ``flush_all``
-    flushes every open channel.
+    flushes every open channel. ``json_fragment`` marks a delta whose fragments
+    are pieces of JSON source text (streamed tool arguments): a restored
+    original spliced into them must be JSON-string-escaped, or a quote,
+    backslash or newline in the original breaks the client's accumulated JSON.
     """
 
     kind: str
@@ -32,6 +35,7 @@ class EventPlan:
     path: tuple[str, ...] = ()
     flush: tuple[Channel, ...] = ()
     flush_all: bool = False
+    json_fragment: bool = False
 
 
 _VERBATIM = EventPlan("verbatim")
@@ -59,7 +63,12 @@ def _anthropic_classify(data: dict[str, Any]) -> EventPlan:
         if dtype == "text_delta":
             return EventPlan("delta", channel=("text", index), path=("delta", "text"))
         if dtype == "input_json_delta":
-            return EventPlan("delta", channel=("json", index), path=("delta", "partial_json"))
+            return EventPlan(
+                "delta",
+                channel=("json", index),
+                path=("delta", "partial_json"),
+                json_fragment=True,
+            )
         if dtype in ("thinking_delta", "signature_delta"):
             # Anthropic rejects thinking blocks that were modified before being
             # echoed back on the next turn: never restore (or scrub) them.
@@ -102,6 +111,16 @@ _RESPONSES_DELTA_EVENTS = frozenset(
 _RESPONSES_DONE_EVENTS = frozenset(
     etype[: -len("delta")] + "done" for etype in _RESPONSES_DELTA_EVENTS
 )
+# Delta streams whose accumulated fragments form a JSON document (the tool
+# arguments string), unlike output_text/custom_tool_call_input/refusal deltas
+# whose accumulation is plain text: a restored original spliced into these must
+# stay a valid piece of a JSON string literal.
+_RESPONSES_JSON_FRAGMENT_EVENTS = frozenset(
+    {
+        "response.function_call_arguments.delta",
+        "response.mcp_call_arguments.delta",
+    }
+)
 # Reasoning passes through untouched, parity with Anthropic thinking blocks
 # (the prefix covers reasoning_text, reasoning_summary_text and
 # reasoning_summary_part, deltas and dones alike). Audio and partial-image
@@ -124,7 +143,12 @@ def _responses_channel_id(data: dict[str, Any]) -> Any:
 def _responses_classify(data: dict[str, Any]) -> EventPlan:
     etype = data.get("type") or ""
     if etype in _RESPONSES_DELTA_EVENTS:
-        return EventPlan("delta", channel=(etype, _responses_channel_id(data)), path=("delta",))
+        return EventPlan(
+            "delta",
+            channel=(etype, _responses_channel_id(data)),
+            path=("delta",),
+            json_fragment=etype in _RESPONSES_JSON_FRAGMENT_EVENTS,
+        )
     if etype.startswith(_RESPONSES_VERBATIM_PREFIX) or etype in _RESPONSES_VERBATIM_EVENTS:
         return _VERBATIM
     if etype in _RESPONSES_DONE_EVENTS:

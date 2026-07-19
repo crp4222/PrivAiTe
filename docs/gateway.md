@@ -71,11 +71,14 @@ API-key mode, keep the default `https://api.openai.com/v1`.
 ## What is scanned (and what is not)
 
 **Anthropic Messages:** `messages[]` string content, `text` blocks, `tool_use`
-input (the tool-call-argument leak), and `tool_result` content. Not scanned:
-the `system` field, `tools`/`tool_choice` definitions, `thinking` and
-`redacted_thinking` blocks (Anthropic rejects modified thinking blocks echoed
-back on a later turn, so they pass through untouched in both directions), and
-media blocks.
+input (the tool-call-argument leak), `server_tool_use` and `mcp_tool_use`
+input (restored client-side on one turn, echoed back on the next), `tool_result`
+and `mcp_tool_result` content, `document` blocks with a text or content source,
+and `search_result` blocks. Not scanned: the `system` field,
+`tools`/`tool_choice` definitions, `thinking` and `redacted_thinking` blocks
+(Anthropic rejects modified thinking blocks echoed back on a later turn, so
+they pass through untouched in both directions), and binary media (images,
+base64/url/file document sources).
 
 **OpenAI Responses:** `input`, as a string or item by item: role message
 content, `function_call` arguments (parsed as JSON, scrubbed value by value),

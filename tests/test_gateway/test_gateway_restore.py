@@ -5,7 +5,7 @@ import json
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from tests.test_gateway.conftest import make_gateway_app
+from tests.test_gateway.conftest import FakeDetector, make_gateway_app
 
 
 def _client(app) -> AsyncClient:
@@ -48,6 +48,42 @@ async def test_anthropic_non_streaming_restore_skips_thinking(gateway_app):
     assert body["content"][0]["thinking"] == "about <PERSON_1>"
     assert body["content"][1]["text"] == "I contacted Marie Dupont."
     assert body["content"][2]["input"]["name"] == "Marie Dupont"
+
+
+@pytest.mark.asyncio
+async def test_anthropic_non_streaming_restores_server_and_mcp_tool_blocks(gateway_app):
+    # The premise of the round-trip scrub coverage: these blocks ARE restored
+    # on the way back, so the client history holds real values inside them.
+    app, upstream = gateway_app
+    upstream.set_json(
+        {
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "server_tool_use",
+                    "id": "srvtoolu_1",
+                    "name": "web_search",
+                    "input": {"query": "who is <PERSON_1>"},
+                },
+                {
+                    "type": "mcp_tool_use",
+                    "id": "mcptoolu_1",
+                    "name": "lookup",
+                    "server_name": "crm",
+                    "input": {"who": "<PERSON_1>"},
+                },
+            ],
+        }
+    )
+    async with _client(app) as client:
+        resp = await client.post("/v1/messages", json=_ANTHROPIC_REQUEST)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["content"][0]["input"]["query"] == "who is Marie Dupont"
+    assert body["content"][1]["input"]["who"] == "Marie Dupont"
 
 
 @pytest.mark.asyncio
@@ -500,6 +536,240 @@ async def test_streaming_detected_from_request_flag_without_content_type(gateway
     deltas = _collect_responses_deltas(resp.text)
     assert "Hi Marie Dupont!" in deltas
     assert "<PERS" not in deltas
+
+
+# An original with a quote, a backslash and a newline (a multi-line address is
+# the realistic case): spliced raw into streamed JSON fragments, any one of
+# them makes the client's accumulated tool arguments unparseable.
+_SPECIALS_ADDRESS = '12 "B" Street\\Unit 7\nParis'
+
+
+def _specials_app():
+    return make_gateway_app(detector=FakeDetector({_SPECIALS_ADDRESS: "LOCATION"}))
+
+
+_SPECIALS_ANTHROPIC_REQUEST = {
+    "model": "claude-test",
+    "max_tokens": 64,
+    "messages": [{"role": "user", "content": f"Ship to {_SPECIALS_ADDRESS} please"}],
+}
+
+
+@pytest.mark.asyncio
+async def test_anthropic_streamed_tool_json_stays_valid_with_special_chars():
+    app, upstream = _specials_app()
+    # Non-streaming reference: restore happens on the parsed input tree.
+    upstream.set_json(
+        {
+            "id": "msg_1",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "t1",
+                    "name": "ship",
+                    "input": {"address": "<LOCATION_1>", "urgent": True},
+                }
+            ],
+        }
+    )
+    async with _client(app) as client:
+        ref = await client.post("/v1/messages", json=_SPECIALS_ANTHROPIC_REQUEST)
+    expected = ref.json()["content"][0]["input"]
+    assert expected == {"address": _SPECIALS_ADDRESS, "urgent": True}
+
+    upstream.set_sse(
+        [
+            (
+                "content_block_start",
+                {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "tool_use", "id": "t1", "name": "ship", "input": {}},
+                },
+            ),
+            (
+                "content_block_delta",
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "input_json_delta", "partial_json": '{"address": "<LOCA'},
+                },
+            ),
+            (
+                "content_block_delta",
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {
+                        "type": "input_json_delta",
+                        "partial_json": 'TION_1>", "urgent": true}',
+                    },
+                },
+            ),
+            ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+            ("message_stop", {"type": "message_stop"}),
+        ]
+    )
+    async with _client(app) as client:
+        resp = await client.post(
+            "/v1/messages", json={**_SPECIALS_ANTHROPIC_REQUEST, "stream": True}
+        )
+
+    events = _parse_stream(resp.text)
+    fragments = "".join(
+        e["delta"]["partial_json"]
+        for e in events
+        if e.get("type") == "content_block_delta"
+        and e.get("delta", {}).get("type") == "input_json_delta"
+    )
+    # The reassembled streamed arguments are valid JSON and parse to the SAME
+    # object as the non-streaming path, raw quote/backslash/newline included.
+    assert json.loads(fragments) == expected
+
+
+@pytest.mark.asyncio
+async def test_responses_streamed_arguments_stay_valid_with_special_chars():
+    app, upstream = _specials_app()
+    request = {"model": "gpt-test", "input": f"Ship to {_SPECIALS_ADDRESS} please"}
+    placeholder_args = '{"address": "<LOCATION_1>", "urgent": true}'
+
+    upstream.set_json(
+        {
+            "id": "resp_1",
+            "output": [
+                {
+                    "type": "function_call",
+                    "call_id": "c1",
+                    "name": "ship",
+                    "arguments": placeholder_args,
+                }
+            ],
+        }
+    )
+    async with _client(app) as client:
+        ref = await client.post("/v1/responses", json=request)
+    expected = json.loads(ref.json()["output"][0]["arguments"])
+    assert expected == {"address": _SPECIALS_ADDRESS, "urgent": True}
+
+    upstream.set_sse(
+        [
+            (
+                "response.function_call_arguments.delta",
+                {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": "fc1",
+                    "delta": '{"address": "<LOCA',
+                },
+            ),
+            (
+                "response.function_call_arguments.delta",
+                {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": "fc1",
+                    "delta": 'TION_1>", "urgent": true}',
+                },
+            ),
+            (
+                "response.function_call_arguments.done",
+                {
+                    "type": "response.function_call_arguments.done",
+                    "item_id": "fc1",
+                    "arguments": placeholder_args,
+                },
+            ),
+            (
+                "response.completed",
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "call_id": "c1",
+                                "name": "ship",
+                                "arguments": placeholder_args,
+                            }
+                        ]
+                    },
+                },
+            ),
+        ]
+    )
+    async with _client(app) as client:
+        resp = await client.post("/v1/responses", json={**request, "stream": True})
+
+    events = _parse_stream(resp.text)
+    fragments = "".join(
+        e["delta"] for e in events if e["type"] == "response.function_call_arguments.delta"
+    )
+    assert json.loads(fragments) == expected
+    done = [e for e in events if e["type"] == "response.function_call_arguments.done"]
+    assert json.loads(done[0]["arguments"]) == expected
+    completed = [e for e in events if e["type"] == "response.completed"]
+    assert json.loads(completed[0]["response"]["output"][0]["arguments"]) == expected
+
+
+@pytest.mark.asyncio
+async def test_responses_plain_text_channel_restores_raw_not_json_escaped():
+    # custom_tool_call_input accumulates to a plain string, not JSON source
+    # text: the restored original must arrive raw (real newline, unescaped
+    # quote and backslash), with only the event's own JSON framing escaping it.
+    app, upstream = _specials_app()
+    request = {"model": "gpt-test", "input": f"Ship to {_SPECIALS_ADDRESS} please"}
+    upstream.set_sse(
+        [
+            (
+                "response.custom_tool_call_input.delta",
+                {
+                    "type": "response.custom_tool_call_input.delta",
+                    "item_id": "ct1",
+                    "delta": "mkdir <LOCA",
+                },
+            ),
+            (
+                "response.custom_tool_call_input.delta",
+                {
+                    "type": "response.custom_tool_call_input.delta",
+                    "item_id": "ct1",
+                    "delta": "TION_1> now",
+                },
+            ),
+            ("response.completed", {"type": "response.completed"}),
+        ]
+    )
+    async with _client(app) as client:
+        resp = await client.post("/v1/responses", json={**request, "stream": True})
+
+    events = _parse_stream(resp.text)
+    deltas = "".join(
+        e["delta"] for e in events if e["type"] == "response.custom_tool_call_input.delta"
+    )
+    assert deltas == f"mkdir {_SPECIALS_ADDRESS} now"
+
+
+@pytest.mark.asyncio
+async def test_responses_arguments_without_placeholder_kept_byte_identical(gateway_app):
+    # The JSON-aware arguments restore must not gratuitously re-encode: an
+    # arguments string containing no placeholder keeps its exact bytes
+    # (whitespace, key order, escapes).
+    app, upstream = gateway_app
+    compact = '{"b":1,"a":"x\\u00e9"}'
+    upstream.set_json({"id": "r", "output": [{"type": "function_call", "arguments": compact}]})
+    async with _client(app) as client:
+        resp = await client.post("/v1/responses", json=_RESPONSES_REQUEST)
+    assert resp.json()["output"][0]["arguments"] == compact
+
+
+@pytest.mark.asyncio
+async def test_responses_non_json_arguments_still_restored_as_text(gateway_app):
+    # Invalid-JSON arguments keep the previous behavior: plain text restore.
+    app, upstream = gateway_app
+    upstream.set_json(
+        {"id": "r", "output": [{"type": "function_call", "arguments": "not json <PERSON_1>"}]}
+    )
+    async with _client(app) as client:
+        resp = await client.post("/v1/responses", json=_RESPONSES_REQUEST)
+    assert resp.json()["output"][0]["arguments"] == "not json Marie Dupont"
 
 
 def _collect_anthropic_text(stream: str) -> str:

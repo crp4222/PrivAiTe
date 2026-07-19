@@ -19,6 +19,16 @@ from privaite.pii.mapping import PIIMapping
 # they are never scrubbed on the way out (nor restored on the way back).
 _THINKING_TYPES = frozenset({"thinking", "redacted_thinking"})
 
+# Scrub coverage must match restore coverage. The response restore rewrites
+# every string leaf except thinking blocks, so the client-side history holds
+# REAL values inside server-side and MCP tool blocks too; when the client
+# echoes them back on the next turn they must be re-scrubbed exactly like
+# tool_use/tool_result. Missing server_tool_use here was a confirmed
+# round-trip leak (Claude Code's WebSearch/WebFetch input restored on turn N,
+# forwarded raw on turn N+1).
+_TOOL_USE_TYPES = frozenset({"tool_use", "server_tool_use", "mcp_tool_use"})
+_TOOL_RESULT_TYPES = frozenset({"tool_result", "mcp_tool_result"})
+
 # Responses input items relayed byte-for-byte. Either their payload is opaque
 # or binary (encrypted reasoning/compaction, a screenshot, a generated image:
 # rewriting base64 corrupts it and the provider validates encrypted content),
@@ -75,9 +85,10 @@ async def scrub_anthropic_request(
 ) -> tuple[dict[str, Any], PIIMapping]:
     """Scrub an Anthropic Messages (or count_tokens) request body.
 
-    Scanned: messages[] string content, text blocks, tool_use input and
-    tool_result content. Untouched: `system`, `tools`/`tool_choice`, thinking
-    blocks and media blocks.
+    Scanned: messages[] string content, text blocks, tool_use /
+    server_tool_use / mcp_tool_use input, tool_result / mcp_tool_result
+    content, text-typed document sources and search_result blocks. Untouched:
+    `system`, `tools`/`tool_choice`, thinking blocks and binary media blocks.
     """
     mapping = PIIMapping()
     new_body = dict(body)
@@ -112,27 +123,102 @@ async def _scrub_anthropic_block(engine: PIIEngine, block: Any, mapping: PIIMapp
     btype = block.get("type")
     if btype in _THINKING_TYPES:
         return block
-    if btype == "text" and isinstance(block.get("text"), str):
-        new_block = dict(block)
-        new_block["text"], _ = await engine.scrub_document(block["text"], mapping)
-        return new_block
-    if btype == "tool_use" and "input" in block:
-        # The tool-call-argument leak: arguments carry user data verbatim.
-        new_block = dict(block)
-        new_block["input"], _ = await engine.scrub_document(block["input"], mapping)
-        return new_block
-    if btype == "tool_result" and "content" in block:
-        new_block = dict(block)
-        inner = block["content"]
-        if isinstance(inner, str):
-            new_block["content"], _ = await engine.scrub_document(inner, mapping)
-        elif isinstance(inner, list):
-            new_block["content"] = [
-                await _scrub_anthropic_block(engine, part, mapping) for part in inner
-            ]
-        return new_block
-    # Media (image/document/...) and unknown block shapes carry no scannable text.
+    if btype == "text":
+        return await _scrub_str_fields(engine, block, ("text",), mapping)
+    if btype in _TOOL_USE_TYPES:
+        return await _scrub_tool_use_block(engine, block, mapping)
+    if btype in _TOOL_RESULT_TYPES:
+        return await _scrub_tool_result_block(engine, block, mapping)
+    if btype == "document":
+        return await _scrub_document_block(engine, block, mapping)
+    if btype == "search_result":
+        return await _scrub_search_result_block(engine, block, mapping)
+    # Binary media (image, base64/url/file documents) and unknown block shapes
+    # carry no scannable text.
     return block
+
+
+async def _scrub_str_fields(
+    engine: PIIEngine, block: dict[str, Any], fields: tuple[str, ...], mapping: PIIMapping
+) -> dict[str, Any]:
+    new_block = dict(block)
+    for field in fields:
+        if isinstance(block.get(field), str):
+            new_block[field], _ = await engine.scrub_document(block[field], mapping)
+    return new_block
+
+
+async def _scrub_tool_use_block(
+    engine: PIIEngine, block: dict[str, Any], mapping: PIIMapping
+) -> dict[str, Any]:
+    # The tool-call-argument leak: arguments carry user data verbatim. Applies
+    # equally to client tool_use and to the server_tool_use/mcp_tool_use blocks
+    # the client echoes back with their input already restored to real values.
+    if "input" not in block:
+        return block
+    new_block = dict(block)
+    new_block["input"], _ = await engine.scrub_document(block["input"], mapping)
+    return new_block
+
+
+async def _scrub_tool_result_block(
+    engine: PIIEngine, block: dict[str, Any], mapping: PIIMapping
+) -> dict[str, Any]:
+    if "content" not in block:
+        return block
+    new_block = dict(block)
+    new_block["content"] = await _scrub_block_content(engine, block["content"], mapping)
+    return new_block
+
+
+async def _scrub_block_content(engine: PIIEngine, inner: Any, mapping: PIIMapping) -> Any:
+    """A block's `content` payload: a bare string or a list of nested blocks.
+    A bare string INSIDE the list is user text too and restore would restore
+    it, so it is scanned (same rule as the engine's content walker)."""
+    if isinstance(inner, str):
+        scrubbed, _ = await engine.scrub_document(inner, mapping)
+        return scrubbed
+    if isinstance(inner, list):
+        return [
+            await _scrub_block_content(engine, part, mapping)
+            if isinstance(part, str)
+            else await _scrub_anthropic_block(engine, part, mapping)
+            for part in inner
+        ]
+    return inner
+
+
+async def _scrub_document_block(
+    engine: PIIEngine, block: dict[str, Any], mapping: PIIMapping
+) -> dict[str, Any]:
+    """A document block whose source.type is "text" or "content" carries
+    plaintext and is scrubbed (title/context are plaintext on every document).
+    base64/url/file sources are binary payloads or pointers: rewriting them
+    would corrupt the document, so they are relayed whole."""
+    new_block = await _scrub_str_fields(engine, block, ("title", "context"), mapping)
+    source = block.get("source")
+    if not isinstance(source, dict):
+        return new_block
+    if source.get("type") == "text" and isinstance(source.get("data"), str):
+        new_source = dict(source)
+        new_source["data"], _ = await engine.scrub_document(source["data"], mapping)
+        new_block["source"] = new_source
+    elif source.get("type") == "content":
+        new_source = dict(source)
+        new_source["content"] = await _scrub_block_content(engine, source.get("content"), mapping)
+        new_block["source"] = new_source
+    return new_block
+
+
+async def _scrub_search_result_block(
+    engine: PIIEngine, block: dict[str, Any], mapping: PIIMapping
+) -> dict[str, Any]:
+    """search_result blocks carry retrieved plaintext: `content` (text blocks)
+    plus the `title` and `source` strings."""
+    new_block = await _scrub_str_fields(engine, block, ("title", "source"), mapping)
+    if "content" in block:
+        new_block["content"] = await _scrub_block_content(engine, block["content"], mapping)
+    return new_block
 
 
 async def scrub_responses_request(
