@@ -100,6 +100,12 @@ pii:
 Types not listed are still masked as usual, so blocking is purely additive on top
 of the default behavior.
 
+The proxy refuses to start if a listed type cannot be emitted by any enabled
+detector (for example `US_PASSPORT` under the default `onnx` preset): a block
+rule that can never fire would be silently unenforceable. Fix it by removing the
+type or enabling a detector that produces it (a `label_mapping` value, a Presidio
+entity, or a `custom_patterns` entity type).
+
 ## Custom regex patterns
 
 Add your own PII patterns without touching code:

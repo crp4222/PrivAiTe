@@ -62,7 +62,61 @@ class PIIEngine:
     def is_ready(self) -> bool:
         return self._ready
 
+    def _validate_block_entities(self) -> None:
+        """Refuse to start when block_entities lists a type that no enabled
+        detector can emit: the gate would silently never fire, which is
+        fail-open by configuration.
+
+        Deliberately conservative to never reject a working config: whenever a
+        detector's producible set cannot be determined precisely (Presidio
+        without an entity allowlist, or an ML detector with an empty
+        label_mapping), that detector is treated as able to emit anything and
+        validation is skipped. When no detector is enabled at all, the
+        dedicated zero-detector startup check reports it instead.
+        """
+        if not self._blocked:
+            return
+        detectors = self.config.detectors
+        enabled_ml = [
+            cfg
+            for cfg in (
+                detectors.bert_ner,
+                detectors.mlmodel,
+                detectors.onnx,
+                detectors.gliner,
+            )
+            if cfg.enabled
+        ]
+        if not detectors.presidio.enabled and not enabled_ml:
+            return
+        producible: set[str] = set()
+        if detectors.presidio.enabled:
+            if not detectors.presidio.entities:
+                return  # full Presidio registry: could emit nearly any type
+            producible |= set(detectors.presidio.entities)
+            # Custom patterns run inside the Presidio detector and are exempt
+            # from its entity allowlist.
+            producible |= {p.entity_type for p in self.config.custom_patterns}
+        for cfg in enabled_ml:
+            if not cfg.label_mapping:
+                return  # unknown label set: treat as able to emit anything
+            producible |= set(cfg.label_mapping.values())
+        unenforceable = sorted(self._blocked - producible)
+        if unenforceable:
+            raise ValueError(
+                "block_entities lists type(s) that no enabled detector can "
+                "emit, so they would never block anything: "
+                + ", ".join(unenforceable)
+                + ". Remove them from block_entities or enable a detector that "
+                "produces them (presidio entities, a label_mapping, or a "
+                "custom_patterns entity_type)."
+            )
+
     async def initialize(self) -> None:
+        # Config-only validation first: it must fail before any model download
+        # or load is paid for.
+        self._validate_block_entities()
+
         if self.config.detectors.presidio.enabled:
             from privaite.pii.detector_presidio import PresidioDetector
 

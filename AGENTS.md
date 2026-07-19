@@ -28,8 +28,9 @@ them as invariants, not suggestions.
    content or entity values. The reversible map is per-request, in-memory only.
 6. **Startup fails fast on unsafe config**, it never degrades silently: `pii.enabled`
    with 0 detectors, `merge_strategy: intersection` with <2 detectors, a Presidio
-   language with no spaCy model, and duplicate provider `model_name` aliases all
-   raise at boot.
+   language with no spaCy model, duplicate provider `model_name` aliases, and a
+   `block_entities` type no enabled detector can emit (conservative check: skipped
+   when a detector's producible set is unknown) all raise at boot.
 7. **Config defaults are the safety posture, do not flip them casually.**
    `preset: onnx` (~84.5% recall), `on_error: block`, `deanonymization.fuzzy_matching: false`
    (fuzzy can mis-substitute), detector `trust_remote_code: false`, `block_entities: []`.

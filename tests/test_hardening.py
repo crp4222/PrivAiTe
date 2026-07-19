@@ -66,6 +66,24 @@ async def test_unknown_presidio_language_fails_at_init_not_per_request():
         await detector.initialize()
 
 
+@pytest.mark.asyncio
+async def test_custom_pattern_survives_presidio_entity_allowlist():
+    # The onnx/max presets run Presidio with an entity allowlist. Custom
+    # patterns used to be filtered out by that allowlist and silently never
+    # fire under the default preset; they are an explicit operator opt-in and
+    # must be exempt from it.
+    from privaite.config.schema import CustomPatternConfig
+    from privaite.pii.detector_presidio import PresidioDetector
+
+    detector = PresidioDetector(
+        PresidioDetectorConfig(enabled=True, languages=["en"], entities=["PERSON"]),
+        custom_patterns=[CustomPatternConfig(pattern=r"KD-\d{6}", entity_type="CUSTOMER_ID")],
+    )
+    await detector.initialize()
+    entities = await detector.detect("ticket opened by KD-123456 yesterday", "en")
+    assert any(e.entity_type == "CUSTOMER_ID" for e in entities)
+
+
 def _format(msg: str) -> str:
     record = logging.LogRecord(
         name="privaite.test",
