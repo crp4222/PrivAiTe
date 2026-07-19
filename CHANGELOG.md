@@ -4,6 +4,37 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.3] - 2026-07-19
+
+### Fixed
+- Text-bearing request fields outside `messages` are now scrubbed before
+  forwarding: chat `prediction.content` (OpenAI predicted outputs carry the
+  client's current document), `web_search_options.user_location`, and the
+  `/v1/completions` `suffix`. They previously rode the request passthrough to
+  the provider unscrubbed. Request inputs only, so they scrub without a restore
+  path, and the `block_entities` gate now applies to them.
+- Startup refuses a `block_entities` policy that lists a type no enabled
+  detector can emit, instead of leaving a gate that silently never fires. The
+  check is conservative: it never rejects a configuration whose producible set
+  cannot be determined.
+- Custom patterns are no longer filtered out by the Presidio entity allowlist
+  under the `onnx`/`max` presets, so a configured `custom_patterns` entity now
+  actually fires.
+- `message.refusal` and `message.audio.transcript` are restored on the response,
+  in both the non-streaming and streaming paths (previously placeholders reached
+  the client).
+- Anonymization fails closed if a unique fake cannot be generated after repeated
+  collisions, rather than returning a value that could cross-restore.
+- The pip quickstart in the README launched the server without exporting
+  `PRIVAITE_API_KEYS`, so every request hit the fail-closed 401. The variable is
+  now on the launch line.
+
+### Changed
+- Documentation and discovery assets refreshed: `llms.txt`/`llms-full.txt`
+  regenerated for the current release, per-page metadata and a sitemap on the
+  docs site, and read-only default token scope plus SHA-pinned actions in the
+  CI and publish workflows.
+
 ## [0.3.2] - 2026-07-17
 
 ### Fixed

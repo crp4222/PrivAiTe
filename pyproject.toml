@@ -1,6 +1,6 @@
 [project]
 name = "privaite"
-version = "0.3.2"
+version = "0.3.3"
 description = "Drop-in self-hosted LLM proxy that reversibly redacts PII before LLM calls, including tool-call arguments and multimodal content"
 readme = "README.md"
 requires-python = ">=3.11"
