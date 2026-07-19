@@ -4,7 +4,6 @@
 > one-line summaries per page is in llms.txt. Regenerated at each release.
 
 
-
 ---
 <!-- source: README.md -->
 
@@ -19,10 +18,6 @@ Self-hosted PII redaction proxy for LLM APIs.
 
 **A drop-in LLM proxy that reversibly replaces PII before it reaches the provider, including inside tool-call arguments and multimodal content, with zero telemetry.**
 
-<p align="center">
-  <img src="docs/demo.gif" alt="PrivAiTe demo: a tool call carrying an email, name and credit card has each value replaced with a placeholder before it reaches the LLM provider, with the JSON keys left intact, then de-anonymized in the reply" width="820">
-</p>
-
 ```
 You type: "Je m'appelle Marie Dupont, email marie@acme.com"
 LLM sees: "Je m'appelle <PERSON_1>, email <EMAIL_ADDRESS_1>"
@@ -30,7 +25,7 @@ LLM says: "Bonjour <PERSON_1>, votre email <EMAIL_ADDRESS_1> est noté."
 You  see: "Bonjour Marie Dupont, votre email marie@acme.com est noté."
 ```
 
-PrivAiTe sits between your app and the model provider. It finds names, emails, phones, cards, IBANs, secrets and more, swaps them for stand-ins before anything leaves your machine, and puts the real values back in the reply. Most tools scan only the plain message text; agent traffic hides PII inside tool-call JSON, and that is the gap PrivAiTe closes. Detection runs locally ([two engines](docs/detection.md), Presidio + OpenAI's open privacy-filter model), nothing phones home, and the same engine runs three ways: standalone proxy, [Open WebUI filter, or LiteLLM guardrail](#integrations).
+PrivAiTe sits between your app and the model provider. It finds names, emails, phones, cards, IBANs, secrets and more, swaps them for stand-ins before anything leaves your machine, and puts the real values back in the reply. Most tools scan only the plain message text; agent traffic hides PII inside tool-call JSON, and that is the gap PrivAiTe closes. Detection runs locally ([two engines](docs/detection.md), Presidio + OpenAI's open privacy-filter model), and the engine runs three ways: standalone proxy, [Open WebUI filter, or LiteLLM guardrail](#integrations).
 
 This is local pseudonymization, not anonymization, and detection is best-effort rather than a guarantee. You remain the data controller. The [Threat model](#threat-model) spells out exactly what it protects against and what it does not.
 
@@ -72,24 +67,6 @@ PRIVAITE_API_KEYS=change-me python -m privaite --config privaite.yaml
 
 **Connect:** point any OpenAI-compatible client at `http://localhost:8400/v1` with the key `change-me`. For Open WebUI: Admin → Settings → Connections → OpenAI API, URL `http://localhost:8400/v1` (or `http://host.docker.internal:8400/v1` if Open WebUI runs in Docker), key = your `PRIVAITE_API_KEYS` value. Client snippets (curl, Python, Node) are in [`examples/`](examples/). Prefer no separate proxy? Use the in-process [Open WebUI filter](#integrations).
 
-## Prove it on your machine
-
-[`examples/demo_tool_call_leak.py`](examples/demo_tool_call_leak.py) starts a fake provider that records what it receives, then sends the same agent request without and with PrivAiTe. Nothing leaves 127.0.0.1:
-
-```bash
-python examples/demo_tool_call_leak.py
-```
-
-```text
- WITHOUT PrivAiTe, the provider receives:
-  {'to': 'marie.dupont@acme-corp.com', 'body': "... Card on file: 4111 1111 1111 1111."}
- WITH PrivAiTe, the same request arrives as:
-  {'to': '<EMAIL_ADDRESS_1>', 'body': "... Card on file: <CREDIT_CARD_1>."}
- and the client still gets the real values back, restored in the reply.
-```
-
-The first panel is also what text-only guardrails forward: they scrub message text but pass tool-call JSON through untouched. To audit it on your own data, see [verify what gets redacted](docs/verify.md).
-
 ## Benchmark
 
 Measured on 120 real documents from the open [AI4Privacy `pii-masking-200k`](https://huggingface.co/datasets/ai4privacy/pii-masking-200k) dataset (458 PII items, labeled by 10 independent auditor agents and cross-checked against the dataset's own mask) across DE, EN, FR, IT, plus 14 clean documents for false positives.
@@ -100,8 +77,6 @@ Measured on 120 real documents from the open [AI4Privacy `pii-masking-200k`](htt
 | `light` (full Presidio) | 62.4% | 57.9% | 3 / 14 | **100%** |
 | LiteLLM Presidio guardrail | 70.3% | 65.3% | 3 / 14 | 0.0% |
 | LLM Guard (Anonymize) | 76.9% | 74.9% | 5 / 14 | 0.0% |
-
-The competitor rows are the REAL integrations at their genuine best, not a strawman baseline. Both scan message text but neither parses tool-call JSON, so 100% of the same PII survives inside a tool-call argument, even values they detect and scrub in plain text.
 
 Read the 100% precisely, it is structural, not absolute: of the PII PrivAiTe detects in plain text, 100% is also removed from tool-call JSON. End to end, its tool-call leak equals its detection misses (15.5% on this corpus with the `onnx` preset), the same misses flat text has.
 
@@ -125,7 +100,7 @@ Per-language and per-entity tables, competitor configs, methodology, reproductio
 
 ## What it scans
 
-Before anything is forwarded: `messages[].content` (plain string or multimodal text parts), `tool_calls[].function.arguments` and the legacy `function_call.arguments` (parsed as JSON, scrubbed value by value including bare numeric leaves, keys and function names intact), `/v1/completions` `prompt`, `/v1/embeddings` `input`. On the way back, values are restored in content, tool calls and reasoning traces, streaming included.
+Before anything is forwarded: `messages[].content` (plain string or multimodal text parts), `tool_calls[].function.arguments` and the legacy `function_call.arguments` (parsed as JSON, scrubbed value by value including bare numeric leaves, keys and function names intact), `/v1/completions` `prompt` and `suffix`, `/v1/embeddings` `input`, chat `prediction.content` (predicted outputs) and `web_search_options.user_location`. On the way back, values are restored in content, tool calls, reasoning traces, refusals and audio transcripts, streaming included.
 
 NOT scanned (know your surface): `messages[].name`, top-level `user`/`metadata`, `tools` definitions, JSON object keys. Keep PII out of those fields. Endpoints, strict mode and passthrough caveats: [docs/api.md](docs/api.md).
 
@@ -354,6 +329,12 @@ pii:
 Types not listed are still masked as usual, so blocking is purely additive on top
 of the default behavior.
 
+The proxy refuses to start if a listed type cannot be emitted by any enabled
+detector (for example `US_PASSPORT` under the default `onnx` preset): a block
+rule that can never fire would be silently unenforceable. Fix it by removing the
+type or enabling a detector that produces it (a `label_mapping` value, a Presidio
+entity, or a `custom_patterns` entity type).
+
 ## Custom regex patterns
 
 Add your own PII patterns without touching code:
@@ -425,10 +406,11 @@ Scanned before anything is forwarded to the provider:
 - `messages[].content`, whether a plain string or a multimodal list of parts (text parts are scrubbed, images and audio are left alone).
 - `tool_calls[].function.arguments` and the legacy `function_call.arguments`: parsed as JSON and scrubbed value by value, including numeric values (a card number sent as a bare JSON number is detected too; on a hit the leaf becomes the masked string). Object keys and the function name stay intact. Arguments that are not valid JSON are scrubbed as free text.
 - `/v1/completions` `prompt` and `/v1/embeddings` `input`, as a string or a list of strings.
+- Auxiliary request fields that carry user text: chat `prediction.content` (predicted outputs, string or text-part list) and `web_search_options.user_location`, plus the `/v1/completions` `suffix`. These are request inputs, scrubbed on the way in only.
 
 NOT scanned (know your surface): `messages[].name`, top-level fields like `user` and `metadata`, and `tools`/`functions` definitions are forwarded as-is; JSON object keys inside tool arguments are never rewritten (masking parameter names would break the tool schema). Keep PII out of those fields, or strip them upstream.
 
-On the way back, the original values are restored in `message.content` and in returned `tool_calls` (including the legacy `function_call`), in both non-streaming and streaming responses. Set `pii.passthrough.tool_calls: true` to forward tool-call arguments unchanged.
+On the way back, the original values are restored in `message.content`, the reasoning trace, `message.refusal`, the audio `transcript`, and in returned `tool_calls` (including the legacy `function_call`), in both non-streaming and streaming responses. Set `pii.passthrough.tool_calls: true` to forward tool-call arguments unchanged.
 
 ## Strict mode
 

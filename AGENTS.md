@@ -68,8 +68,8 @@ carries any payload other than fully-held-back content.
 
 - Run in the repo venv (`.venv`): `pytest`, `ruff check`, `ruff format --check`,
   and **`mypy privaite/ integrations/openwebui/privaite_filter.py integrations/litellm/privaite_guardrail.py`**.
-  The publish workflow type-checks the integrations even though the push CI does
-  not: skipping them once broke a release.
+  Both the push CI and the publish workflow type-check the integrations:
+  skipping them locally once broke a release.
 - Version: bump **both** `pyproject.toml` and `privaite/__init__.py`; date the
   `CHANGELOG.md` section; bump the integration pins (`privaite>=X`).
 - Benchmark: if you touched detection, re-run `privaite-bench`
