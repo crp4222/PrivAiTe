@@ -6,7 +6,11 @@ request and stashes the reversible map in the request metadata (consumed and pop
 by the post-call hook); the post-call hook restores the real values in the response,
 including inside tool-call arguments and the legacy function_call, which LiteLLM's
 built-in Presidio guardrail does not touch. It also anonymizes Responses API
-`input` and restores Responses `output_text` / function_call output. Chat
+`input` and restores Responses `output_text` / function_call output. The
+auxiliary request fields LiteLLM forwards verbatim are scrubbed too, matching
+the core proxy: chat `prediction.content`, `web_search_options.user_location`
+and the completions `prompt`/`suffix` (request side only, nothing to restore;
+tokenized integer-array prompts pass through unscanned as documented). Chat
 streaming is restored too: text content, streamed tool-call arguments, and the
 streamed function_call. (Responses API streaming restore is not yet implemented.)
 On the failure path the map is dropped from metadata as well (best-effort), so it
@@ -172,16 +176,79 @@ class PrivaiteGuardrail(CustomGuardrail):
     # Scanned individually so a mixed input list is not left raw.
     _ITEM_TEXT_FIELDS = ("output", "arguments", "text")
 
-    def _overwrite_snapshot_input(self, data: dict, new_input: Any) -> None:
-        # A plain `data["input"] = ...` rebind leaks for string input: the proxy
-        # snapshots the request body by shallow-copying data before this hook,
-        # so the original string stays in proxy_server_request.body["input"].
-        # Overwrite the snapshot copy too. (List inputs are mutated in place, so
-        # the aliased snapshot already reflects the anonymized values.)
+    def _overwrite_snapshot_field(self, data: dict, field: str, new_value: Any) -> None:
+        # A plain `data[field] = ...` rebind leaks for top-level string fields
+        # (`input`, `prompt`, `suffix`): the proxy snapshots the request body by
+        # shallow-copying data before this hook, so the original string stays in
+        # proxy_server_request.body[field]. Overwrite the snapshot copy too.
+        # (Lists and dicts are mutated in place, so the aliased snapshot already
+        # reflects the anonymized values.)
         psr = data.get("proxy_server_request")
         body = psr.get("body") if isinstance(psr, dict) else None
-        if isinstance(body, dict) and "input" in body:
-            body["input"] = new_input
+        if isinstance(body, dict) and field in body:
+            body[field] = new_value
+
+    @staticmethod
+    def _has_aux_fields(data: dict) -> bool:
+        """True when the request carries one of the auxiliary text fields
+        scanned by _scrub_aux_fields; keeps the pre-call early return from
+        skipping a request whose only user text sits in those fields."""
+        prediction = data.get("prediction")
+        if isinstance(prediction, dict) and "content" in prediction:
+            return True
+        web_search = data.get("web_search_options")
+        if isinstance(web_search, dict) and "user_location" in web_search:
+            return True
+        suffix = data.get("suffix")
+        if isinstance(suffix, str) and suffix:
+            return True
+        # /v1/completions user text: a string prompt or the batch list shape.
+        # (A dict prompt is a Responses template reference; it carries no plain
+        # user text and is left untouched, as before.)
+        prompt = data.get("prompt")
+        return isinstance(prompt, (str, list)) and bool(prompt)
+
+    async def _scrub_aux_fields(self, data: dict, engine: Any, mapping: Any) -> None:
+        """Scrub the request-side text fields outside messages/input that
+        LiteLLM forwards verbatim (core proxy parity): chat `prediction.content`
+        (predicted outputs carry the client's current document),
+        `web_search_options.user_location`, and the completions `prompt` (string
+        or batch list) and `suffix`. Every value flows through the engine's
+        process_request_value, the same single choke point, so the block gate
+        and the fail-closed policy apply unchanged. Request inputs only, nothing
+        to restore. The prediction and web_search_options dicts are aliased by
+        the proxy's shallow body snapshot, so their keys are rebound on the SAME
+        dict; `prompt` and `suffix` are top-level strings, so their snapshot
+        copies are overwritten explicitly."""
+        prediction = data.get("prediction")
+        if isinstance(prediction, dict) and "content" in prediction:
+            prediction["content"] = await engine.process_request_value(
+                prediction["content"], mapping
+            )
+        web_search = data.get("web_search_options")
+        if isinstance(web_search, dict) and "user_location" in web_search:
+            web_search["user_location"] = await engine.process_request_value(
+                web_search["user_location"], mapping
+            )
+        suffix = data.get("suffix")
+        if isinstance(suffix, str) and suffix:
+            new_suffix = await engine.process_request_value(suffix, mapping)
+            data["suffix"] = new_suffix
+            self._overwrite_snapshot_field(data, "suffix", new_suffix)
+        # /v1/completions prompt: a string, or a list for the batch shape. The
+        # walker scrubs string leaves only, so a tokenized (integer-array)
+        # prompt passes through unchanged, keeping the documented "tokenized
+        # inputs are not scanned" boundary. A dict prompt (Responses template
+        # reference) is left untouched, as before.
+        prompt = data.get("prompt")
+        if isinstance(prompt, str) and prompt:
+            new_prompt = await engine.process_request_value(prompt, mapping)
+            data["prompt"] = new_prompt
+            self._overwrite_snapshot_field(data, "prompt", new_prompt)
+        elif isinstance(prompt, list) and prompt:
+            # Slot-wise rewrite of the SAME list object: the body snapshot
+            # aliases it, so the anonymized entries land in the snapshot too.
+            prompt[:] = await engine.process_request_value(prompt, mapping)
 
     def _responses_item_repr(self, item: Any) -> tuple:
         """Map ONE Responses `input` list item to (engine_message, field) so it
@@ -208,8 +275,11 @@ class PrivaiteGuardrail(CustomGuardrail):
         engine (span-precise), sharing ONE mapping so neither is left untouched
         when a crafted request carries both. Every Responses input item is scanned
         item by item (message, tool output, tool call, bare string), so a mixed
-        input list no longer slips past detection and the block gate. Returns the
-        mapping, or None if there was nothing to anonymize."""
+        input list no longer slips past detection and the block gate. The
+        auxiliary request fields (prediction.content, web_search_options
+        user_location, completions prompt/suffix) are scrubbed into the same
+        mapping. Returns the mapping, or None if there was nothing to
+        anonymize."""
         messages = data.get("messages")
         msg_list = messages if isinstance(messages, list) else []
         batch: list[Any] = list(msg_list)
@@ -229,7 +299,15 @@ class PrivaiteGuardrail(CustomGuardrail):
                 targets.append((idx, field))
 
         if not batch:
-            return None
+            if not self._has_aux_fields(data):
+                return None
+            # No messages and no input: the only user text sits in the auxiliary
+            # fields. Scrub them into a fresh per-request mapping.
+            from privaite.pii.mapping import PIIMapping
+
+            aux_mapping = PIIMapping()
+            await self._scrub_aux_fields(data, engine, aux_mapping)
+            return aux_mapping
 
         anonymized, mapping = await engine.process_request(batch)
 
@@ -242,7 +320,7 @@ class PrivaiteGuardrail(CustomGuardrail):
             if target == "str":
                 new_text = anon.get("content", input_value)
                 data["input"] = new_text
-                self._overwrite_snapshot_input(data, new_text)
+                self._overwrite_snapshot_field(data, "input", new_text)
                 continue
             # every non-"str" target came from the `isinstance(input_value, list)`
             # branch above, so input_value is a list here.
@@ -256,6 +334,10 @@ class PrivaiteGuardrail(CustomGuardrail):
                 new_item = dict(input_value[target])
                 new_item[field] = anon.get("content", new_item[field])
                 input_value[target] = new_item
+
+        # Auxiliary fields share the SAME mapping as messages/input, so a
+        # request carrying both keeps one reversible map and one block gate.
+        await self._scrub_aux_fields(data, engine, mapping)
         return mapping
 
     async def async_pre_call_hook(
@@ -271,7 +353,7 @@ class PrivaiteGuardrail(CustomGuardrail):
         if isinstance(metadata, dict):
             metadata.pop("privaite_map", None)
 
-        if not data.get("messages") and not data.get("input"):
+        if not data.get("messages") and not data.get("input") and not self._has_aux_fields(data):
             return data
 
         engine = await self._engine_for(self._languages())
@@ -291,16 +373,30 @@ class PrivaiteGuardrail(CustomGuardrail):
             data.setdefault("metadata", {})["privaite_map"] = dict(mapping.get_all_fakes())
         return data
 
+    async def _restore_audio_transcript(self, message: Any, engine: Any, mapping: Any) -> None:
+        """Restore the audio transcript on a response message (restore parity
+        with the core: audio replies carry their text in audio.transcript, and
+        the model echoes placeholders there like anywhere else)."""
+        audio = getattr(message, "audio", None)
+        if audio is None:
+            return
+        transcript = _obj_get(audio, "transcript")
+        if isinstance(transcript, str) and transcript:
+            _obj_set(audio, "transcript", await engine.process_response(transcript, mapping))
+
     async def _restore_message(self, message: Any, engine: Any, mapping: Any) -> None:
         """Restore originals in one response message: content, reasoning trace,
-        tool-call args and the legacy function_call args."""
+        the refusal, the audio transcript, tool-call args and the legacy
+        function_call args (restore parity with the core proxy)."""
         content = getattr(message, "content", None)
         if isinstance(content, str) and content:
             message.content = await engine.process_response(content, mapping)
-        for field in ("reasoning_content", "reasoning"):
+        # A refusal can quote the request, so it carries placeholders too.
+        for field in ("reasoning_content", "reasoning", "refusal"):
             value = getattr(message, field, None)
             if isinstance(value, str) and value:
                 setattr(message, field, await engine.process_response(value, mapping))
+        await self._restore_audio_transcript(message, engine, mapping)
         for tool_call in getattr(message, "tool_calls", None) or []:
             fn = getattr(tool_call, "function", None)
             if fn is None:
@@ -352,18 +448,35 @@ class PrivaiteGuardrail(CustomGuardrail):
             if isinstance(args, str) and args:
                 _obj_set(item, "arguments", await engine.process_response(args, mapping))
 
+    def _restore_delta_audio(self, delta: Any, index: int, finished: bool, restore) -> None:
+        """Feed streamed audio transcript fragments through their own restore
+        buffer and flush the held tail on the finish chunk, creating the audio
+        carrier when the finish delta has none so the tail is never dropped."""
+        audio = getattr(delta, "audio", None)
+        fragment = _obj_get(audio, "transcript") if audio is not None else None
+        if not isinstance(fragment, str):
+            fragment = ""
+        if not fragment and not finished:
+            return
+        restored = restore(("audio", index), fragment, finished)
+        if audio is not None:
+            _obj_set(audio, "transcript", restored)
+        elif restored:
+            _obj_set(delta, "audio", {"transcript": restored})
+
     def _restore_delta(self, delta: Any, index: int, finished: bool, restore) -> None:
         """Restore one streamed delta in place: text content, the reasoning
-        trace, streamed tool-call argument fragments (per tool_call index) and
-        the legacy function_call."""
+        trace, the refusal, the audio transcript, streamed tool-call argument
+        fragments (per tool_call index) and the legacy function_call."""
         content = getattr(delta, "content", None) or ""
         restored = restore(("content", index), content, finished)
         if content or finished:
             delta.content = restored
-        for field in ("reasoning_content", "reasoning"):
+        for field in ("reasoning_content", "reasoning", "refusal"):
             value = getattr(delta, field, None)
             if isinstance(value, str) and (value or finished):
                 setattr(delta, field, restore((field, index), value, finished))
+        self._restore_delta_audio(delta, index, finished, restore)
         for tool_call in getattr(delta, "tool_calls", None) or []:
             fn = getattr(tool_call, "function", None)
             if fn is None:
