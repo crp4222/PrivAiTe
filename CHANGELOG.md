@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Opt-in agent CLI gateway (`gateway.enabled`, off by default): native
+  `/v1/messages` and `/v1/messages/count_tokens` routes for Claude Code
+  (Anthropic Messages API, validated live end to end) and a `/v1/responses`
+  route for Codex (OpenAI Responses API, beta). Requests are scrubbed at the
+  same engine choke point, tool-call arguments included, the client's own auth
+  is relayed verbatim (no key injected or validated on gateway routes), and
+  responses are restored, streaming included. See `docs/gateway.md`.
 - Opt-in engine-level detection cache (`pii.detection_cache`) for clients that
   resend conversation history every turn (agent CLIs). Caches merged detection
   spans per exact text leaf, keyed by salted hash, bounded LRU with TTL; stores

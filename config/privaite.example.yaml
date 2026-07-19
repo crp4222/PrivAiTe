@@ -41,6 +41,18 @@ providers:
       model: "ollama/glm-4.6:cloud"
       api_base: "http://host.docker.internal:11434"
 
+# Agent CLI gateway (opt-in, off by default): native routes for Claude Code
+# (Anthropic Messages, validated live) and Codex (OpenAI Responses, beta).
+# Gateway routes relay the client's own provider credentials as-is; PrivAiTe
+# injects and validates no key there. Enable pii.detection_cache below for
+# agent sessions. See docs/gateway.md.
+# gateway:
+#   enabled: true
+#   anthropic:
+#     base_url: "https://api.anthropic.com/v1"
+#   openai_responses:                          # beta (Codex)
+#     base_url: "https://api.openai.com/v1"
+
 pii:
   enabled: true
   # Full ONNX suite (default): ~84.5% recall on the benchmark (~749ms). Detects

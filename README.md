@@ -58,42 +58,44 @@ PRIVAITE_API_KEYS=change-me python -m privaite --config privaite.yaml
 
 **Connect:** point any OpenAI-compatible client at `http://localhost:8400/v1` with the key `change-me`. For Open WebUI: Admin → Settings → Connections → OpenAI API, URL `http://localhost:8400/v1` (or `http://host.docker.internal:8400/v1` if Open WebUI runs in Docker), key = your `PRIVAITE_API_KEYS` value. Client snippets (curl, Python, Node) are in [`examples/`](examples/). Prefer no separate proxy? Use the in-process [Open WebUI filter](#integrations).
 
-## Use it with your agent CLI (Claude Code, Codex)
+## Use it with Claude Code (agent CLI gateway)
 
-Opt-in gateway mode (off by default): your agent CLI points its base URL at PrivAiTe, which scrubs PII and secrets out of each request (tool-call arguments included) with the same local, benchmarked detection, relays your CLI's own auth token verbatim upstream, and restores the real values in the response, streaming included. Verified live with Claude Code (Anthropic Messages API) and Codex (OpenAI Responses API), both on their regular subscription logins. Any OpenAI-compatible app already works through the standard proxy above; the gateway adds the native protocols these CLIs speak.
+Opt-in gateway mode (off by default): your agent CLI points its base URL at PrivAiTe, which scrubs PII and secrets out of each request (tool-call arguments included) with the same local, benchmarked detection, relays whatever auth the CLI itself sends verbatim upstream, and restores the real values in the response, streaming included. The Claude Code path (Anthropic Messages API) is validated live end to end: running against the real Anthropic API with restore disabled proved the provider only ever received placeholders. Codex support is beta (see below). Any OpenAI-compatible app already works through the standard proxy above; the gateway adds the native protocols these CLIs speak.
+
+```mermaid
+flowchart LR
+    CLI["Agent CLI"] -- "request + the CLI's own auth token" --> PVT["PrivAiTe"]
+    PVT -- "placeholders only, token relayed verbatim" --> API["Provider API"]
+    API -- "response" --> PVT
+    PVT -- "real values restored, streaming included" --> CLI
+```
 
 ```yaml
 gateway:
   enabled: true
   anthropic:
     base_url: "https://api.anthropic.com/v1"
-  openai_responses:
-    base_url: "https://api.openai.com/v1"                 # API-key mode
-    # base_url: "https://chatgpt.com/backend-api/codex"   # Codex on a ChatGPT subscription
+pii:
+  detection_cache:
+    enabled: true    # recommended for agent sessions, see below
 ```
 
 ```bash
-ANTHROPIC_BASE_URL=http://localhost:8400 claude   # Claude Code
+ANTHROPIC_BASE_URL=http://localhost:8400 claude
 ```
 
-```toml
-# Codex (~/.codex/config.toml); Codex only speaks the Responses API
-model_provider = "privaite"
+Enable the detection cache when you use the gateway: agent CLIs resend the whole conversation every turn, and without the cache every turn re-scans the entire history (roughly 50 seconds per turn on a large measured session, about a second with the cache on). The [threat model](#threat-model) spells out the memory tradeoff.
 
-[model_providers.privaite]
-name = "PrivAiTe"
-base_url = "http://localhost:8400/v1"
-wire_api = "responses"
-requires_openai_auth = true   # ChatGPT subscription; for API-key mode use env_key = "OPENAI_API_KEY" instead
-```
+**Codex (beta).** The gateway also exposes `/v1/responses` (OpenAI Responses API), which is what Codex speaks. That path passes the same test suite but has had less live validation than Claude Code, so it is labeled beta; setup is in [docs/gateway.md](docs/gateway.md#codex-beta).
 
-Three things to know before relying on it:
+Four things to know before relying on it:
 
-- **Your own login, relayed verbatim.** PrivAiTe injects and validates nothing on gateway routes. This relays your own subscription traffic for your own use; it is not a provider-supported integration, and the ChatGPT Codex backend is undocumented and could change. API-key mode is the durable path.
+- **Measured, not promised.** In the [live agent-workflow benchmark](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md), Claude Code reading a repository with 24 planted PII values and secrets sent all 24 to the provider directly; through the gateway with the default preset, 0 reached it on that fixture, and on a larger realistic session 2 of 24 still got through (two secrets embedded in log lines). Never read this as zero leaks.
 - **It protects the egress, not the agent.** Claude Code and Codex still hold the real values in their own context and local transcripts; only what reaches the provider is scrubbed.
 - **The agent's own prompt is deliberately not scanned.** The Anthropic `system` field and the Responses `instructions` field pass through as-is, and Claude Code injects your `CLAUDE.md` and project context there.
+- **Auth is relayed, not managed.** PrivAiTe injects and validates nothing on gateway routes; it forwards the credentials your CLI sends, for your own traffic. Whether your provider's terms of service permit that traffic to transit a local proxy is between you and the provider; this is not a provider-supported integration, and API-key mode is the durable path.
 
-Full setup, scanned surface and limits: [docs/gateway.md](docs/gateway.md).
+Full setup, the flow diagram in detail, scanned surface and limits: [docs/gateway.md](docs/gateway.md).
 
 ## Benchmark
 
@@ -112,9 +114,7 @@ Two honesty notes, both favoring caution. LLM Guard's detection model is fine-tu
 
 Per-language and per-entity tables, competitor configs, methodology, reproduction: [privaite-bench](https://github.com/crp4222/privaite-bench). Feature comparison: [docs/comparison.md](docs/comparison.md).
 
-A live agent-workflow benchmark (a repository with planted PII and secrets, driven through real Claude Code and Codex sessions, measuring what actually reaches the provider with and without PrivAiTe) is in progress; results will be added here.
-
-<!-- AGENT_WORKFLOW_BENCHMARK: fill from privaite-bench agent_workflow/RESULTS.md once the run completes -->
+There is also a live agent-workflow benchmark: a repository with 24 planted PII values and secrets, driven through real Claude Code and Codex sessions, with a recording proxy measuring what actually reaches the provider. Directly, Claude Code sent 24/24 planted values and Codex 20/24. Through the [gateway](docs/gateway.md) with the default `onnx` preset, 0/24 reached the provider on that fixture; on a larger realistic session, 2 of 24 still got through (two secrets embedded in log lines), so treat it as a strong measured reduction, not zero leaks. Full matrix, latency and cache measurements: [agent_workflow/RESULTS.md](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md).
 
 ## Presets
 
@@ -177,7 +177,7 @@ Also browsable as a site: [crp4222.github.io/PrivAiTe](https://crp4222.github.io
 - [API reference](docs/api.md): endpoints, the exact scanned/unscanned surface, strict mode, passthrough caveats
 - [Verify what gets redacted](docs/verify.md): audit the proxy on your own data, dry-run inspect endpoint
 - [Feature comparison](docs/comparison.md) and the [reproducible benchmark](https://github.com/crp4222/privaite-bench)
-- [Agent CLI gateway](docs/gateway.md): Claude Code and Codex setup, what gateway routes scan, honest limits
+- [Agent CLI gateway](docs/gateway.md): Claude Code setup, Codex setup (beta), what gateway routes scan, honest limits
 - [Changelog](CHANGELOG.md)
 
 ## Development

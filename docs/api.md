@@ -19,6 +19,13 @@ OpenAI-compatible:
 | `GET /ready` | Readiness check |
 | `GET /stats` | PII detection stats per session |
 
+With [gateway mode](gateway.md) enabled (opt-in, off by default), the agent CLI
+routes also exist: `POST /v1/messages` and `POST /v1/messages/count_tokens`
+(Anthropic Messages, for Claude Code) and `POST /v1/responses` (OpenAI
+Responses, for Codex, beta). They relay the client's own provider credentials
+and are not covered by `PRIVAITE_API_KEYS`; their scanned surface is documented
+on the [gateway page](gateway.md).
+
 ## What gets anonymized
 
 Scanned before anything is forwarded to the provider:

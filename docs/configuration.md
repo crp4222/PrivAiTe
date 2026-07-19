@@ -41,6 +41,23 @@ providers:
 A `${VAR}` whose environment variable is unset fails startup on purpose, so a
 missing key is caught at boot rather than at the first request.
 
+## Agent CLI gateway
+
+Opt-in native routes for Claude Code (Anthropic Messages, validated live) and
+Codex (OpenAI Responses, beta). Gateway routes relay the client's own provider
+credentials as-is; PrivAiTe injects and validates no key there. Enable the
+[detection cache](#detection-cache-agent-sessions) alongside it. Full setup,
+scanned surface and limits: [gateway.md](gateway.md).
+
+```yaml
+gateway:
+  enabled: false    # default: off, the routes do not exist
+  anthropic:
+    base_url: "https://api.anthropic.com/v1"
+  openai_responses:                            # beta (Codex)
+    base_url: "https://api.openai.com/v1"
+```
+
 ## Docker with a custom config
 
 With just `OPENAI_API_KEY` set, the image exposes `gpt-4o-mini` and `gpt-4o`. For

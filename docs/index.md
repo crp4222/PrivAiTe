@@ -100,9 +100,10 @@ The benchmark is public and reproducible. Run it yourself.
   no separate service.
 - **LiteLLM guardrail.** A custom guardrail for teams already running the
   LiteLLM proxy: it runs the engine in process, no separate service.
-- **Agent CLI gateway.** Point Claude Code or Codex at PrivAiTe with their own
-  login: the traffic to the provider is scrubbed and the reply restored.
-  Opt-in, off by default. [Setup and limits](gateway.md).
+- **Agent CLI gateway.** Point Claude Code at PrivAiTe: the traffic to the
+  provider is scrubbed and the reply restored, tool-call arguments included.
+  Codex is supported in beta. Opt-in, off by default.
+  [Setup and limits](gateway.md).
 
 ---
 
@@ -148,6 +149,7 @@ full quickstart, config reference, and threat model are in the
 - [Configuration reference](configuration.md): providers, presets, anonymization methods, `block_entities`, custom patterns
 - [API reference](api.md): endpoints and the exact scanned/unscanned request surface
 - [Verify what gets redacted](verify.md): audit the proxy on your own data
+- [Agent CLI gateway](gateway.md): Claude Code setup, Codex setup (beta), scanned surface, honest limits
 - [PrivAiTe vs Presidio, LLM Guard, LiteLLM](comparison.md): feature and benchmark comparison
 
 ---
