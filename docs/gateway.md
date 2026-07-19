@@ -131,10 +131,35 @@ PII values and secrets and records every byte the provider actually receives.
 Directly, Claude Code sent 24/24 planted values to the provider and Codex
 20/24. Through the gateway with the default `onnx` preset, 0/24 reached the
 provider on that fixture; on a larger, more realistic session, 2 of 24 still
-got through (two secrets embedded in log lines). Read that as a strong
-measured reduction, never as zero leaks: detection is statistical, and a value
-it misses reaches the provider. The results page also carries the latency and
-cache measurements behind the recommendation above.
+got through. That miss is a detector recall gap at full-log scale, not a
+routing bug and not a log-line problem: offline, the same two secrets are
+scrubbed in `.env` form, in an isolated log line, and in a 40-line window,
+and only the full 69 KB log reproduces the miss. It lands where the
+benchmark already says the detector is weakest (SECRET recall 71.4% on the
+comparison corpus). Read that as a strong measured reduction, never as zero
+leaks: detection is statistical, and a value it misses reaches the provider.
+The results page also carries the latency and cache measurements behind the
+recommendation above.
+
+## Known behaviors (from live validation)
+
+Observed in real Claude Code and Codex sessions through the gateway. These are
+fidelity notes and beta edges, not leaks: in each case the real values stayed
+on the machine.
+
+- **The model may confabulate scrubbed values.** The model only ever sees
+  placeholders, so it sometimes invents a plausible stand-in in its prose (a
+  name, an env var name). The invention is silent: if a reply states a
+  concrete value the model could not have seen, treat it as made up.
+- **Absolute file paths can be scrubbed as URLs.** A path inside tool-call
+  input may be replaced by a URL placeholder, so the provider sees a mangled
+  path in the echoed tool history. The local tool loop keeps working on the
+  real path; only the model's view of the path degrades.
+- **Codex (beta) rough edges.** Codex's model refresh calls `/v1/models` on
+  the gateway and a red ERROR line is logged on every run; it is noise, not a
+  failure. A detection span can also swallow an adjacent label or newline, so
+  a faithful restore reproduces a small cosmetic formatting artifact in the
+  displayed output.
 
 ## Honest limits
 

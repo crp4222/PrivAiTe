@@ -67,6 +67,45 @@ PRIVAITE_API_KEYS=change-me python -m privaite --config privaite.yaml
 
 **Connect:** point any OpenAI-compatible client at `http://localhost:8400/v1` with the key `change-me`. For Open WebUI: Admin → Settings → Connections → OpenAI API, URL `http://localhost:8400/v1` (or `http://host.docker.internal:8400/v1` if Open WebUI runs in Docker), key = your `PRIVAITE_API_KEYS` value. Client snippets (curl, Python, Node) are in [`examples/`](examples/). Prefer no separate proxy? Use the in-process [Open WebUI filter](#integrations).
 
+## Use it with Claude Code (agent CLI gateway)
+
+Opt-in gateway mode (off by default): your agent CLI points its base URL at PrivAiTe, which scrubs PII and secrets out of each request (tool-call arguments included) with the same local, benchmarked detection, relays whatever auth the CLI itself sends verbatim upstream, and restores the real values in the response, streaming included. The Claude Code path (Anthropic Messages API) is validated live end to end: running against the real Anthropic API with restore disabled proved the provider only ever received placeholders. Codex support is beta (see below). Any OpenAI-compatible app already works through the standard proxy above; the gateway adds the native protocols these CLIs speak.
+
+```mermaid
+flowchart LR
+    CLI["Agent CLI"] -- "request + the CLI's own auth token" --> PVT["PrivAiTe"]
+    PVT -- "placeholders only, token relayed verbatim" --> API["Provider API"]
+    API -- "response" --> PVT
+    PVT -- "real values restored, streaming included" --> CLI
+```
+
+```yaml
+gateway:
+  enabled: true
+  anthropic:
+    base_url: "https://api.anthropic.com/v1"
+pii:
+  detection_cache:
+    enabled: true    # recommended for agent sessions, see below
+```
+
+```bash
+ANTHROPIC_BASE_URL=http://localhost:8400 claude
+```
+
+Enable the detection cache when you use the gateway: agent CLIs resend the whole conversation every turn, and without the cache every turn re-scans the entire history (roughly 50 seconds per turn on a large measured session, about a second with the cache on). The [threat model](#threat-model) spells out the memory tradeoff.
+
+**Codex (beta).** The gateway also exposes `/v1/responses` (OpenAI Responses API), which is what Codex speaks. That path passes the same test suite but has had less live validation than Claude Code, so it is labeled beta; setup is in [docs/gateway.md](docs/gateway.md#codex-beta).
+
+Four things to know before relying on it:
+
+- **Measured, not promised.** In the [live agent-workflow benchmark](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md), Claude Code reading a repository with 24 planted PII values and secrets sent all 24 to the provider directly; through the gateway with the default preset, 0 reached it on that fixture, and on a larger realistic session 2 of 24 still got through (a detector recall gap at full-log scale: the same two secrets are caught in isolation, but missed when a whole 69 KB log is scanned). Never read this as zero leaks.
+- **It protects the egress, not the agent.** Claude Code and Codex still hold the real values in their own context and local transcripts; only what reaches the provider is scrubbed.
+- **The agent's own prompt is deliberately not scanned.** The Anthropic `system` field and the Responses `instructions` field pass through as-is, and Claude Code injects your `CLAUDE.md` and project context there.
+- **Auth is relayed, not managed.** PrivAiTe injects and validates nothing on gateway routes; it forwards the credentials your CLI sends, for your own traffic. Whether your provider's terms of service permit that traffic to transit a local proxy is between you and the provider; this is not a provider-supported integration, and API-key mode is the durable path.
+
+Full setup, the flow diagram in detail, scanned surface and limits: [docs/gateway.md](docs/gateway.md).
+
 ## Benchmark
 
 Measured on 120 real documents from the open [AI4Privacy `pii-masking-200k`](https://huggingface.co/datasets/ai4privacy/pii-masking-200k) dataset (458 PII items, labeled by 10 independent auditor agents and cross-checked against the dataset's own mask) across DE, EN, FR, IT, plus 14 clean documents for false positives.
@@ -83,6 +122,8 @@ Read the 100% precisely, it is structural, not absolute: of the PII PrivAiTe det
 Two honesty notes, both favoring caution. LLM Guard's detection model is fine-tuned on the exact dataset behind this corpus, so its recall here is optimistic; PrivAiTe's default model is not (OpenAI's model card states it did not train on it). An out-of-distribution cross-check on two independent corpora confirms the default generalizes: ~84% held on Gretel finance text while the AI4Privacy-tuned model drops to ~62% ([OOD_COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md)).
 
 Per-language and per-entity tables, competitor configs, methodology, reproduction: [privaite-bench](https://github.com/crp4222/privaite-bench). Feature comparison: [docs/comparison.md](docs/comparison.md).
+
+There is also a live agent-workflow benchmark: a repository with 24 planted PII values and secrets, driven through real Claude Code and Codex sessions, with a recording proxy measuring what actually reaches the provider. Directly, Claude Code sent 24/24 planted values and Codex 20/24. Through the [gateway](docs/gateway.md) with the default `onnx` preset, 0/24 reached the provider on that fixture; on a larger realistic session, 2 of 24 still got through (a detector recall gap at full-log scale: the same two secrets are caught in isolation but missed when a whole 69 KB log is scanned), so treat it as a strong measured reduction, not zero leaks. Full matrix, latency and cache measurements: [agent_workflow/RESULTS.md](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md).
 
 ## Presets
 
@@ -116,6 +157,9 @@ PrivAiTe performs **local pseudonymization**, not guaranteed anonymization. Dete
 - **Re-identification from context.** Even with names replaced, the surrounding text can stay identifying ("the CEO of `<ORG_1>` who resigned in March").
 - **A compromised local machine.** The mapping and raw text live in local memory; this is not a defense against a local attacker.
 - **The provider correlating** requests within a session.
+- **The agent itself, in [gateway mode](docs/gateway.md).** The CLI keeps the real values in its own context and local transcripts; only the traffic to the provider is scrubbed. And the agent's own prompt (the Anthropic `system` field, the Responses `instructions` field) is relayed unscanned, so PII in your `CLAUDE.md` or injected project context reaches the provider.
+
+**If you enable the detection cache** (`pii.detection_cache`, off by default), one nuance is added to the promise above. The reversible mapping is still per-request and still dropped when the request ends. But the cache keeps PII-derived **metadata** in process memory for up to its TTL (default 30 minutes) after a request ends: salted BLAKE2b hashes of recently scanned text fragments, plus the positions, types, scores and detector sources of the PII spans found in them. An expired entry is never served again; it is removed from memory on the first cache write after its expiry, and the whole cache is cleared at shutdown, so only a process that goes completely idle keeps its last (expired, unusable) entries longer, until that next write or shutdown. No text, no PII values, no anonymized output, and nothing on disk. The honest delta: an attacker who can already read process memory (who today sees every in-flight request and its full mapping) additionally gains, for up to the TTL after traffic stops (longer only in the idle-process case above), (a) confirmation that a specific candidate text was recently processed, since the hash salt sits in the same memory, and (b) the positions and types of PII inside documents they obtained elsewhere. They gain no raw values and no ability to reverse placeholders. In multi-user deployments there is also a dedup timing side channel: the cache is shared across auth keys, and a cache hit is observably faster than a miss, so one user can in principle probe whether an exact text was recently sent by another. Leave the cache off if any of this matters for your deployment; enable it for [agent CLI sessions](docs/gateway.md), where it removes the cost of re-scanning the entire resent conversation on every turn.
 
 For GDPR/HIPAA: treat this as pseudonymization + transfer minimization, not anonymization. If you need irreversible removal, use `method: "redact"`. Audit it on your own data: [docs/verify.md](docs/verify.md).
 
@@ -142,6 +186,7 @@ Also browsable as a site: [crp4222.github.io/PrivAiTe](https://crp4222.github.io
 - [API reference](docs/api.md): endpoints, the exact scanned/unscanned surface, strict mode, passthrough caveats
 - [Verify what gets redacted](docs/verify.md): audit the proxy on your own data, dry-run inspect endpoint
 - [Feature comparison](docs/comparison.md) and the [reproducible benchmark](https://github.com/crp4222/privaite-bench)
+- [Agent CLI gateway](docs/gateway.md): Claude Code setup, Codex setup (beta), what gateway routes scan, honest limits
 - [Changelog](CHANGELOG.md)
 
 ## Development
@@ -265,6 +310,23 @@ providers:
 A `${VAR}` whose environment variable is unset fails startup on purpose, so a
 missing key is caught at boot rather than at the first request.
 
+## Agent CLI gateway
+
+Opt-in native routes for Claude Code (Anthropic Messages, validated live) and
+Codex (OpenAI Responses, beta). Gateway routes relay the client's own provider
+credentials as-is; PrivAiTe injects and validates no key there. Enable the
+[detection cache](#detection-cache-agent-sessions) alongside it. Full setup,
+scanned surface and limits: [gateway.md](gateway.md).
+
+```yaml
+gateway:
+  enabled: false    # default: off, the routes do not exist
+  anthropic:
+    base_url: "https://api.anthropic.com/v1"
+  openai_responses:                            # beta (Codex)
+    base_url: "https://api.openai.com/v1"
+```
+
 ## Docker with a custom config
 
 With just `OPENAI_API_KEY` set, the image exposes `gpt-4o-mini` and `gpt-4o`. For
@@ -337,6 +399,48 @@ rule that can never fire would be silently unenforceable. Fix it by removing the
 type or enabling a detector that produces it (a `label_mapping` value, a Presidio
 entity, or a `custom_patterns` entity type).
 
+## Detection cache (agent sessions)
+
+Agent CLIs (Claude Code, Codex) resend the entire growing conversation on every
+turn, so the proxy re-scans mostly identical bytes: O(n) detector work per turn,
+O(n^2) per session. The detection cache remembers the merged detection result
+for each exact text leaf, so a resent leaf skips the detectors entirely. On a
+real captured 11-turn Codex session with the `onnx` preset, per-turn scrub time
+drops to well under a second from turn 2 on, with byte-identical output.
+
+```yaml
+pii:
+  detection_cache:
+    enabled: false      # default: off (see the README threat model)
+    max_entries: 4096   # LRU bound
+    ttl_seconds: 1800   # entries expire after 30 minutes (swept on the next write)
+```
+
+What it stores and what it never stores:
+
+- Stored: salted BLAKE2b hashes of scanned text leaves (the salt is random per
+  process and never leaves it), plus span metadata (start, end, entity type,
+  score, detector source) for each hash.
+- Never stored: the text itself, the matched PII values, the anonymized output,
+  or any placeholder mapping. Placeholder numbering stays per-request.
+
+The `block_entities` gate and the anonymizer run on every request, cached or
+not, so a cached detection still blocks and still fails closed. A change to any
+detector setting changes the cache key fingerprint, so stale results are never
+served after a config change.
+
+Why it is off by default: with the cache enabled, PII-derived metadata (hashes,
+positions, types) survives in process memory up to `ttl_seconds` after a
+request ends, instead of nothing outliving the request. An expired entry is
+never served again; it is removed from memory on the first cache write after
+its expiry, and the whole cache is cleared at engine shutdown, so only a
+process that goes completely idle holds its last (expired, unusable) entries
+longer, until that next write or shutdown. The full delta,
+including the multi-user dedup timing side channel, is spelled out in the
+[README threat model](../README.md#threat-model). Enable it if you use the
+[agent CLI gateway](gateway.md) or any client that resends conversation
+history; leave it off if the stricter memory posture matters more than latency.
+
 ## Custom regex patterns
 
 Add your own PII patterns without touching code:
@@ -400,6 +504,13 @@ OpenAI-compatible:
 | `GET /health` | Health check |
 | `GET /ready` | Readiness check |
 | `GET /stats` | PII detection stats per session |
+
+With [gateway mode](gateway.md) enabled (opt-in, off by default), the agent CLI
+routes also exist: `POST /v1/messages` and `POST /v1/messages/count_tokens`
+(Anthropic Messages, for Claude Code) and `POST /v1/responses` (OpenAI
+Responses, for Codex, beta). They relay the client's own provider credentials
+and are not covered by `PRIVAITE_API_KEYS`; their scanned surface is documented
+on the [gateway page](gateway.md).
 
 ## What gets anonymized
 
@@ -538,3 +649,187 @@ pip install privaite
 python solutions/ai4privacy_loader.py   # in the privaite-bench repo
 python -m solutions.compare
 ```
+
+
+---
+<!-- source: docs/gateway.md -->
+
+# Agent CLI gateway (Claude Code, Codex in beta)
+
+Gateway mode lets an agent CLI point its base URL at PrivAiTe. On the way out,
+the request is scrubbed by the same engine and presets as the OpenAI-compatible
+endpoints, tool-call arguments included, and whatever auth the CLI itself sends
+is relayed verbatim upstream. On the way back, the real values are restored,
+streaming included. It is opt-in and off by default: with `gateway.enabled:
+false` the routes do not exist and nothing about the proxy changes.
+
+**Status.** The Claude Code path (Anthropic Messages API: `/v1/messages` and
+`/v1/messages/count_tokens`) is the validated path: it was exercised live end
+to end against the real Anthropic API, and running with restore disabled proved
+the provider only ever received placeholders, restore and streaming included.
+The Codex path (OpenAI Responses API: `/v1/responses`) is **beta**: it passes
+the same test suite, but the Responses protocol has more moving parts and this
+path has had less live validation than Claude Code. Expect rough edges and
+please report what you hit.
+
+## How a request flows
+
+```mermaid
+sequenceDiagram
+    participant CLI as Agent CLI (Claude Code, Codex)
+    participant PVT as PrivAiTe gateway
+    participant API as Provider API
+
+    CLI->>PVT: request, with the CLI's own auth token
+    Note over PVT: scrub at the single engine choke point<br/>message text, tool-call arguments, tool results
+    PVT->>API: placeholders only, auth token relayed verbatim
+    Note over API: the provider never sees the detected values
+    API-->>PVT: response (streaming or not)
+    Note over PVT: restore the real values, streaming included
+    PVT-->>CLI: response with the real values back in place
+```
+
+Gateway routes carry the client's own provider credentials: PrivAiTe neither
+injects nor validates any key there (`PRIVAITE_API_KEYS` applies to the
+OpenAI-compatible endpoints only). The mapping between real values and
+placeholders lives in memory for the length of the request, on your machine.
+
+## Enable it
+
+```yaml
+gateway:
+  enabled: true
+  anthropic:
+    base_url: "https://api.anthropic.com/v1"
+  openai_responses:                                         # beta (Codex)
+    base_url: "https://api.openai.com/v1"                   # API-key mode
+    # base_url: "https://chatgpt.com/backend-api/codex"     # Codex subscription login
+```
+
+**Enable the detection cache for agent sessions.** Agent CLIs resend the whole
+conversation every turn, so without the cache every turn re-scans the entire
+history and the scrub cost grows with the context: on a large measured session
+it reached roughly 50 seconds per turn, versus about a second with the cache
+on. The tradeoff (PII-derived metadata, never values, staying in process memory
+up to the TTL) is spelled out in the
+[README threat model](https://github.com/crp4222/PrivAiTe#threat-model); config
+details in the
+[configuration reference](configuration.md#detection-cache-agent-sessions).
+
+```yaml
+pii:
+  detection_cache:
+    enabled: true
+```
+
+## Claude Code
+
+```bash
+ANTHROPIC_BASE_URL=http://localhost:8400 claude
+```
+
+That is the whole setup. Claude Code sends its own login with each request; the
+gateway relays it as-is to `gateway.anthropic.base_url`.
+
+## Codex (beta)
+
+Codex only speaks the Responses API, and the `/v1/responses` route is the beta
+part of the gateway (see the status note above). Add a custom provider to
+`~/.codex/config.toml`:
+
+```toml
+model_provider = "privaite"
+
+[model_providers.privaite]
+name = "PrivAiTe"                # PrivAiTe Responses support is beta
+base_url = "http://localhost:8400/v1"
+wire_api = "responses"
+requires_openai_auth = true      # Codex login relayed as-is
+# env_key = "OPENAI_API_KEY"     # API-key mode instead: use this line, drop requires_openai_auth
+```
+
+With `requires_openai_auth`, also set the gateway upstream to the backend Codex
+actually talks to (`https://chatgpt.com/backend-api/codex`, commented in the
+YAML above). For API-key mode, keep the default `https://api.openai.com/v1`;
+that is the durable, documented upstream.
+
+## What is scanned (and what is not)
+
+**Anthropic Messages:** `messages[]` string content, `text` blocks, `tool_use`
+input (the tool-call-argument leak), `server_tool_use` and `mcp_tool_use`
+input (restored client-side on one turn, echoed back on the next), `tool_result`
+and `mcp_tool_result` content, `document` blocks with a text or content source,
+and `search_result` blocks. Not scanned: the `system` field,
+`tools`/`tool_choice` definitions, `thinking` and `redacted_thinking` blocks
+(Anthropic rejects modified thinking blocks echoed back on a later turn, so
+they pass through untouched in both directions), and binary media (images,
+base64/url/file document sources).
+
+**OpenAI Responses (beta):** `input`, as a string or item by item: role message
+content, `function_call` arguments (parsed as JSON, scrubbed value by value),
+`function_call_output`, other text-bearing item fields, bare strings. Not
+scanned: the top-level `instructions` field and `tools` definitions.
+
+The unscanned `system` and `instructions` fields matter in practice: they are
+the agent's own prompt, and Claude Code injects your `CLAUDE.md` and project
+context there, so PII inside those reaches the provider. Keep secrets and
+personal data out of them.
+
+Restore covers both streaming and non-streaming responses. The same fail-closed
+policy applies: if scrubbing fails, the request is rejected and nothing is
+forwarded.
+
+## Measured, not promised
+
+The [agent-workflow benchmark](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md)
+drives real Claude Code and Codex sessions over a repository with 24 planted
+PII values and secrets and records every byte the provider actually receives.
+Directly, Claude Code sent 24/24 planted values to the provider and Codex
+20/24. Through the gateway with the default `onnx` preset, 0/24 reached the
+provider on that fixture; on a larger, more realistic session, 2 of 24 still
+got through. That miss is a detector recall gap at full-log scale, not a
+routing bug and not a log-line problem: offline, the same two secrets are
+scrubbed in `.env` form, in an isolated log line, and in a 40-line window,
+and only the full 69 KB log reproduces the miss. It lands where the
+benchmark already says the detector is weakest (SECRET recall 71.4% on the
+comparison corpus). Read that as a strong measured reduction, never as zero
+leaks: detection is statistical, and a value it misses reaches the provider.
+The results page also carries the latency and cache measurements behind the
+recommendation above.
+
+## Known behaviors (from live validation)
+
+Observed in real Claude Code and Codex sessions through the gateway. These are
+fidelity notes and beta edges, not leaks: in each case the real values stayed
+on the machine.
+
+- **The model may confabulate scrubbed values.** The model only ever sees
+  placeholders, so it sometimes invents a plausible stand-in in its prose (a
+  name, an env var name). The invention is silent: if a reply states a
+  concrete value the model could not have seen, treat it as made up.
+- **Absolute file paths can be scrubbed as URLs.** A path inside tool-call
+  input may be replaced by a URL placeholder, so the provider sees a mangled
+  path in the echoed tool history. The local tool loop keeps working on the
+  real path; only the model's view of the path degrades.
+- **Codex (beta) rough edges.** Codex's model refresh calls `/v1/models` on
+  the gateway and a red ERROR line is logged on every run; it is noise, not a
+  failure. A detection span can also swallow an adjacent label or newline, so
+  a faithful restore reproduces a small cosmetic formatting artifact in the
+  displayed output.
+
+## Honest limits
+
+- **The gateway protects the egress, not the agent.** Claude Code and Codex
+  still hold the real values in their own context and local transcripts; only
+  what reaches the provider is scrubbed. Keeping values out of the agent's own
+  context would take a source-side interceptor, which a gateway is not.
+- **Auth is relayed, not managed.** The gateway forwards whatever credentials
+  the CLI sends, unchanged, for your own traffic. Whether your provider's terms
+  of service permit that traffic to transit a local proxy is between you and
+  the provider: this is not a provider-supported or provider-endorsed
+  integration, the `chatgpt.com` Codex backend is undocumented and could change
+  without notice, and API-key mode is the durable path.
+- Everything in the README
+  [threat model](https://github.com/crp4222/PrivAiTe#threat-model) still
+  applies: this is pseudonymization, not anonymization, and detection is
+  best-effort.

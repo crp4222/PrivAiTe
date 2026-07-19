@@ -21,6 +21,15 @@ All notable changes to this project are documented here. The format follows
   cache on or off, and `block_entities` still blocks on cache hits. Off by
   default; the README threat model documents what enabling it changes.
 
+### Fixed
+- LiteLLM guardrail parity with the 0.3.3 core fixes: the `/v1/completions`
+  `prompt` (string and batch list shapes) and `suffix`, chat
+  `prediction.content` and `web_search_options.user_location` are now scrubbed
+  through the engine choke point (masking and `block_entities` included), and
+  `message.refusal` and `message.audio.transcript` are restored in both the
+  non-streaming and streaming paths. This fix also ships on its own as the
+  0.3.4 patch, so it is not new to this release.
+
 ## [0.3.3] - 2026-07-19
 
 ### Fixed
