@@ -62,4 +62,23 @@ On the `light` preset (Presidio only), addresses and URLs are not detected. Secr
 - **Single-word names** from spaCy are dropped (too many false positives). Caught by contextual patterns ("Nom: X") or the `onnx` preset.
 - **Lowercase names** need intro patterns ("je m'appelle X"). The `onnx` preset catches them without patterns.
 - **Informal dates** ("last Tuesday", "il y a deux ans") are not detected.
+- **Secrets in log output, once a line of context precedes them.** This one is
+  measured and reproducible, not a hypothesis. The two secrets behind the agent
+  benchmark's 2/24 figure are detected on their own: in `.env` assignment form
+  and on an isolated log line, both are scrubbed. They are missed once roughly
+  **one preceding line of log-shaped context** sits in front of them. A 7-line,
+  ~1 KB excerpt of that log already reproduces it (the API key survives all 5 of
+  its occurrences there, the SMTP password 4 of 5), and 41-line windows leak
+  4 of 5 and 3 of 5. The effect is **order dependent**: text appended *after*
+  the line never triggers it, only text before it does. It is a property of the
+  detector, so it holds on every surface that runs the engine (the
+  OpenAI-compatible proxy, the Open WebUI filter, the LiteLLM guardrail), not
+  only on the [agent CLI gateway](gateway.md). If you pipe raw application logs
+  through an LLM, assume secrets in them can survive.
+- **A password inside a connection URL can be typed as an email.** Presidio's
+  `EMAIL_ADDRESS` recognizer scores 1.0 over the userinfo part of a URI, so
+  `postgres://user:pass@host/db` can be detected and replaced as an email rather
+  than as a `SECRET`. It still leaves the machine as a placeholder, but under the
+  shipped configs it is then reversible (placeholder) instead of irreversible
+  (redact), which is not what an operator blocking or redacting secrets expects.
 - **Unscanned request fields**: see [the scanned surface](api.md#what-gets-anonymized).

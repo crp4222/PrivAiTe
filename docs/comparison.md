@@ -7,7 +7,7 @@ description: >-
 
 # PrivAiTe vs Presidio, LLM Guard, and LiteLLM PII masking
 
-PrivAiTe is a drop-in, self-hosted LLM proxy that redacts PII before it reaches the provider and restores it in the reply. Unlike Microsoft Presidio (a library you assemble), Protect AI LLM Guard, or LiteLLM's built-in Presidio guardrail, it also redacts PII inside **tool-call arguments** (the part every tested competitor misses, ~99% measured leak) and multimodal content, reversibly and with zero telemetry.
+PrivAiTe is a drop-in, self-hosted LLM proxy that redacts PII before it reaches the provider and restores it in the reply. Unlike Microsoft Presidio (a library you assemble), Protect AI LLM Guard, or LiteLLM's built-in Presidio guardrail, it also redacts PII inside **tool-call arguments** (the part every tested competitor misses: 100% of the PII placed in a tool-call argument survives in both measured competitors) and multimodal content, reversibly and with zero telemetry.
 
 This is local pseudonymization, not anonymization, and detection is best-effort. You remain the data controller. See the [threat model](../README.md#threat-model).
 

@@ -121,6 +121,44 @@ pii:
 map, so nothing is restored in responses for those types (and two values that mask
 to the same string can never cross-restore).
 
+## Entity overrides (per-type methods)
+
+`anonymization.method` is the default for every type; `entity_overrides` changes
+it for named types. **Both shipped configs use this, and it is the one place
+where PrivAiTe is deliberately not reversible:**
+
+```yaml
+pii:
+  anonymization:
+    method: "placeholder"
+    entity_overrides:
+      CREDIT_CARD:
+        method: "mask"       # ****************, irreversible
+        masking_char: "*"
+      SECRET:
+        method: "redact"     # [SECRET], irreversible
+```
+
+That block is what ships in `config/privaite.example.yaml` and
+`config/privaite.openai.yaml`, and the Docker image picks one of those two when
+you do not mount your own config, so **the documented Docker quickstart runs
+with card numbers masked and secrets redacted**. Concretely: a card number or a
+secret detected in your request is destroyed on the way out, the provider sees
+`****************` or `[SECRET]`, and the reply comes back with that stand-in
+still in place. It is never restored, because the original was never kept. Every
+other type keeps the reversible `placeholder` method and does come back.
+
+This is the safer default for the two types whose leak is worst, and it is a
+choice, not a law. Delete the `entity_overrides` block (or set those types to
+`placeholder`) if you would rather have card numbers and secrets restored in the
+reply; keep it, or extend it to more types, if you would rather they never come
+back at all. Each override takes `method` (`placeholder`, `fake_replacement`,
+`redact`, `mask`) and, for `mask`, `masking_char`.
+
+An override is about *how* a type is replaced. If a type must not be sent at
+all, even as a stand-in, use [`block_entities`](#blocking-specific-pii-types-hard-policy-gate)
+instead: that rejects the whole request.
+
 ## Blocking specific PII types (hard policy gate)
 
 By default every detected PII item is pseudonymized and the request goes through.

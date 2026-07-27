@@ -55,11 +55,14 @@ providers:
 
 pii:
   enabled: true
-  # Full ONNX suite (default): ~84.5% recall on the benchmark (~749ms). Detects
-  # everything including secrets and passwords; downloads the ONNX model on first
-  # run. Use "light" for the fast Presidio-only path (~62% recall, near-zero
-  # latency). Do NOT pin detectors.presidio.entities below on the light path: it
-  # restricts detection to only those types and drops recall to ~35%.
+  # Full ONNX suite (default): ~84.5% recall on the benchmark, at ~543 ms average
+  # in-process detection time per benchmark document (privaite-bench
+  # COMPARISON.md; that is detection time on one document, not end-to-end request
+  # latency, and it is hardware-dependent). Detects everything including secrets
+  # and passwords; downloads the ONNX model on first run. Use "light" for the fast
+  # Presidio-only path (~62% recall, ~63 ms per document on the same corpus). Do
+  # NOT pin detectors.presidio.entities below on the light path: it restricts
+  # detection to only those types and drops recall to ~35%.
   preset: "onnx"
 
   detectors:
@@ -115,6 +118,13 @@ pii:
   anonymization:
     method: "placeholder"
     faker_locale: ["fr_FR", "en_US"]
+    # Per-type overrides of the method above. BOTH are irreversible on purpose:
+    # a masked card and a redacted secret never enter the reversible map, so they
+    # are NOT restored in the reply (the provider sees "****************" or
+    # "[SECRET]" and so do you). Every other type keeps the reversible
+    # "placeholder" method and does come back. Delete this block, or set these
+    # types to "placeholder", if you would rather have them restored.
+    # Documented at docs/configuration.md#entity-overrides-per-type-methods.
     entity_overrides:
       CREDIT_CARD:
         method: "mask"

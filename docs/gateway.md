@@ -38,6 +38,19 @@ injects nor validates any key there (`PRIVAITE_API_KEYS` applies to the
 OpenAI-compatible endpoints only). The mapping between real values and
 placeholders lives in memory for the length of the request, on your machine.
 
+**The gateway routes are unauthenticated, by design. Know what that means.**
+With `gateway.enabled: true`, `POST /v1/messages`, `POST /v1/messages/count_tokens`
+and `POST /v1/responses` accept a request that carries no PrivAiTe key at all:
+the auth middleware skips exactly those paths, because the only credential in
+that request is the CLI's own upstream token and there is no PrivAiTe key in it
+to verify. On top of that the server binds `0.0.0.0` by default (`server.host`)
+and applies no rate limit of any kind (the only inbound guard is
+`server.max_request_bytes`). So an exposed port plus gateway mode is an endpoint
+that anyone who can reach it can drive, spending your provider quota and being
+billed to whatever account the relayed token belongs to. Set
+`server.host: "127.0.0.1"`, or keep the port off untrusted networks, before
+enabling gateway mode anywhere but localhost.
+
 ## Enable it
 
 ```yaml
@@ -99,25 +112,57 @@ that is the durable, documented upstream.
 
 ## What is scanned (and what is not)
 
-**Anthropic Messages:** `messages[]` string content, `text` blocks, `tool_use`
-input (the tool-call-argument leak), `server_tool_use` and `mcp_tool_use`
-input (restored client-side on one turn, echoed back on the next), `tool_result`
-and `mcp_tool_result` content, `document` blocks with a text or content source,
-and `search_result` blocks. Not scanned: the `system` field,
-`tools`/`tool_choice` definitions, `thinking` and `redacted_thinking` blocks
-(Anthropic rejects modified thinking blocks echoed back on a later turn, so
-they pass through untouched in both directions), and binary media (images,
-base64/url/file document sources).
+**Anthropic Messages.** Scanned: `messages[]` content when it is a plain
+string; `text` blocks; `tool_use` input (the tool-call-argument leak) and the
+`server_tool_use` / `mcp_tool_use` input the client echoes back after a restore;
+`tool_result` and `mcp_tool_result` content (a bare string, a nested block, or a
+list of both); `document` blocks (`title`, `context`, and a `text` or `content`
+source); `search_result` blocks (`title`, `source`, `content`). A block type
+this build does not know is **also** scanned rather than relayed raw: its
+allowlisted plaintext fields go through the engine, its `input`/`output` payload
+is walked leaf by leaf, and its `content` and a dict `source` follow the same
+rules as a known block. Not scanned: the `system` field (relayed verbatim, see
+below), `tools`/`tool_choice` definitions, and JSON object keys. Relayed
+byte-for-byte: `thinking` and `redacted_thinking` blocks (Anthropic rejects
+modified thinking blocks echoed back on a later turn, so they pass through
+untouched in both directions), the binary/pointer blocks, base64/url/file
+document sources, and on an unknown block everything outside the allowlist (a
+`source.data` blob, a `signature`, `encrypted_content`, ids).
 
-**OpenAI Responses (beta):** `input`, as a string or item by item: role message
-content, `function_call` arguments (parsed as JSON, scrubbed value by value),
-`function_call_output`, other text-bearing item fields, bare strings. Not
-scanned: the top-level `instructions` field and `tools` definitions.
+**OpenAI Responses (beta).** Scanned: `input` as a plain string, or item by
+item: the `content` of an item that carries both a `role` and a `content`
+(including the `text` and `refusal` fields of its parts, and bare strings in the
+part list); `function_call` `arguments` (parsed as JSON, scrubbed value by value,
+re-encoded); `custom_tool_call` `input`; the typed data field of a typed item;
+the `output` of any `*_output` item (this is where a file the agent read comes
+back, walked leaf by leaf); the text-bearing fields (`output`, `arguments`,
+`input`, `text`, `reason`) and the `content` of an item shape this build does not
+know; bare strings in the `input` list; and `prompt.variables` (the prompt
+template's own `id` and `version` are not user text and are left alone). Not
+scanned: the top-level `instructions` field (relayed verbatim, see below),
+`tools` definitions, and JSON object keys. Relayed byte-for-byte: the opaque
+item types (encrypted reasoning and compaction, generated images, server-side
+pointers, tool listings) and the binary content/output parts.
+
+### Exact lists (pinned to the code by a test)
+
+These are the frozensets the scrubber actually uses; `tests/test_gateway/test_gateway_docs.py`
+fails if this page and the code drift apart, in either direction.
+
+- Anthropic blocks relayed byte-for-byte: `thinking`, `redacted_thinking`, `image`, `container_upload`
+- Anthropic tool blocks scanned: `tool_use`, `server_tool_use`, `mcp_tool_use`, `tool_result`, `mcp_tool_result`
+- Unknown Anthropic block, plaintext fields scanned: `text`, `title`, `context`, `source`, `url`, `reason`, `stdout`, `stderr`
+- Unknown Anthropic block, JSON payload fields walked: `input`, `output`
+- Responses items relayed byte-for-byte: `reasoning`, `compaction`, `compaction_trigger`, `computer_call_output`, `image_generation_call`, `item_reference`, `mcp_list_tools`, `tool_search_call`, `tool_search_output`, `additional_tools`
+- Responses typed item fields scanned: `computer_call.action`, `computer_call.actions`, `local_shell_call.action`, `shell_call.action`, `web_search_call.action`, `apply_patch_call.operation`, `file_search_call.queries`, `file_search_call.results`, `code_interpreter_call.code`, `code_interpreter_call.outputs`, `program.code`, `program_output.result`
+- Responses content and output parts relayed byte-for-byte: `input_image`, `input_file`, `input_audio`, `image`, `output_image`, `computer_screenshot`
 
 The unscanned `system` and `instructions` fields matter in practice: they are
 the agent's own prompt, and Claude Code injects your `CLAUDE.md` and project
 context there, so PII inside those reaches the provider. Keep secrets and
-personal data out of them.
+personal data out of them. They are read for policy even so: both go through the
+same `block_entities` gate, so a blocked type sitting in the agent's prompt
+rejects the request instead of being relayed.
 
 Restore covers both streaming and non-streaming responses. The same fail-closed
 policy applies: if scrubbing fails, the request is rejected and nothing is
@@ -131,15 +176,35 @@ PII values and secrets and records every byte the provider actually receives.
 Directly, Claude Code sent 24/24 planted values to the provider and Codex
 20/24. Through the gateway with the default `onnx` preset, 0/24 reached the
 provider on that fixture; on a larger, more realistic session, 2 of 24 still
-got through. That miss is a detector recall gap at full-log scale, not a
-routing bug and not a log-line problem: offline, the same two secrets are
-scrubbed in `.env` form, in an isolated log line, and in a 40-line window,
-and only the full 69 KB log reproduces the miss. It lands where the
-benchmark already says the detector is weakest (SECRET recall 71.4% on the
-comparison corpus). Read that as a strong measured reduction, never as zero
-leaks: detection is statistical, and a value it misses reaches the provider.
-The results page also carries the latency and cache measurements behind the
-recommendation above.
+got through. Both are secrets in `key=value` log lines, and the mechanism is
+now measured rather than guessed. It is a detection miss, not a routing bug:
+the gateway traversed and scrubbed those exact lines (they arrive at the
+provider with `<DATE_TIME_n>` placeholders already substituted into them), the
+detector simply did not flag the two values.
+
+What the miss actually depends on is surrounding context, not input size:
+
+- On their own, both values are caught: in `.env` assignment form and on an
+  isolated log line, they are scrubbed every time.
+- Roughly **one preceding line of log-shaped context is enough to break it**. A
+  7-line, ~1 KB excerpt of that same log already reproduces the miss: the API
+  key survives all 5 of its occurrences there, the SMTP password 4 of 5.
+  41-line windows leak 4 of 5 and 3 of 5.
+- The effect is **order dependent**: text appended *after* the line never
+  triggers it. Only text in front of the value does.
+- Because this is a property of the detector and not of the gateway, it applies
+  to **every surface that runs the engine**: the OpenAI-compatible proxy, the
+  Open WebUI filter and the LiteLLM guardrail leak the same values on the same
+  input. Nothing about this is gateway-specific.
+
+It lands where the benchmark already says the detector is weakest (SECRET
+recall 71.4% on the comparison corpus). Read the 2 of 24 as a strong measured
+reduction, never as zero leaks, and read it as a floor rather than a ceiling:
+one of the four database-URL password occurrences is held back only by a
+Presidio `EMAIL_ADDRESS` false positive scoring 1.0 over the URI userinfo, so
+that password is currently typed and placeholdered as an email (and therefore
+reversible) rather than redacted as a secret. The results page also carries the
+latency and cache measurements behind the recommendation above.
 
 ## Known behaviors (from live validation)
 
@@ -168,7 +233,9 @@ on the machine.
   what reaches the provider is scrubbed. Keeping values out of the agent's own
   context would take a source-side interceptor, which a gateway is not.
 - **Auth is relayed, not managed.** The gateway forwards whatever credentials
-  the CLI sends, unchanged, for your own traffic. Whether your provider's terms
+  the CLI sends, unchanged, for your own traffic, and the gateway routes
+  themselves accept no PrivAiTe key (see [How a request flows](#how-a-request-flows):
+  open routes, `0.0.0.0` bind, no rate limit). Whether your provider's terms
   of service permit that traffic to transit a local proxy is between you and
   the provider: this is not a provider-supported or provider-endorsed
   integration, the `chatgpt.com` Codex backend is undocumented and could change

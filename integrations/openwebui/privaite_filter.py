@@ -4,7 +4,7 @@ author: crp4222
 author_url: https://github.com/crp4222/PrivAiTe
 version: 0.1.8
 required_open_webui_version: 0.5.0
-requirements: privaite>=0.3.1
+requirements: privaite>=0.4.0
 description: Anonymize or block PII (text, tool calls, multimodal) before it reaches the provider.
 """
 
@@ -15,9 +15,12 @@ description: Anonymize or block PII (text, tool calls, multimodal) before it rea
 # Note: this pulls Presidio and spaCy into Open WebUI's environment and downloads
 # the spaCy models for the chosen languages on first use (en_core_web_lg alone is
 # ~560MB). The default "onnx" preset also downloads the Privacy Filter model on
-# first use, so the first request after enabling it can be slow. Set the preset
-# valve to "light" to skip the ONNX model, or run PrivAiTe as a standalone proxy
-# and point your connection at it instead.
+# first use, so the first request after enabling it can be slow, and on a
+# memory-constrained instance it can be killed outright: an external user had to
+# bake privaite and en_core_web_lg into his Open WebUI image to get past an
+# out-of-memory kill on that first request. Pre-install them (see the README),
+# set the preset valve to "light" to skip the ONNX model, or run PrivAiTe as a
+# standalone proxy and point your connection at it instead.
 
 from __future__ import annotations
 

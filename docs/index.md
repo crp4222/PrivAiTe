@@ -29,10 +29,11 @@ You  see: "Bonjour Marie Dupont, votre email marie@acme.com est noté."
 ## The problem
 
 People paste real customer names, emails, contracts, and API keys into chatbots
-and coding agents every day. In 2025, security researchers reported that a large
-share of corporate AI usage includes sensitive data, and that around 40 percent
-of files sent to AI tools contain personal data. Once that text reaches a
-third-party model, you no longer control where it is stored, logged, or used.
+and coding agents every day. In this project's own
+[agent benchmark](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md),
+a coding agent asked to read a small repository put all 24 planted PII values
+and secrets on the provider's wire. Once that text reaches a third-party model,
+you no longer control where it is stored, logged, or used.
 
 Most existing tools only scrub the visible chat message. Modern traffic is not
 just chat. It is agents calling tools with your data in the arguments, documents
@@ -68,8 +69,12 @@ also read exactly what it sends.
   only a chat box.
 - **Zero telemetry.** Detection runs on your machine. PrivAiTe does not call
   home, and there is no hosted dashboard collecting your traffic.
-- **Reversible by design.** You get the real values back, so the output stays
-  usable. Redaction that throws data away breaks the reply.
+- **Reversible by design, with two deliberate exceptions.** You get the real
+  values back, so the output stays usable. The exceptions are in both shipped
+  configs: card numbers are masked and secrets are redacted, which is
+  irreversible on purpose, so those two are never restored. It is a per-type
+  setting you can change
+  ([entity overrides](configuration.md#entity-overrides-per-type-methods)).
 - **Drop-in.** Swap one base URL. It works with any OpenAI-compatible client.
 
 ---

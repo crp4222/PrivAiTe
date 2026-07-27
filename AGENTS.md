@@ -60,6 +60,54 @@ It is the one deliberate exception to "never echo values" (the caller sent the
 text; invariant #5 still fully applies to logs, errors and /stats, and the
 endpoint module deliberately has no logger). Keep it excluded from /stats.
 
+## Gateway: the SECOND scrub surface (`privaite/gateway/`)
+
+Opt-in agent CLI routes (`gateway.enabled`, off by default): `/v1/messages`,
+`/v1/messages/count_tokens` (Anthropic Messages, Claude Code) and `/v1/responses`
+(OpenAI Responses, Codex, beta). They are a **parallel request path** to
+`privaite/api/`: a core-side fix (a new scanned field, a new restored field, a
+gate) is NOT automatically true here. Check both.
+
+- **Scrub (`gateway/scrub.py`)** still goes through the one choke point: every
+  scanned string reaches `PIIEngine.scrub_document` (hence `_anonymize_text`),
+  so `block_entities` and fail-closed apply unchanged. Rules that exist because
+  breaking them leaked: scrub coverage must match restore coverage (restore
+  rewrites every string leaf, so the client holds REAL values inside
+  `server_tool_use`/`mcp_tool_use` blocks and echoes them back next turn: scrub
+  them); tool OUTPUT carriers are where a file the agent read arrives
+  (`custom_tool_call_output` and friends, a list of `{type,text}` parts, not
+  just a string); an Anthropic block type this build does not know is scanned
+  through an allowlist of plaintext field names, never relayed raw. Relayed
+  byte-for-byte: `thinking`/`redacted_thinking`, binary and opaque payloads,
+  and the Responses opaque item types. The agent's own prompt (`system`,
+  `instructions`) is the one field read but not rewritten: it goes through
+  `PIIEngine.gate_document`, so `block_entities` still rejects the request while
+  the prompt reaches the provider verbatim. The exact frozensets are documented
+  in `docs/gateway.md` and pinned by `tests/test_gateway/test_gateway_docs.py`:
+  change one, change the other.
+- **Restore (`gateway/restore.py`)** is NOT the core restore. `restore_tree`
+  rewrites **every string leaf** of the response except blocks whose type is in
+  the protocol's `skip_restore_types` (thinking, encrypted reasoning/compaction),
+  and an `arguments` string is restored on its PARSED tree and re-encoded, never
+  by plain substitution (splicing a raw quote/backslash/newline back into a JSON
+  string literal breaks the client's `json.loads`).
+- **A separate SSE restorer** lives here too (`_SSERestorer`), driven by the
+  declarative event plans in `gateway/protocols.py`: one `StreamingDeAnonymizer`
+  per text channel so a placeholder split across two events still restores, a
+  flush at channel end and at `[DONE]` so held-back text is never dropped, and
+  `json_escaped_mapping` on JSON-fragment channels (streamed tool arguments) so
+  the spliced original stays a valid piece of the JSON string literal it lands
+  in. Upstream framing (event names, comments, `[DONE]`) is preserved verbatim.
+- **Relay (`gateway/relay.py`)**: `accept-encoding` is never forwarded (the
+  proxy must be able to decode what comes back), duplicate header names are
+  relayed verbatim as a list of pairs, an upstream timeout maps to 504 and a
+  transport failure to 502.
+- **Auth**: gateway paths are deliberately skipped by `AuthMiddleware` when
+  gateway mode is on (the only credential in the request is the client's own
+  upstream token). With the default `server.host: 0.0.0.0` and no rate limit,
+  an exposed port plus gateway mode is an open endpoint. Documented in
+  `docs/gateway.md`; do not "fix" it silently in either direction.
+
 ## Streaming handler (`privaite/streaming/handler.py`)
 
 Forward the provider's own chunks (preserve `id`, `usage`, `logprobs`, and the real
@@ -76,6 +124,10 @@ carries any payload other than fully-held-back content.
   skipping them locally once broke a release.
 - Version: bump **both** `pyproject.toml` and `privaite/__init__.py`; date the
   `CHANGELOG.md` section; bump the integration pins (`privaite>=X`).
+- Docs: `python scripts/gen_llms_full.py` after ANY documentation change
+  (`--check` fails when stale). `llms-full.txt` is a concatenation and went
+  stale for three releases once; `llms.txt` and `docs/llms.txt` are the same
+  file and must stay identical.
 - Benchmark: if you touched detection, re-run `privaite-bench`
   (`python -m solutions.compare` from that repo root) and update `COMPARISON.md` +
   the README numbers. The published numbers must match the shipped code.

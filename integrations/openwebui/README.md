@@ -8,9 +8,12 @@ text.
 ## Install
 
 1. Make sure `privaite` is available to Open WebUI. The filter declares
-   `requirements: privaite>=0.3.1`, so Open WebUI installs it automatically from
+   `requirements: privaite>=0.4.0`, so Open WebUI installs it automatically from
    PyPI. You can also install it into the Open WebUI environment yourself
-   (`pip install privaite`).
+   (`pip install privaite`), which is the recommended path: see the first-run
+   memory note below. Note that Open WebUI only resolves that requirement when
+   the package is absent; an environment that already has an older `privaite` is
+   not upgraded for you.
 2. In Open WebUI: Admin Panel, Functions, "+", paste the contents of
    `privaite_filter.py`, save, then enable it.
 3. Open the function's valves to pick the preset and the languages. The default
@@ -29,11 +32,25 @@ older one the filter refuses the request rather than silently forwarding the PII
 
 ## Notes
 
-- The filter runs Presidio and spaCy inside Open WebUI and downloads the spaCy
-  models for your languages on first use (en_core_web_lg alone is ~560MB). The
-  default `onnx` preset also downloads the Privacy Filter model on first use, so
-  the first request after enabling it can be slow. Pre-installing the models, or
-  using the `light` preset, avoids that.
+- **First use can get the container OOM-killed. Pre-install instead.** The
+  filter runs Presidio and spaCy inside Open WebUI and downloads the spaCy models
+  for your languages on first use (en_core_web_lg alone is ~560MB); the default
+  `onnx` preset downloads the Privacy Filter model on top of that. Installing and
+  loading all of it inside a running Open WebUI process is a real memory spike on
+  top of Open WebUI's own footprint. This is not theoretical: the one external
+  user who reported back on this integration had to bake `privaite` and the large
+  spaCy model into his Open WebUI image beforehand, because the first request
+  after enabling the filter was killed for running out of memory. Do the same:
+
+  ```dockerfile
+  FROM ghcr.io/open-webui/open-webui:main
+  RUN pip install --no-cache-dir privaite>=0.4.0 && \
+      python -m spacy download en_core_web_lg
+  ```
+
+  Then the first request only loads what is already on disk. Using the `light`
+  preset (no ONNX model) or raising the container's memory limit also helps, and
+  running PrivAiTe as a standalone proxy avoids the problem entirely.
 - This is local pseudonymization, not guaranteed anonymization. See the Threat
   model in the main README.
 - For a lighter Open WebUI instance, run PrivAiTe as a standalone proxy and point
