@@ -41,7 +41,13 @@ class BertNERDetector(HFPipelineDetector):
 
 
 def _resolve_device(device_str: str) -> int | str:
-    # HF pipelines want a device index (-1 cpu, 0 cuda) or the "mps" string; map the
-    # shared torch device name onto that format.
-    pipeline_device: dict[str, int | str] = {"cpu": -1, "cuda": 0, "mps": "mps"}
-    return pipeline_device.get(resolve_torch_device(device_str), -1)
+    # HF pipelines want a device index (-1 cpu, 0 cuda) or a torch device string;
+    # map the shared torch device name onto that format. The index form is kept:
+    # a lookup table keyed on bare names sent "cuda:1" to the CPU silently.
+    resolved = resolve_torch_device(device_str)
+    base, _, index = resolved.partition(":")
+    if base == "cuda":
+        return int(index) if index else 0
+    if base == "mps":
+        return resolved
+    return -1

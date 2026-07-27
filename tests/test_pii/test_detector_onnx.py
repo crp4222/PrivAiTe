@@ -10,13 +10,20 @@ cap unscanned; long inputs are now covered whole by overlapping windows.
 
 from __future__ import annotations
 
+import logging
 import sys
 import types
 
 import numpy as np
 import pytest
+from pydantic import ValidationError
 
-from privaite.config.schema import OnnxDetectorConfig
+from privaite.config.schema import (
+    BertNERDetectorConfig,
+    GlinerDetectorConfig,
+    MLModelDetectorConfig,
+    OnnxDetectorConfig,
+)
 from privaite.pii.detector_onnx import (
     _WINDOW_OVERLAP,
     _WINDOW_TOKENS,
@@ -88,13 +95,129 @@ def test_auto_falls_back_to_cpu(monkeypatch):
         ("coreml", ["CoreMLExecutionProvider", "CPUExecutionProvider"]),
         ("mps", ["CoreMLExecutionProvider", "CPUExecutionProvider"]),
         ("cpu", ["CPUExecutionProvider"]),
-        ("something-unknown", ["CPUExecutionProvider"]),
     ],
 )
 def test_explicit_device_branches(device, expected):
-    # Explicit coreml/mps stays a documented opt-in; unknown values fail safe
-    # to CPU. None of these consult ort.get_available_providers().
+    # Explicit coreml/mps stays a documented opt-in. None of these consult
+    # ort.get_available_providers().
     assert _detector(device=device)._get_providers() == expected
+
+
+@pytest.mark.parametrize("device", ["something-unknown", "gpu", "cuda0", "cuda:0", ""])
+def test_unknown_onnx_device_is_refused_at_boot(device):
+    # An unknown value used to fall through to the CPU branch while the log
+    # still showed what was requested, so a typo (or "cuda" on a CPU-only
+    # build) looked like a working accelerator. It must fail at startup.
+    with pytest.raises(ValidationError, match="device must be"):
+        OnnxDetectorConfig(device=device)
+
+
+def test_torch_detectors_refuse_unknown_devices_and_keep_the_index_form():
+    # torch accepts "cuda:1"; onnxruntime selects a provider by NAME, so an
+    # index there would silently mean CPU (refused above), and "coreml" is an
+    # ONNX provider name that torch does not know.
+    assert MLModelDetectorConfig(device="cuda:1").device == "cuda:1"
+    assert GlinerDetectorConfig(device="mps").device == "mps"
+    assert BertNERDetectorConfig(device="auto").device == "auto"
+    for config_class in (MLModelDetectorConfig, BertNERDetectorConfig, GlinerDetectorConfig):
+        for bad in ("coreml", "cude", "gpu", ""):
+            with pytest.raises(ValidationError, match="device must be"):
+                config_class(device=bad)
+
+
+def test_hf_pipeline_device_keeps_the_index_instead_of_falling_back_to_cpu():
+    # The pipeline device was resolved through a table keyed on bare names, so
+    # "cuda:1" fell through to -1 and every inference silently ran on the CPU.
+    from privaite.pii.detector_bert_ner import _resolve_device
+
+    assert _resolve_device("cpu") == -1
+    assert _resolve_device("cuda") == 0
+    assert _resolve_device("cuda:1") == 1
+    assert _resolve_device("mps") == "mps"
+    assert _resolve_device("mps:0") == "mps:0"
+
+
+class _FakeSession:
+    """Minimal onnxruntime session: only the provider report initialize() reads."""
+
+    def __init__(self, providers: list[str]) -> None:
+        self._providers = providers
+
+    def get_providers(self) -> list[str]:
+        return list(self._providers)
+
+
+def _fake_runtime(
+    monkeypatch, tmp_path, session_providers: list[str], available: list[str] | None = None
+) -> dict:
+    """Stand in for onnxruntime, transformers and the model download so
+    initialize() runs without touching the network or a real model.
+    ``session_providers`` is what the built session reports it actually runs on,
+    ``available`` what the build advertises (they differ on a silent fallback)."""
+    created: dict = {}
+    ort = _fake_ort(available if available is not None else session_providers)
+    ort.SessionOptions = types.SimpleNamespace  # type: ignore[attr-defined]
+    ort.GraphOptimizationLevel = types.SimpleNamespace(  # type: ignore[attr-defined]
+        ORT_ENABLE_ALL=99
+    )
+
+    def fake_session(path, sess_options=None, providers=None):
+        created["providers"] = providers
+        return _FakeSession(session_providers)
+
+    ort.InferenceSession = fake_session  # type: ignore[attr-defined]
+
+    transformers = types.ModuleType("transformers")
+
+    class _FakeAutoTokenizer:
+        @staticmethod
+        def from_pretrained(model_name, revision=None, trust_remote_code=False):
+            created["tokenizer_args"] = (model_name, trust_remote_code)
+            return "tokenizer"
+
+    transformers.AutoTokenizer = _FakeAutoTokenizer  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "onnxruntime", ort)
+    monkeypatch.setitem(sys.modules, "transformers", transformers)
+    monkeypatch.setattr(
+        "privaite.pii.detector_onnx.download_onnx_model",
+        lambda **kwargs: tmp_path / "model.onnx",
+    )
+    return created
+
+
+@pytest.mark.asyncio
+async def test_logged_providers_are_the_session_real_ones(monkeypatch, tmp_path, caplog):
+    # Requesting CUDA on a CPU-only onnxruntime build does not raise: it warns
+    # and builds a CPU session. The log used to print the REQUESTED list, so an
+    # operator read "CUDA" while every inference ran on the CPU.
+    _fake_runtime(monkeypatch, tmp_path, ["CPUExecutionProvider"])
+    detector = _detector(device="cuda")
+
+    with caplog.at_level(logging.INFO, logger="privaite.pii.detector_onnx"):
+        await detector.initialize()
+
+    active = [r for r in caplog.records if r.getMessage().startswith("ONNX session providers:")]
+    assert len(active) == 1
+    assert active[0].getMessage() == "ONNX session providers: ['CPUExecutionProvider']"
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "CUDAExecutionProvider" in warnings[0].getMessage()
+    assert "not available" in warnings[0].getMessage()
+
+
+@pytest.mark.asyncio
+async def test_no_warning_when_every_requested_provider_is_active(monkeypatch, tmp_path, caplog):
+    _fake_runtime(monkeypatch, tmp_path, ["CPUExecutionProvider"])
+    detector = _detector(device="cpu")
+
+    with caplog.at_level(logging.INFO, logger="privaite.pii.detector_onnx"):
+        await detector.initialize()
+
+    assert [r for r in caplog.records if r.levelno == logging.WARNING] == []
+    assert any(
+        r.getMessage() == "ONNX session providers: ['CPUExecutionProvider']" for r in caplog.records
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -415,40 +538,17 @@ async def test_initialize_creates_session_with_selected_providers(monkeypatch, t
     # On a machine where CoreML is available, initialize() with device: "auto"
     # must hand the session CPU only, and load the tokenizer with
     # trust_remote_code left off.
-    from privaite.pii import detector_onnx as module
-
-    created: dict = {}
-
-    fake_ort = _fake_ort(["CoreMLExecutionProvider", "CPUExecutionProvider"])
-    fake_ort.SessionOptions = types.SimpleNamespace  # type: ignore[attr-defined]
-    fake_ort.GraphOptimizationLevel = types.SimpleNamespace(  # type: ignore[attr-defined]
-        ORT_ENABLE_ALL=99
+    created = _fake_runtime(
+        monkeypatch,
+        tmp_path,
+        ["CPUExecutionProvider"],
+        available=["CoreMLExecutionProvider", "CPUExecutionProvider"],
     )
-
-    def fake_session(path, sess_options=None, providers=None):
-        created["providers"] = providers
-        return "session"
-
-    fake_ort.InferenceSession = fake_session  # type: ignore[attr-defined]
-
-    fake_transformers = types.ModuleType("transformers")
-
-    class _FakeAutoTokenizer:
-        @staticmethod
-        def from_pretrained(model_name, revision=None, trust_remote_code=False):
-            created["tokenizer_args"] = (model_name, trust_remote_code)
-            return "tokenizer"
-
-    fake_transformers.AutoTokenizer = _FakeAutoTokenizer  # type: ignore[attr-defined]
-
-    monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
-    monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
-    monkeypatch.setattr(module, "download_onnx_model", lambda **kwargs: tmp_path / "model.onnx")
 
     detector = _detector(device="auto")
     await detector.initialize()
 
     assert created["providers"] == ["CPUExecutionProvider"]
     assert created["tokenizer_args"] == ("openai/privacy-filter", False)
-    assert detector._session == "session"
+    assert detector._session.get_providers() == ["CPUExecutionProvider"]
     assert detector._tokenizer == "tokenizer"

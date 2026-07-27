@@ -199,6 +199,25 @@ pii:
       entity_type: "REFERENCE"
 ```
 
+By default the whole match is anonymized. When the pattern needs context that
+must stay readable, name the part that carries the value: the anonymized span
+is then the named group alone, and the surrounding text is left untouched.
+
+```yaml
+pii:
+  custom_patterns:
+    # "api_key=SECRETVALUE" becomes "api_key=<SECRET_1>", not "<SECRET_1>"
+    - pattern: "api_key=(?P<value>[A-Za-z0-9_\\-]{16,})"
+      entity_type: "SECRET"
+```
+
+`value` is the conventional name; with several named groups it wins, otherwise
+the first declared group is used. Unnamed `(...)` groups are not markers, so a
+pattern without a named group keeps anonymizing the whole match.
+
+Custom patterns are an explicit opt-in: their entity types are never filtered
+out by a preset's Presidio entity allowlist.
+
 ## Languages
 
 7 languages supported with spaCy NER and contextual patterns: FR, EN, DE, ES, IT
@@ -230,3 +249,21 @@ When changing a detector's `model_name`, also set `revision` to a commit SHA
 from that model's repository. A default SHA from a different repository fails to
 load instead of silently using different weights. `revision: null` intentionally
 follows the mutable default branch and is not reproducible.
+
+## Detector device
+
+`device` selects the accelerator per detector. An unknown value is refused at
+boot, naming the offending key: onnxruntime does not fail when an execution
+provider is missing (it warns and builds a CPU session), so a typo, or `cuda` on
+a CPU-only build, used to look like a working accelerator. The startup log now
+reports the providers the session really runs on, and warns when a requested one
+is unavailable.
+
+| Detector | Accepted values |
+|---|---|
+| `onnx` | `auto`, `cpu`, `cuda`, `coreml`, `mps` (execution provider names, no index) |
+| `mlmodel`, `bert_ner`, `gliner` | `auto`, `cpu`, `cuda`, `mps`, with an optional index such as `cuda:1` |
+
+`auto` never selects CoreML for the ONNX detector: it is slower than CPU at every
+measured input size and accumulates compiled-model memory until the host process
+is killed. `device: "coreml"` stays available as an explicit opt-in.

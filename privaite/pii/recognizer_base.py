@@ -24,11 +24,18 @@ class RegexSpanRecognizer(EntityRecognizer):
         results = []
         for compiled, entity_type, score, group in self._specs:
             for match in compiled.finditer(text):
+                start = match.start(group) if group else match.start()
+                end = match.end(group) if group else match.end()
+                if start < 0 or end <= start:
+                    # An optional named group that did not participate reports
+                    # (-1, -1): reporting it would anonymize the wrong
+                    # characters. An empty span would anonymize nothing.
+                    continue
                 results.append(
                     RecognizerResult(
                         entity_type=entity_type,
-                        start=match.start(group) if group else match.start(),
-                        end=match.end(group) if group else match.end(),
+                        start=start,
+                        end=end,
                         score=score,
                     )
                 )

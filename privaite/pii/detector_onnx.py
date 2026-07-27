@@ -246,11 +246,11 @@ class OnnxPrivacyFilterDetector(PIIDetector):
                 revision=self.config.revision,
             )
 
-            providers = self._get_providers()
+            requested = self._get_providers()
             logger.info(
-                "Creating ONNX session (variant=%s, providers=%s)",
+                "Creating ONNX session (variant=%s, requested_providers=%s)",
                 self.config.onnx_variant,
-                providers,
+                requested,
             )
 
             sess_opts = ort.SessionOptions()
@@ -258,8 +258,9 @@ class OnnxPrivacyFilterDetector(PIIDetector):
             self._session = ort.InferenceSession(
                 str(model_path),
                 sess_options=sess_opts,
-                providers=providers,
+                providers=requested,
             )
+            self._log_session_providers(requested)
 
             self._tokenizer = AutoTokenizer.from_pretrained(
                 self.config.model_name,
@@ -270,6 +271,25 @@ class OnnxPrivacyFilterDetector(PIIDetector):
         logger.info("Loading ONNX privacy-filter model (%s)...", self.config.model_name)
         await asyncio.to_thread(_load)
         logger.info("ONNX model loaded successfully")
+
+    def _log_session_providers(self, requested: list[str]) -> None:
+        """Report the execution providers the session ACTUALLY runs on.
+
+        onnxruntime does not fail when a requested provider is absent from the
+        build: it emits a Python UserWarning and builds a CPU session. Logging
+        the requested list alone printed "CUDAExecutionProvider" on a CPU-only
+        machine, so an operator could not tell a working accelerator from a
+        silent fallback."""
+        active = list(self._session.get_providers())
+        missing = [provider for provider in requested if provider not in active]
+        if missing:
+            logger.warning(
+                "Requested ONNX execution provider(s) %s not available in this "
+                "onnxruntime build; the session runs on %s",
+                missing,
+                active,
+            )
+        logger.info("ONNX session providers: %s", active)
 
     def _get_providers(self) -> list[str]:
         device = self.config.device
@@ -292,6 +312,8 @@ class OnnxPrivacyFilterDetector(PIIDetector):
             return ["CUDAExecutionProvider", "CPUExecutionProvider"]
         if device in ("coreml", "mps"):
             return ["CoreMLExecutionProvider", "CPUExecutionProvider"]
+        # Only "cpu" reaches here: the config schema refuses every other value at
+        # boot, so this is no longer a silent catch-all for typos.
         return ["CPUExecutionProvider"]
 
     async def detect(self, text: str, language: str = "en") -> list[PIIEntity]:

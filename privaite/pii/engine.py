@@ -97,10 +97,14 @@ class PIIEngine:
         if detectors.presidio.enabled:
             if not detectors.presidio.entities:
                 return None  # full Presidio registry: could emit nearly any type
+            from privaite.pii.detector_presidio import builtin_recognizer_entity_types
+
             producible |= set(detectors.presidio.entities)
-            # Custom patterns run inside the Presidio detector and are exempt
-            # from its entity allowlist.
+            # Custom patterns and the recognizers PrivAiTe registers itself run
+            # inside the Presidio detector and are exempt from its entity
+            # allowlist, so they widen what it can emit.
             producible |= {p.entity_type for p in self.config.custom_patterns}
+            producible |= builtin_recognizer_entity_types()
         for cfg in enabled_ml:
             if not cfg.label_mapping:
                 return None  # unknown label set: treat as able to emit anything

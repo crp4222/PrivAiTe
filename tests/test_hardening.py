@@ -84,6 +84,81 @@ async def test_custom_pattern_survives_presidio_entity_allowlist():
     assert any(e.entity_type == "CUSTOMER_ID" for e in entities)
 
 
+@pytest.mark.asyncio
+async def test_registered_recognizer_is_never_dead_under_a_preset():
+    # ContextualLocationRecognizer emits only LOCATION, a type the onnx/max
+    # preset allowlist does not contain: it was registered on every analyzer
+    # and filtered out of every result, i.e. dead code under the DEFAULT
+    # preset. Every recognizer PrivAiTe registers must be able to contribute
+    # its own types, or the next one to emit a filtered type (SECRET, say)
+    # dies just as silently.
+    from privaite.config.schema import _ONNX_PRESIDIO_ENTITIES
+    from privaite.pii.detector_presidio import PresidioDetector, builtin_recognizer_entity_types
+
+    assert "LOCATION" not in _ONNX_PRESIDIO_ENTITIES
+    assert "LOCATION" in builtin_recognizer_entity_types()
+
+    detector = PresidioDetector(
+        PresidioDetectorConfig(
+            enabled=True, languages=["en"], entities=list(_ONNX_PRESIDIO_ENTITIES)
+        )
+    )
+    await detector.initialize()
+
+    registered = {t for types in detector._own_recognizers.values() for t in types}
+    assert builtin_recognizer_entity_types() <= registered
+
+    entities = await detector.detect("She lives in Bordeaux since 2019.", "en")
+    assert any(e.entity_type == "LOCATION" for e in entities)
+
+
+def test_block_entities_gate_accepts_a_type_only_our_recognizers_emit():
+    # The startup check refuses a block_entities type no enabled detector can
+    # emit. It derived Presidio's producible types from the entity allowlist
+    # alone, so once the contextual location recognizer is no longer dead, a
+    # config blocking LOCATION on a Presidio-only allowlist would have been
+    # refused at boot for a gate that does fire.
+    config = PIIConfig(
+        enabled=True,
+        preset=None,
+        detectors=DetectorsConfig(
+            presidio=PresidioDetectorConfig(
+                enabled=True, languages=["en"], entities=["EMAIL_ADDRESS"]
+            )
+        ),
+        block_entities=["LOCATION"],
+    )
+    engine = PIIEngine(config)
+    engine._validate_block_entities()
+
+    config.block_entities = ["NOT_A_TYPE"]
+    with pytest.raises(ValueError, match="NOT_A_TYPE"):
+        PIIEngine(config)._validate_block_entities()
+
+
+@pytest.mark.asyncio
+async def test_allowlist_still_scopes_presidios_own_recognizers():
+    # Un-deadening our recognizers must NOT widen the preset: their types have
+    # to be requested from the analyzer for them to run at all, which also lets
+    # Presidio's own spaCy NER emit those types. Those stay filtered out, so
+    # the entity allowlist keeps meaning what it says and the published
+    # detection numbers only move by what OUR recognizers add.
+    from privaite.config.schema import _ONNX_PRESIDIO_ENTITIES
+    from privaite.pii.detector_presidio import PresidioDetector
+
+    detector = PresidioDetector(
+        PresidioDetectorConfig(
+            enabled=True, languages=["en"], entities=list(_ONNX_PRESIDIO_ENTITIES)
+        )
+    )
+    await detector.initialize()
+
+    # No contextual-location cue here, so any LOCATION could only come from
+    # Presidio's own recognizers, which the allowlist excludes.
+    entities = await detector.detect("The Paris office ships from Berlin.", "en")
+    assert not any(e.entity_type == "LOCATION" for e in entities)
+
+
 def _format(msg: str) -> str:
     record = logging.LogRecord(
         name="privaite.test",

@@ -1,8 +1,39 @@
 from __future__ import annotations
 
-from typing import Literal
+import re
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+
+# Accelerator selection. An unknown value used to degrade silently: onnxruntime
+# does not fail when an execution provider is missing, it emits a Python
+# UserWarning and builds a CPU session, so `device: "cuda"` on a CPU-only build
+# (or any typo) looked like it worked while every inference ran on the CPU.
+# Refuse the value at boot instead. The message names the accepted forms, never
+# the offending input, so a config error can never echo an interpolated value.
+#
+# The torch-backed detectors (mlmodel, bert_ner, gliner) accept an optional
+# device index ("cuda:1") because torch does. The ONNX runtime selects an
+# execution provider by name, so an index there would silently mean CPU and is
+# refused; "coreml" is the reverse case, an ONNX-only provider name.
+_TORCH_DEVICE_RE = re.compile(r"^(auto|cpu|(cuda|mps)(:\d+)?)$")
+_ONNX_DEVICES = ("auto", "cpu", "cuda", "coreml", "mps")
+
+
+def _check_torch_device(value: str) -> str:
+    if not _TORCH_DEVICE_RE.match(value):
+        raise ValueError("device must be auto, cpu, cuda[:N] or mps[:N]")
+    return value
+
+
+def _check_onnx_device(value: str) -> str:
+    if value not in _ONNX_DEVICES:
+        raise ValueError(f"device must be one of {', '.join(_ONNX_DEVICES)}")
+    return value
+
+
+TorchDevice = Annotated[str, AfterValidator(_check_torch_device)]
+OnnxDevice = Annotated[str, AfterValidator(_check_onnx_device)]
 
 
 class StrictModel(BaseModel):
@@ -87,7 +118,7 @@ class _PrivacyFilterDetectorConfig(StrictModel):
     # Off by default: a PII proxy must not execute code shipped inside a model repo
     # unless the operator explicitly opts in for a custom-code model.
     trust_remote_code: bool = False
-    device: str = "auto"
+    device: TorchDevice = "auto"
     score_threshold: float = 0.5
     label_mapping: dict[str, str] = Field(default_factory=lambda: dict(_PRIVACY_FILTER_LABELS))
 
@@ -98,6 +129,9 @@ class MLModelDetectorConfig(_PrivacyFilterDetectorConfig):
 
 
 class OnnxDetectorConfig(_PrivacyFilterDetectorConfig):
+    # ONNX picks an execution provider, not a torch device: "coreml" is valid
+    # here (an explicit opt-in, never chosen by "auto") and an index is not.
+    device: OnnxDevice = "auto"
     onnx_variant: str = "q4f16"
     max_length: int = 128000
     cache_dir: str | None = None
@@ -108,7 +142,7 @@ class BertNERDetectorConfig(StrictModel):
     model_name: str = "dslim/bert-base-NER"
     # The built-in model is pinned to an immutable commit; None follows main.
     revision: str | None = _BERT_NER_REVISION
-    device: str = "auto"
+    device: TorchDevice = "auto"
     score_threshold: float = 0.5
     label_mapping: dict[str, str] = Field(
         default_factory=lambda: {
@@ -128,7 +162,7 @@ class GlinerDetectorConfig(StrictModel):
     model_name: str = "urchade/gliner_multi_pii-v1"
     # The built-in model is pinned to an immutable commit; None follows main.
     revision: str | None = _GLINER_PII_REVISION
-    device: str = "auto"
+    device: TorchDevice = "auto"
     score_threshold: float = 0.5
     # GLiNER is label-conditioned: it only returns the labels asked for here.
     labels: list[str] = Field(
