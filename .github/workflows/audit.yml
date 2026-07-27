@@ -33,11 +33,11 @@ jobs:
           pip install -e ".[ml,gliner,dev]"
 
       - name: Audit resolved environment
-        # Ignored advisories (keep minimal, one justification per entry):
-        # GHSA-537c-gmf6-5ccf: cryptography wheels bundle a vulnerable OpenSSL,
-        # fixed only in cryptography 48.0.1. presidio-anonymizer (core dependency,
-        # latest 2.2.363) caps cryptography<47, so no floor of ours can reach the
-        # fix. Drop the ignore once presidio allows cryptography>=48.
+        # Ignored advisories (keep minimal, one justification per entry): none.
+        # The GHSA-537c-gmf6-5ccf entry is gone: it existed only while
+        # presidio-anonymizer capped cryptography<47, and 2.2.364 requires
+        # cryptography>=48.0.1, so the freshest resolution our floors allow now
+        # reaches the fixed release on its own.
         run: |
           pip install pip-audit
-          pip-audit --skip-editable --ignore-vuln GHSA-537c-gmf6-5ccf
+          pip-audit --skip-editable

@@ -80,6 +80,8 @@ def _collect_content(events: list[str]) -> str:
             if payload.strip() == "[DONE]":
                 continue
             for choice in json.loads(payload).get("choices", []):
+                if not isinstance(choice, dict):
+                    continue
                 content = choice.get("delta", {}).get("content")
                 if content:
                     out.append(content)
@@ -647,3 +649,329 @@ async def test_streamed_arguments_without_placeholder_are_byte_identical():
     events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
 
     assert _collect_tool_args(events)[0] == raw
+
+
+# ---------------------------------------------------------------------------
+# Held-back text is never dropped: flush onto the finish chunk, drain after the
+# stream. One test per carrier that had no exercised flush/drain path.
+# ---------------------------------------------------------------------------
+
+
+def _tool_args_by_choice(events: list[str]) -> dict[tuple[int, int], str]:
+    """Tool-call argument fragments keyed by (choice index, tool index), so a
+    remainder emitted on the wrong choice is visible."""
+    args: dict[tuple[int, int], str] = {}
+    for payload in _payloads(events):
+        for choice in payload.get("choices", []):
+            c_idx = choice.get("index", 0)
+            for call in choice.get("delta", {}).get("tool_calls") or []:
+                key = (c_idx, call.get("index", 0))
+                frag = (call.get("function") or {}).get("arguments") or ""
+                args[key] = args.get(key, "") + frag
+    return args
+
+
+@pytest.mark.asyncio
+async def test_content_remainder_flushes_onto_the_finish_chunk():
+    # The text ends on a partial placeholder and the finish chunk carries no
+    # content of its own: the held-back tail must ride out on it.
+    mapping = PIIMapping()
+    mapping.add("Marie Dupont", "<PERSON_1>", "PERSON")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [FakeChunk("bye <PERSON_1"), FakeChunk(None, finish_reason="stop")]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    payloads = _payloads(events)
+
+    assert _collect_content(events) == "bye <PERSON_1"
+    # it went out on the finish chunk, not as a synthetic extra event
+    assert payloads[-1]["choices"][0]["finish_reason"] == "stop"
+    assert payloads[-1]["choices"][0]["delta"]["content"] == "<PERSON_1"
+
+
+@pytest.mark.asyncio
+async def test_reasoning_remainder_flushes_onto_the_finish_chunk():
+    mapping = PIIMapping()
+    mapping.add("Marie Dupont", "<PERSON_1>", "PERSON")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [
+        FakeDeltaChunk({"reasoning_content": "the user is <PERSON_1"}),
+        FakeChunk(None, finish_reason="stop"),
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    payloads = _payloads(events)
+
+    assert payloads[-1]["choices"][0]["delta"]["reasoning_content"] == "<PERSON_1"
+    reasoning = "".join(
+        choice.get("delta", {}).get("reasoning_content") or ""
+        for payload in payloads
+        for choice in payload.get("choices", [])
+    )
+    assert reasoning == "the user is <PERSON_1"
+
+
+@pytest.mark.asyncio
+async def test_tool_argument_remainder_goes_out_before_a_finish_chunk_without_its_slot():
+    # The finish chunk carries no tool_calls slot for that index, so the held
+    # arguments cannot be appended to it: they must go out as a synthetic delta
+    # chunk emitted BEFORE the finish chunk, keeping the fragment order.
+    mapping = PIIMapping()
+    mapping.add("marie@acme.com", "<EMAIL_ADDRESS_1>", "EMAIL_ADDRESS")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [
+        FakeDeltaChunk(
+            {"tool_calls": [{"index": 0, "function": {"arguments": '{"to": "<EMAIL_ADDRES'}}]}
+        ),
+        FakeChunk(None, finish_reason="tool_calls"),
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    payloads = _payloads(events)
+
+    assert _collect_tool_args(events)[0] == '{"to": "<EMAIL_ADDRES'
+    assert payloads[-1]["choices"][0]["finish_reason"] == "tool_calls"
+    assert (
+        payloads[-2]["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"]
+        == "<EMAIL_ADDRES"
+    )
+
+
+@pytest.mark.asyncio
+async def test_finish_chunk_never_flushes_another_choices_tool_arguments():
+    # n>1: choice 0 finishing must not splice choice 1's held-back arguments
+    # into its own stream (they are different answers to the same request).
+    mapping = PIIMapping()
+    mapping.add("marie@acme.com", "<EMAIL_ADDRESS_1>", "EMAIL_ADDRESS")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    def _tool_chunk(choice_index: int, arguments: str) -> RawChunk:
+        return RawChunk(
+            {
+                "model": "m",
+                "choices": [
+                    {
+                        "index": choice_index,
+                        "delta": {
+                            "tool_calls": [{"index": 0, "function": {"arguments": arguments}}]
+                        },
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        )
+
+    def _finish(choice_index: int) -> RawChunk:
+        return RawChunk(
+            {
+                "model": "m",
+                "choices": [{"index": choice_index, "delta": {}, "finish_reason": "stop"}],
+            }
+        )
+
+    chunks = [
+        _tool_chunk(0, '{"a": "<EMAIL_ADDRES'),
+        _tool_chunk(1, '{"b": "<EMAIL_ADDRES'),
+        _finish(0),
+        _finish(1),
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    args = _tool_args_by_choice(events)
+
+    assert args[(0, 0)] == '{"a": "<EMAIL_ADDRES'
+    assert args[(1, 0)] == '{"b": "<EMAIL_ADDRES'
+
+
+@pytest.mark.asyncio
+async def test_function_call_remainder_flushes_onto_the_finish_chunk():
+    mapping = PIIMapping()
+    mapping.add("marie@acme.com", "<EMAIL_ADDRESS_1>", "EMAIL_ADDRESS")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [
+        FakeDeltaChunk({"function_call": {"name": "send", "arguments": '{"to": "<EMAIL_ADDRES'}}),
+        FakeDeltaChunk({"function_call": {"arguments": ""}}, finish_reason="function_call"),
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    payloads = _payloads(events)
+
+    assert _collect_function_call_args(events) == '{"to": "<EMAIL_ADDRES'
+    # appended onto the finish chunk's own function_call, no extra event
+    assert payloads[-1]["choices"][0]["finish_reason"] == "function_call"
+    assert payloads[-1]["choices"][0]["delta"]["function_call"]["arguments"] == "<EMAIL_ADDRES"
+
+
+@pytest.mark.asyncio
+async def test_function_call_remainder_goes_out_before_a_finish_chunk_without_it():
+    mapping = PIIMapping()
+    mapping.add("marie@acme.com", "<EMAIL_ADDRESS_1>", "EMAIL_ADDRESS")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [
+        FakeDeltaChunk({"function_call": {"name": "send", "arguments": '{"to": "<EMAIL_ADDRES'}}),
+        FakeChunk(None, finish_reason="function_call"),
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    payloads = _payloads(events)
+
+    assert _collect_function_call_args(events) == '{"to": "<EMAIL_ADDRES'
+    assert payloads[-1]["choices"][0]["finish_reason"] == "function_call"
+    assert payloads[-2]["choices"][0]["delta"]["function_call"]["arguments"] == "<EMAIL_ADDRES"
+
+
+@pytest.mark.asyncio
+async def test_tool_argument_remainder_drains_when_stream_ends_without_finish():
+    # No finish chunk ever arrives: the drain pass must still emit the held
+    # arguments, on the right choice and tool index.
+    mapping = PIIMapping()
+    mapping.add("marie@acme.com", "<EMAIL_ADDRESS_1>", "EMAIL_ADDRESS")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [
+        FakeDeltaChunk(
+            {"tool_calls": [{"index": 2, "function": {"arguments": '{"to": "<EMAIL_ADDRES'}}]}
+        )
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+
+    assert _tool_args_by_choice(events)[(0, 2)] == '{"to": "<EMAIL_ADDRES'
+    assert events[-1] == "data: [DONE]\n\n"
+
+
+@pytest.mark.asyncio
+async def test_function_call_remainder_drains_when_stream_ends_without_finish():
+    mapping = PIIMapping()
+    mapping.add("marie@acme.com", "<EMAIL_ADDRESS_1>", "EMAIL_ADDRESS")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [FakeDeltaChunk({"function_call": {"name": "send", "arguments": '{"to": "<EMAIL'}})]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+
+    assert _collect_function_call_args(events) == '{"to": "<EMAIL'
+    assert events[-1] == "data: [DONE]\n\n"
+
+
+# ---------------------------------------------------------------------------
+# /v1/completions stream (stream_text_response): same no-drop rule on `text`
+# ---------------------------------------------------------------------------
+
+
+def _text_chunk(text, finish_reason=None, index=0) -> RawChunk:
+    return RawChunk(
+        {
+            "object": "text_completion",
+            "model": "m",
+            "choices": [{"index": index, "text": text, "finish_reason": finish_reason}],
+        }
+    )
+
+
+def _collect_text(events: list[str]) -> str:
+    return "".join(
+        choice.get("text") or ""
+        for payload in _payloads(events)
+        for choice in payload.get("choices", [])
+        if isinstance(choice, dict)
+    )
+
+
+@pytest.mark.asyncio
+async def test_text_completion_remainder_flushes_onto_the_finish_chunk():
+    mapping = PIIMapping()
+    mapping.add("Marie Dupont", "<PERSON_1>", "PERSON")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [_text_chunk("bye <PERSON_1"), _text_chunk(None, finish_reason="stop")]
+
+    events = [
+        ev async for ev in StreamingHandler.stream_text_response(_stream(chunks), mapping, cfg)
+    ]
+    payloads = _payloads(events)
+
+    assert _collect_text(events) == "bye <PERSON_1"
+    assert payloads[-1]["choices"][0]["text"] == "<PERSON_1"
+    assert payloads[-1]["choices"][0]["finish_reason"] == "stop"
+
+
+@pytest.mark.asyncio
+async def test_text_completion_remainder_drains_when_stream_ends_without_finish():
+    mapping = PIIMapping()
+    mapping.add("Marie Dupont", "<PERSON_1>", "PERSON")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [_text_chunk("bye <PERSON_1")]
+
+    events = [
+        ev async for ev in StreamingHandler.stream_text_response(_stream(chunks), mapping, cfg)
+    ]
+
+    assert _collect_text(events) == "bye <PERSON_1"
+    assert _payloads(events)[-1]["object"] == "text_completion"
+    assert events[-1] == "data: [DONE]\n\n"
+
+
+# ---------------------------------------------------------------------------
+# Malformed provider payloads: skip what cannot be parsed, never drop the chunk
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_unparsable_choice_or_tool_call_is_forwarded_not_swallowed():
+    # A choice that is not an object, and a tool_calls entry that is not one,
+    # cannot be restored. They must be left alone and the chunk must still
+    # reach the client: silently dropping a provider chunk loses its payload.
+    mapping = PIIMapping()
+    mapping.add("marie@acme.com", "<EMAIL_ADDRESS_1>", "EMAIL_ADDRESS")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [
+        RawChunk({"model": "m", "choices": ["not-an-object"]}),
+        RawChunk(
+            {
+                "model": "m",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"tool_calls": ["not-an-object"]},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        ),
+        FakeChunk("ok", finish_reason="stop"),
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    payloads = _payloads(events)
+
+    assert payloads[0]["choices"] == ["not-an-object"]
+    assert payloads[1]["choices"][0]["delta"]["tool_calls"] == ["not-an-object"]
+    assert _collect_content(events) == "ok"
+
+
+@pytest.mark.asyncio
+async def test_text_completion_unparsable_choice_is_forwarded_not_swallowed():
+    mapping = PIIMapping()
+    mapping.add("Marie Dupont", "<PERSON_1>", "PERSON")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+
+    chunks = [
+        RawChunk({"object": "text_completion", "model": "m", "choices": ["not-an-object"]}),
+        _text_chunk("hello <PERSON_1>", finish_reason="stop"),
+    ]
+
+    events = [
+        ev async for ev in StreamingHandler.stream_text_response(_stream(chunks), mapping, cfg)
+    ]
+    payloads = _payloads(events)
+
+    assert payloads[0]["choices"] == ["not-an-object"]
+    assert _collect_text(events) == "hello Marie Dupont"

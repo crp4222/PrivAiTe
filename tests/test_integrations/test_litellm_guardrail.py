@@ -917,6 +917,23 @@ async def test_web_search_user_location_scrubbed():
 
 
 @pytest.mark.asyncio
+async def test_aux_fields_share_the_message_mapping():
+    # messages and prediction are scrubbed into ONE reversible map: the same
+    # original value found in both surfaces maps to the same placeholder.
+    gr = _guardrail()
+    data = {
+        "messages": [{"role": "user", "content": "mail marie.dupont@acme.com"}],
+        "prediction": {"type": "content", "content": "mail marie.dupont@acme.com"},
+    }
+    data = await gr.async_pre_call_hook(None, None, data, "completion")
+    fakes = data["metadata"]["privaite_map"]
+    placeholders = [f for f, o in fakes.items() if o == "marie.dupont@acme.com"]
+    assert len(placeholders) == 1
+    assert placeholders[0] in data["messages"][0]["content"]
+    assert placeholders[0] in data["prediction"]["content"]
+
+
+@pytest.mark.asyncio
 async def test_completions_suffix_scrubbed_including_snapshot():
     # Fill-in-the-middle: `suffix` is user text and rides the request verbatim.
     # It is a TOP-LEVEL string, so the shallow body snapshot must be overwritten
@@ -981,6 +998,21 @@ async def test_block_gate_covers_suffix():
     data = {"prompt": "no pii", "suffix": "mail bob@leak.com"}
     with pytest.raises(HTTPException) as ei:
         await gr.async_pre_call_hook(None, None, data, "atext_completion")
+    assert ei.value.status_code == 400
+    assert "bob@leak.com" not in str(ei.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_block_gate_covers_web_search_user_location():
+    # user_location is scrubbed input-side, so the block gate must reject there
+    # too: a blocked type reaching the provider through an auxiliary field is
+    # exactly what the gate exists to stop.
+    from fastapi import HTTPException
+
+    gr = _blocking_guardrail()
+    data = {"web_search_options": {"user_location": {"approximate": {"city": "near bob@leak.com"}}}}
+    with pytest.raises(HTTPException) as ei:
+        await gr.async_pre_call_hook(None, None, data, "completion")
     assert ei.value.status_code == 400
     assert "bob@leak.com" not in str(ei.value.detail)
 
