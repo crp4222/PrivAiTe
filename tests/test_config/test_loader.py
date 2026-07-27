@@ -1,11 +1,21 @@
 import os
 import tempfile
+from pathlib import Path
 
 import pytest
 import yaml
 
 from privaite.config.loader import load_config
 from privaite.config.schema import PrivAiTeConfig
+
+_CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
+
+
+def _write_yaml(data: dict) -> str:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        yaml.dump(data, f)
+        f.flush()
+        return f.name
 
 
 def test_explicitly_requested_missing_file_raises():
@@ -98,6 +108,77 @@ def test_env_var_interpolation():
     finally:
         os.unlink(path)
         del os.environ["TEST_PRIVAITE_KEY"]
+
+
+def test_misspelled_block_entities_key_fails_at_boot():
+    # The typo used to be ignored: the proxy started with an EMPTY policy gate
+    # while the operator believed requests carrying those types were rejected.
+    path = _write_yaml({"pii": {"enabled": True, "block_entites": ["US_SSN"]}})
+    try:
+        with pytest.raises(ValueError) as ei:
+            load_config(path)
+        message = str(ei.value)
+        assert "pii.block_entites" in message
+        assert "unknown config key" in message
+    finally:
+        os.unlink(path)
+
+
+def test_misspelled_gateway_key_fails_at_boot():
+    # `enable` instead of `enabled` used to yield a silently disabled gateway.
+    path = _write_yaml({"gateway": {"enable": True}})
+    try:
+        with pytest.raises(ValueError) as ei:
+            load_config(path)
+        assert "gateway.enable" in str(ei.value)
+    finally:
+        os.unlink(path)
+
+
+def test_unknown_top_level_key_fails_at_boot():
+    path = _write_yaml({"pii_settings": {"enabled": True}})
+    try:
+        with pytest.raises(ValueError, match="unknown config key"):
+            load_config(path)
+    finally:
+        os.unlink(path)
+
+
+def test_provider_litellm_params_stay_permissive():
+    # litellm's per-provider parameters change with every release, so this one
+    # section must keep accepting keys the schema does not know about.
+    path = _write_yaml(
+        {
+            "providers": [
+                {
+                    "model_name": "azure-model",
+                    "litellm_params": {
+                        "model": "azure/gpt-4o",
+                        "api_version": "2024-02-01",
+                        "aws_region_name": "eu-west-3",
+                    },
+                }
+            ]
+        }
+    )
+    try:
+        config = load_config(path)
+        assert config.providers[0].litellm_params.model == "azure/gpt-4o"
+    finally:
+        os.unlink(path)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["privaite.yaml", "privaite.openai.yaml", "privaite.example.yaml"],
+)
+def test_shipped_configs_still_load(name, monkeypatch):
+    # The Docker image boots on one of these three; strict key checking must not
+    # reject anything we ship.
+    monkeypatch.setenv("OPENAI_API_KEY", "test-placeholder-not-a-key")
+    config = load_config(_CONFIG_DIR / name)
+    assert config.providers
+    assert config.pii.enabled is True
 
 
 def test_missing_env_var_raises():

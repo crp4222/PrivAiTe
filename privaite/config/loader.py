@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 from pydantic import ValidationError
+from pydantic_core import ErrorDetails
 
 from privaite.config.schema import PrivAiTeConfig
 
@@ -70,7 +71,16 @@ def load_config(path: str | Path | None = None) -> PrivAiTeConfig:
         # Never echo field VALUES: interpolation already ran, so pydantic's
         # default repr would print interpolated API keys into the startup log.
         locations = "; ".join(
-            ".".join(str(part) for part in err["loc"]) + f" ({err['msg']})"
-            for err in exc.errors(include_input=False, include_url=False)
+            _describe_error(err) for err in exc.errors(include_input=False, include_url=False)
         )
         raise ValueError(f"Invalid config {path}: {locations}") from None
+
+
+def _describe_error(err: ErrorDetails) -> str:
+    location = ".".join(str(part) for part in err["loc"])
+    if err["type"] == "extra_forbidden":
+        # Unknown keys are refused on purpose: a typo used to be ignored, so
+        # `block_entites` left the policy gate empty and a misspelled gateway
+        # key left the gateway off, both silently.
+        return f"{location} (unknown config key, check the spelling)"
+    return f"{location} ({err['msg']})"

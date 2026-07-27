@@ -99,6 +99,33 @@ def test_block_entities_default_empty_and_accepts_list():
     ]
 
 
+def test_unknown_key_is_rejected_by_every_config_section():
+    from privaite.config.schema import (
+        DeanonymizationConfig,
+        GatewayConfig,
+        PrivAiTeConfig,
+        ServerConfig,
+    )
+
+    with pytest.raises(ValueError):
+        PIIConfig(block_entites=["US_SSN"])
+    with pytest.raises(ValueError):
+        GatewayConfig(enable=True)
+    with pytest.raises(ValueError):
+        ServerConfig(prt=9000)
+    with pytest.raises(ValueError):
+        DeanonymizationConfig(fuzzy_treshold=0.9)
+    with pytest.raises(ValueError):
+        PrivAiTeConfig(piii={})
+
+
+def test_litellm_params_keep_accepting_unknown_provider_keys():
+    from privaite.config.schema import LiteLLMParams
+
+    params = LiteLLMParams(model="azure/gpt-4o", api_version="2024-02-01")
+    assert params.model_dump()["api_version"] == "2024-02-01"
+
+
 def test_model_loading_is_supply_chain_safe_by_default():
     # A PII proxy must not execute model-repo code or follow mutable model refs
     # by default, so a rewritten repo cannot silently swap the weights.

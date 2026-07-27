@@ -14,6 +14,13 @@ RUN pip install --no-cache-dir .
 RUN python -m spacy download en_core_web_lg && \
     python -m spacy download fr_core_news_md
 
+# Run as a non-root user. Created BEFORE the model prefetch below so the Hugging
+# Face cache is written into a directory that user owns; otherwise the container
+# would re-download the model on every start.
+RUN useradd --create-home --uid 10001 privaite
+ENV HF_HOME=/home/privaite/.cache/huggingface
+USER privaite
+
 # Pre-download the default ONNX Privacy Filter model and tokenizer so the
 # container starts fast and works offline from the first request.
 RUN python -c "from privaite.config.schema import OnnxDetectorConfig; from privaite.pii.detector_onnx import download_onnx_model; config = OnnxDetectorConfig(); download_onnx_model(repo_id=config.model_name, revision=config.revision)" && \
@@ -23,8 +30,11 @@ COPY config/ config/
 
 EXPOSE 8400
 
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD curl -f http://localhost:8400/health || exit 1
+# /ready, not /health: /health is a static dict that answers ok even when the
+# PII engine is missing and every request 502s. /ready returns 503 until the
+# engine is up. The start period covers the first-run model load.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=3 \
+    CMD curl -f http://localhost:8400/ready || exit 1
 
 # Config selection, in order: a mounted config/privaite.yaml wins; otherwise, if
 # OPENAI_API_KEY is set, the drop-in OpenAI config is used (docker run -e

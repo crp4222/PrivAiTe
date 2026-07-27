@@ -2,10 +2,23 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class ServerConfig(BaseModel):
+class StrictModel(BaseModel):
+    """Base for every config section: an unknown key is a startup error.
+
+    Pydantic ignores unknown keys by default, so a typo such as `block_entites`
+    used to load fine and leave the real `block_entities` gate empty, and a
+    misspelled gateway key left the gateway off. That is exactly the silent
+    degradation invariant #6 forbids: unsafe or misunderstood config must fail
+    at boot, never quietly do something else.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ServerConfig(StrictModel):
     host: str = "0.0.0.0"
     port: int = 8400
     workers: int = 1
@@ -13,7 +26,7 @@ class ServerConfig(BaseModel):
     max_request_bytes: int = 10_000_000
 
 
-class AuthConfig(BaseModel):
+class AuthConfig(StrictModel):
     enabled: bool = True
 
 
@@ -22,15 +35,19 @@ class LiteLLMParams(BaseModel):
     api_key: str | None = None
     api_base: str | None = None
 
-    model_config = {"extra": "allow"}
+    # The ONE deliberately permissive section: these are passed straight to
+    # litellm, whose per-provider parameters (api_version, aws_region_name,
+    # vertex_project, timeouts...) change with every litellm release. Forbidding
+    # unknown keys here would reject valid provider configs.
+    model_config = ConfigDict(extra="allow")
 
 
-class ProviderConfig(BaseModel):
+class ProviderConfig(StrictModel):
     model_name: str
     litellm_params: LiteLLMParams
 
 
-class PresidioDetectorConfig(BaseModel):
+class PresidioDetectorConfig(StrictModel):
     enabled: bool = True
     languages: list[str] = Field(default_factory=lambda: ["fr", "en"])
     score_threshold: float = 0.4
@@ -58,7 +75,7 @@ _BERT_NER_REVISION = "d1a3e8f13f8c3566299d95fcfc9a8d2382a9affc"
 _GLINER_PII_REVISION = "1fcf13e85f4eef5394e1fcd406cf2ca9ea82351d"
 
 
-class _PrivacyFilterDetectorConfig(BaseModel):
+class _PrivacyFilterDetectorConfig(StrictModel):
     """Shared config for the two openai/privacy-filter backends; they differ only in
     runtime knobs (ONNX variant vs torch dtype/cache)."""
 
@@ -86,7 +103,7 @@ class OnnxDetectorConfig(_PrivacyFilterDetectorConfig):
     cache_dir: str | None = None
 
 
-class BertNERDetectorConfig(BaseModel):
+class BertNERDetectorConfig(StrictModel):
     enabled: bool = False
     model_name: str = "dslim/bert-base-NER"
     # The built-in model is pinned to an immutable commit; None follows main.
@@ -102,7 +119,7 @@ class BertNERDetectorConfig(BaseModel):
     )
 
 
-class GlinerDetectorConfig(BaseModel):
+class GlinerDetectorConfig(StrictModel):
     enabled: bool = False
     # GLiNER trained on independent (non-AI4Privacy) synthetic data. Adding it to
     # the onnx suite (the `max` preset) raises out-of-distribution recall; see the
@@ -153,7 +170,7 @@ class GlinerDetectorConfig(BaseModel):
     )
 
 
-class DetectorsConfig(BaseModel):
+class DetectorsConfig(StrictModel):
     presidio: PresidioDetectorConfig = Field(default_factory=PresidioDetectorConfig)
     mlmodel: MLModelDetectorConfig = Field(default_factory=MLModelDetectorConfig)
     onnx: OnnxDetectorConfig = Field(default_factory=OnnxDetectorConfig)
@@ -161,18 +178,18 @@ class DetectorsConfig(BaseModel):
     gliner: GlinerDetectorConfig = Field(default_factory=GlinerDetectorConfig)
 
 
-class EntityOverride(BaseModel):
+class EntityOverride(StrictModel):
     method: str = "placeholder"
     masking_char: str = "*"
 
 
-class AnonymizationConfig(BaseModel):
+class AnonymizationConfig(StrictModel):
     method: str = "placeholder"
     faker_locale: list[str] = Field(default_factory=lambda: ["fr_FR", "en_US"])
     entity_overrides: dict[str, EntityOverride] = Field(default_factory=dict)
 
 
-class DeanonymizationConfig(BaseModel):
+class DeanonymizationConfig(StrictModel):
     enabled: bool = True
     # Fuzzy matching catches placeholders the model re-typed imperfectly, at the
     # cost of a small wrong-substitution risk on lookalike spans, so it is opt-in.
@@ -180,7 +197,7 @@ class DeanonymizationConfig(BaseModel):
     fuzzy_threshold: float = 0.85
 
 
-class DetectionCacheConfig(BaseModel):
+class DetectionCacheConfig(StrictModel):
     # Engine-level cache of merged detection results, keyed on the exact leaf
     # text. Agent CLIs (Claude Code, Codex) resend the whole conversation every
     # turn, so without it the proxy re-scans mostly identical bytes: O(n^2)
@@ -205,7 +222,7 @@ class DetectionCacheConfig(BaseModel):
     ttl_seconds: int = Field(default=1800, ge=1)
 
 
-class InspectConfig(BaseModel):
+class InspectConfig(StrictModel):
     # Dry-run inspection endpoint (POST /v1/pii/inspect): returns the detections
     # for a caller-supplied text WITHOUT forwarding anything to any provider and
     # without logging any value. The caller already knows the text it sent, so
@@ -214,13 +231,13 @@ class InspectConfig(BaseModel):
     enabled: bool = False
 
 
-class CustomPatternConfig(BaseModel):
+class CustomPatternConfig(StrictModel):
     pattern: str
     entity_type: str
     score: float = 0.9
 
 
-class PassthroughConfig(BaseModel):
+class PassthroughConfig(StrictModel):
     system_messages: bool = False
     tool_calls: bool = False
 
@@ -240,7 +257,7 @@ _ONNX_PRESIDIO_ENTITIES = [
 ]
 
 
-class PIIConfig(BaseModel):
+class PIIConfig(StrictModel):
     enabled: bool = True
     # Default to the full ONNX suite (~84.5% recall on the benchmark, ~749ms):
     # it detects everything the light preset does plus secrets and passwords.
@@ -312,12 +329,12 @@ class PIIConfig(BaseModel):
             )
 
 
-class LoggingConfig(BaseModel):
+class LoggingConfig(StrictModel):
     format: str = "json"
     level: str = "info"
 
 
-class GatewayUpstreamConfig(BaseModel):
+class GatewayUpstreamConfig(StrictModel):
     # The provider API root INCLUDING its version prefix; the gateway appends the
     # protocol's own suffix ("/messages", "/responses"). Codex subscription
     # traffic is served from https://chatgpt.com/backend-api/codex.
@@ -331,7 +348,7 @@ class GatewayUpstreamConfig(BaseModel):
     forward_headers: list[str] | None = None
 
 
-class GatewayConfig(BaseModel):
+class GatewayConfig(StrictModel):
     # Opt-in agent-CLI gateway: relays Anthropic Messages and OpenAI Responses
     # traffic through the same scrub/restore engine. The client authenticates
     # itself to the upstream with its own token; PrivAiTe neither injects nor
@@ -346,7 +363,7 @@ class GatewayConfig(BaseModel):
     )
 
 
-class PrivAiTeConfig(BaseModel):
+class PrivAiTeConfig(StrictModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     providers: list[ProviderConfig] = Field(default_factory=list)

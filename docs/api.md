@@ -15,8 +15,8 @@ OpenAI-compatible:
 | `POST /v1/embeddings` | Embeddings (anonymized, no de-anonymization) |
 | `POST /v1/pii/inspect` | Dry-run detection preview (off by default, see [verify.md](verify.md)) |
 | `GET /v1/models` | List configured models |
-| `GET /health` | Health check |
-| `GET /ready` | Readiness check |
+| `GET /health` | Liveness: the process answers (static, reads no state) |
+| `GET /ready` | Readiness: `200` when the proxy can serve, `503` when it cannot |
 | `GET /stats` | PII detection stats per session |
 
 With [gateway mode](gateway.md) enabled (opt-in, off by default), the agent CLI
@@ -38,6 +38,23 @@ Scanned before anything is forwarded to the provider:
 NOT scanned (know your surface): `messages[].name`, top-level fields like `user` and `metadata`, and `tools`/`functions` definitions are forwarded as-is; JSON object keys inside tool arguments are never rewritten (masking parameter names would break the tool schema). Keep PII out of those fields, or strip them upstream.
 
 On the way back, the original values are restored in `message.content`, the reasoning trace, `message.refusal`, the audio `transcript`, and in returned `tool_calls` (including the legacy `function_call`), in both non-streaming and streaming responses. Set `pii.passthrough.tool_calls: true` to forward tool-call arguments unchanged.
+
+## Health and readiness
+
+`/health` is liveness only: a static `{"status": "ok"}` that reads no state, so
+it answers `ok` even when nothing works. Probe `/ready` instead (the Docker
+image's `HEALTHCHECK` does):
+
+```json
+{"ready": true, "checks": {"providers_configured": true, "pii_engine_ready": true},
+ "pii": "ready", "gateway_enabled": false}
+```
+
+It returns `503` unless the proxy can actually serve: a provider must be
+configured (or gateway mode enabled, which needs none), and the PII engine must
+be up. `pii` says which case you are in: `ready`, `initializing`, `missing` (PII
+is enabled but no engine is attached, so nothing would be scrubbed), or
+`disabled` (`pii.enabled: false`, an operator decision, which stays ready).
 
 ## Strict mode
 

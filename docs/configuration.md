@@ -11,6 +11,20 @@ Everything below goes in your `privaite.yaml` (`python -m privaite --config priv
 The [README quick start](https://github.com/crp4222/PrivAiTe#quick-start) has the minimal
 working file; this page covers every knob.
 
+## Unknown keys fail at boot
+
+Every section is validated strictly: a key PrivAiTe does not know refuses
+startup and names the offending path, rather than being ignored.
+
+```
+ValueError: Invalid config privaite.yaml: pii.block_entites (unknown config key, check the spelling)
+```
+
+That typo used to start a proxy with an **empty** policy gate while the operator
+believed those types were rejected, and a `gateway: enable:` typo used to leave
+the gateway silently off. The single exception is `litellm_params`, which is
+handed to LiteLLM as-is and therefore accepts any provider parameter.
+
 ## Server
 
 ```yaml
