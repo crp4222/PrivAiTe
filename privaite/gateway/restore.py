@@ -18,7 +18,7 @@ import httpx
 from privaite.gateway.protocols import Channel, EventPlan, ProtocolSpec
 from privaite.pii.engine import PIIEngine, PIIProcessingError
 from privaite.pii.mapping import PIIMapping
-from privaite.streaming.buffer import StreamingDeAnonymizer
+from privaite.streaming.buffer import StreamingDeAnonymizer, json_escaped_mapping
 
 logger = logging.getLogger("privaite.gateway.restore")
 
@@ -65,25 +65,6 @@ def _restore_json_arguments(engine: PIIEngine, arguments: str, mapping: PIIMappi
     return json.dumps(restored, ensure_ascii=False)
 
 
-def _json_escape(value: str) -> str:
-    """The JSON string-literal encoding of value, without the surrounding
-    quotes: what a restored original must look like when spliced into streamed
-    JSON fragments."""
-    return json.dumps(value, ensure_ascii=False)[1:-1]
-
-
-def _json_escaped_mapping(mapping: PIIMapping) -> PIIMapping:
-    """A derived mapping whose originals are JSON-string-escaped, for holdback
-    buffers restoring inside JSON source text. The fakes are left as-is:
-    placeholders contain no JSON-escaping characters, so they appear literally
-    in the fragments (a fake that does escape would never match either way,
-    with or without this derivation)."""
-    escaped = PIIMapping()
-    for fake, original in mapping.get_all_fakes().items():
-        escaped.add(_json_escape(original), fake, mapping.get_entity_type(original) or "")
-    return escaped
-
-
 def _sse_block(lines: list[str]) -> str:
     return "\n".join(lines) + "\n\n"
 
@@ -104,7 +85,7 @@ class _SSERestorer:
             # A JSON-fragment channel (streamed tool arguments) restores with
             # escaped originals, so the spliced value stays a valid piece of
             # the JSON string literal it lands in.
-            mapping = _json_escaped_mapping(self._mapping) if json_fragment else self._mapping
+            mapping = json_escaped_mapping(self._mapping) if json_fragment else self._mapping
             buffer = self._buffers[channel] = StreamingDeAnonymizer(mapping)
         return buffer.feed(fragment)
 

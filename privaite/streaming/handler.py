@@ -8,7 +8,7 @@ from typing import Any
 from privaite.config.schema import DeanonymizationConfig
 from privaite.pii.engine import PIIProcessingError
 from privaite.pii.mapping import PIIMapping
-from privaite.streaming.buffer import StreamingDeAnonymizer
+from privaite.streaming.buffer import StreamingDeAnonymizer, json_escaped_mapping
 from privaite.streaming.sse import (
     create_chunk_dict,
     create_delta_chunk,
@@ -94,11 +94,20 @@ class StreamingHandler:
         func_bufs: dict[int, StreamingDeAnonymizer] = {}
         finished: set[int] = set()
         model_name = ""
+        json_mapping: PIIMapping | None = None
 
-        def _buf(store: dict, key: Any) -> StreamingDeAnonymizer:
+        def _buf(store: dict, key: Any, json_fragment: bool = False) -> StreamingDeAnonymizer:
+            # Argument fragments are JSON source text: restore them with escaped
+            # originals so a value carrying a quote, a backslash or a newline
+            # stays a valid piece of the JSON string literal it lands in
+            # (built once per stream, and only when such a fragment shows up).
+            nonlocal json_mapping
             buf = store.get(key)
             if buf is None:
-                buf = store[key] = StreamingDeAnonymizer(mapping)  # type: ignore[arg-type]
+                if json_fragment and json_mapping is None:
+                    json_mapping = json_escaped_mapping(mapping)  # type: ignore[arg-type]
+                source = json_mapping if json_fragment else mapping
+                buf = store[key] = StreamingDeAnonymizer(source)  # type: ignore[arg-type]
             return buf
 
         def _flush_into_delta(idx: int, delta: dict, pre_events: list[dict]) -> None:
@@ -203,11 +212,11 @@ class StreamingHandler:
                         fn = call.get("function") or {}
                         if fn.get("arguments"):
                             fn["arguments"] = _buf(
-                                tool_bufs, (idx, call.get("index", 0) or 0)
+                                tool_bufs, (idx, call.get("index", 0) or 0), json_fragment=True
                             ).feed(fn["arguments"])
                     function_call = delta.get("function_call")
                     if isinstance(function_call, dict) and function_call.get("arguments"):
-                        function_call["arguments"] = _buf(func_bufs, idx).feed(
+                        function_call["arguments"] = _buf(func_bufs, idx, json_fragment=True).feed(
                             function_call["arguments"]
                         )
 

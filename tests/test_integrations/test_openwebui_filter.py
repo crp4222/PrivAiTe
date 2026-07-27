@@ -370,3 +370,36 @@ async def test_inlet_failure_clears_map_and_aborts_before_returning_body(monkeyp
 
     assert body["messages"][0]["content"] == "Marie Dupont"
     assert "privaite_map" not in meta
+
+
+@pytest.mark.asyncio
+async def test_outlet_output_arguments_stay_valid_json_with_special_chars():
+    # A multi-line address is enough to produce this: the stock preset emits
+    # spans that span a line break (see tests/test_pii/test_stock_preset_spans.py),
+    # and a Windows/UNC path carries backslashes. Spliced raw into an arguments
+    # string, each of those characters breaks the client's json.loads.
+    original = '12 "B" Street\\Unit 7\nParis'
+    module = _load_filter()
+    flt = module.Filter()
+    flt.valves.preset = "light"
+    flt.valves.languages = "en"
+
+    meta: dict = {"privaite_map": {"<LOCATION_1>": original}}
+    raw = '{"b":1,"a":"x\\u00e9"}'
+    output = [
+        {"type": "function_call", "name": "ship", "arguments": '{"to": "<LOCATION_1>"}'},
+        {"type": "function_call", "name": "noop", "arguments": raw},
+        {"type": "function_call", "name": "tour", "arguments": '{"stops": ["<LOCATION_1>", 7]}'},
+        # Not JSON: the plain string restore stands, unescaped.
+        {"type": "function_call", "name": "plain", "arguments": "to=<LOCATION_1>"},
+    ]
+    reply = {"messages": [{"role": "assistant", "content": "", "output": output}]}
+
+    out = await flt.outlet(reply, meta)
+    restored = out["messages"][0]["output"]
+
+    assert json.loads(restored[0]["arguments"]) == {"to": original}
+    # Nothing to restore in the second one: its exact bytes must survive.
+    assert restored[1]["arguments"] == raw
+    assert json.loads(restored[2]["arguments"]) == {"stops": [original, 7]}
+    assert restored[3]["arguments"] == f"to={original}"

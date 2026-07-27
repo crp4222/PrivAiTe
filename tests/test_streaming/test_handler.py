@@ -580,3 +580,70 @@ async def test_audio_transcript_remainder_drains_when_stream_ends_without_finish
     )
     assert transcript == "bye <PERSON_1"
     assert events[-1] == "data: [DONE]\n\n"
+
+
+# ---------------------------------------------------------------------------
+# Restored values spliced into streamed JSON source text
+# ---------------------------------------------------------------------------
+
+# A multi-line address is enough to produce this: the stock preset emits LOCATION
+# spans that span a line break (see tests/test_pii/test_stock_preset_spans.py),
+# and a Windows/UNC path carries backslashes. Spliced raw into an arguments
+# fragment, each of those characters breaks the client's json.loads.
+_SPECIALS_ORIGINAL = '12 "B" Street\\Unit 7\nParis'
+
+
+@pytest.mark.asyncio
+async def test_streamed_tool_arguments_stay_valid_json_with_special_chars():
+    mapping = PIIMapping()
+    mapping.add(_SPECIALS_ORIGINAL, "<LOCATION_1>", "LOCATION")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+    # the placeholder is split across two argument deltas
+    chunks = [
+        FakeDeltaChunk({"tool_calls": [{"index": 0, "function": {"arguments": '{"to": "<LOCA'}}]}),
+        FakeDeltaChunk(
+            {"tool_calls": [{"index": 0, "function": {"arguments": 'TION_1>", "urgent": true}'}}]}
+        ),
+        FakeChunk("", finish_reason="tool_calls"),
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    args = _collect_tool_args(events)
+
+    assert json.loads(args[0]) == {"to": _SPECIALS_ORIGINAL, "urgent": True}
+    assert "<LOCATION_1>" not in args[0]
+
+
+@pytest.mark.asyncio
+async def test_streamed_function_call_arguments_stay_valid_json_with_special_chars():
+    mapping = PIIMapping()
+    mapping.add(_SPECIALS_ORIGINAL, "<LOCATION_1>", "LOCATION")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+    chunks = [
+        FakeDeltaChunk({"function_call": {"name": "ship", "arguments": '{"to": "<LOCA'}}),
+        FakeDeltaChunk({"function_call": {"arguments": 'TION_1>"}'}}),
+        FakeChunk("", finish_reason="function_call"),
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+    restored = _collect_function_call_args(events)
+
+    assert json.loads(restored) == {"to": _SPECIALS_ORIGINAL}
+
+
+@pytest.mark.asyncio
+async def test_streamed_arguments_without_placeholder_are_byte_identical():
+    # The JSON-escaped restore must not touch fragments carrying no placeholder:
+    # a provider's exact bytes (whitespace, key order, its own escapes) survive.
+    mapping = PIIMapping()
+    mapping.add(_SPECIALS_ORIGINAL, "<LOCATION_1>", "LOCATION")
+    cfg = DeanonymizationConfig(enabled=True, fuzzy_matching=False)
+    raw = '{"b":1,"a":"x\\u00e9\\n"}'
+    chunks = [
+        FakeDeltaChunk({"tool_calls": [{"index": 0, "function": {"arguments": raw}}]}),
+        FakeChunk("", finish_reason="tool_calls"),
+    ]
+
+    events = [ev async for ev in StreamingHandler.stream_response(_stream(chunks), mapping, cfg)]
+
+    assert _collect_tool_args(events)[0] == raw

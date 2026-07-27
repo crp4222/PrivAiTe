@@ -1294,3 +1294,108 @@ async def test_instructions_not_scanned_when_nothing_is_blocked():
     out = await gr.async_pre_call_hook(None, None, data, "aresponses")
     assert out["instructions"] == instructions
     assert not (out.get("metadata") or {}).get("privaite_map")
+
+
+# ---------------------------------------------------------------------------
+# Restored values spliced into tool-call arguments (JSON source text)
+# ---------------------------------------------------------------------------
+
+# A multi-line address is enough to produce this: the stock preset emits spans
+# that span a line break (see tests/test_pii/test_stock_preset_spans.py), and a
+# Windows/UNC path carries backslashes. Spliced raw into an arguments string,
+# each of those characters breaks the client's json.loads.
+_SPECIALS_ORIGINAL = '12 "B" Street\\Unit 7\nParis'
+_SPECIALS_MAP = {"<LOCATION_1>": _SPECIALS_ORIGINAL}
+
+
+@pytest.mark.asyncio
+async def test_post_call_tool_arguments_stay_valid_json_with_special_chars():
+    gr = _guardrail()
+    data = {"metadata": {"privaite_map": dict(_SPECIALS_MAP)}}
+    message = types.SimpleNamespace(
+        content=None,
+        tool_calls=[
+            types.SimpleNamespace(
+                function=types.SimpleNamespace(arguments='{"to": "<LOCATION_1>", "urgent": true}')
+            ),
+            types.SimpleNamespace(
+                function=types.SimpleNamespace(arguments='{"stops": ["<LOCATION_1>", 7]}')
+            ),
+            # Not JSON: the plain string restore stands, unescaped.
+            types.SimpleNamespace(function=types.SimpleNamespace(arguments="to=<LOCATION_1>")),
+        ],
+        function_call=types.SimpleNamespace(arguments='{"to": "<LOCATION_1>"}'),
+    )
+    response = types.SimpleNamespace(choices=[types.SimpleNamespace(message=message)])
+
+    out = await gr.async_post_call_success_hook(data, None, response)
+    restored = out.choices[0].message
+
+    assert json.loads(restored.tool_calls[0].function.arguments) == {
+        "to": _SPECIALS_ORIGINAL,
+        "urgent": True,
+    }
+    assert json.loads(restored.tool_calls[1].function.arguments) == {
+        "stops": [_SPECIALS_ORIGINAL, 7]
+    }
+    assert restored.tool_calls[2].function.arguments == f"to={_SPECIALS_ORIGINAL}"
+    assert json.loads(restored.function_call.arguments) == {"to": _SPECIALS_ORIGINAL}
+
+
+@pytest.mark.asyncio
+async def test_post_call_responses_arguments_stay_valid_json_with_special_chars():
+    gr = _guardrail()
+    data = {"metadata": {"privaite_map": dict(_SPECIALS_MAP)}}
+    raw = '{"b":1,"a":"x\\u00e9"}'
+    response = types.SimpleNamespace(
+        choices=None,
+        output=[
+            {"type": "function_call", "arguments": '{"to": "<LOCATION_1>"}'},
+            {"type": "function_call", "arguments": raw},
+        ],
+    )
+
+    out = await gr.async_post_call_success_hook(data, None, response)
+
+    assert json.loads(out.output[0]["arguments"]) == {"to": _SPECIALS_ORIGINAL}
+    # Nothing to restore in the second one: its exact bytes must survive.
+    assert out.output[1]["arguments"] == raw
+
+
+@pytest.mark.asyncio
+async def test_streaming_tool_arguments_stay_valid_json_with_special_chars():
+    gr = _guardrail()
+    data = {"metadata": {"privaite_map": dict(_SPECIALS_MAP)}}
+
+    def _chunk(args, finish=None):
+        return types.SimpleNamespace(
+            choices=[
+                types.SimpleNamespace(
+                    index=0,
+                    delta=types.SimpleNamespace(
+                        content=None,
+                        tool_calls=[
+                            types.SimpleNamespace(
+                                index=0, function=types.SimpleNamespace(arguments=args)
+                            )
+                        ],
+                        function_call=None,
+                    ),
+                    finish_reason=finish,
+                )
+            ]
+        )
+
+    # the placeholder is split across two streamed argument fragments
+    async def _source():
+        yield _chunk('{"to": "<LOCA')
+        yield _chunk('TION_1>", "urgent": true}', finish="stop")
+
+    out = ""
+    async for chunk in gr.async_post_call_streaming_iterator_hook(None, _source(), data):
+        for choice in chunk.choices:
+            for tc in choice.delta.tool_calls or []:
+                if tc.function and tc.function.arguments:
+                    out += tc.function.arguments
+
+    assert json.loads(out) == {"to": _SPECIALS_ORIGINAL, "urgent": True}

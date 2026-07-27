@@ -33,6 +33,7 @@ dot-notation. See integrations/litellm/README.md.
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any, cast
 
 from litellm.integrations.custom_guardrail import CustomGuardrail
@@ -64,6 +65,43 @@ def _obj_set(obj: Any, key: str, value: Any) -> None:
         obj[key] = value
     else:
         setattr(obj, key, value)
+
+
+def _json_escape(value: str) -> str:
+    """The JSON string-literal encoding of value, without the surrounding
+    quotes: what a restored original must look like when spliced into streamed
+    argument fragments. Mirrors privaite.streaming.buffer.json_escape."""
+    return json.dumps(value, ensure_ascii=False)[1:-1]
+
+
+async def _restore_json_tree(engine: Any, value: Any, mapping: Any) -> Any:
+    """Restore every string leaf of a parsed JSON document (keys are not
+    rewritten, mirroring the core engine's walker)."""
+    if isinstance(value, str):
+        return await engine.process_response(value, mapping)
+    if isinstance(value, dict):
+        return {key: await _restore_json_tree(engine, item, mapping) for key, item in value.items()}
+    if isinstance(value, list):
+        return [await _restore_json_tree(engine, item, mapping) for item in value]
+    return value
+
+
+async def _restore_arguments(engine: Any, arguments: str, mapping: Any) -> str:
+    """Restore a tool/function call's `arguments`: a JSON document inside a
+    string. Plain substitution would splice a raw quote, backslash or newline
+    from the original into a JSON string literal and the client's json.loads of
+    the arguments would fail; restore on the parsed tree and re-encode instead
+    (core parity: PIIEngine._deanonymize_arguments). When nothing changes, or
+    the string is not JSON, the previous behaviour is kept byte for byte."""
+    plain = await engine.process_response(arguments, mapping)
+    if plain == arguments:
+        return arguments
+    try:
+        parsed = json.loads(arguments)
+    except ValueError:
+        # Not JSON: the plain string restore is all there is.
+        return plain
+    return json.dumps(await _restore_json_tree(engine, parsed, mapping), ensure_ascii=False)
 
 
 class PrivaiteGuardrail(CustomGuardrail):
@@ -428,12 +466,12 @@ class PrivaiteGuardrail(CustomGuardrail):
                 continue
             args = getattr(fn, "arguments", None)
             if args:
-                fn.arguments = await engine.process_response(args, mapping)
+                fn.arguments = await _restore_arguments(engine, args, mapping)
         function_call = getattr(message, "function_call", None)
         if function_call is not None:
             fc_args = getattr(function_call, "arguments", None)
             if fc_args:
-                function_call.arguments = await engine.process_response(fc_args, mapping)
+                function_call.arguments = await _restore_arguments(engine, fc_args, mapping)
 
     async def async_post_call_success_hook(
         self, data: dict, user_api_key_dict: Any, response: Any
@@ -471,7 +509,7 @@ class PrivaiteGuardrail(CustomGuardrail):
                     _obj_set(block, "text", await engine.process_response(text, mapping))
             args = _obj_get(item, "arguments")
             if isinstance(args, str) and args:
-                _obj_set(item, "arguments", await engine.process_response(args, mapping))
+                _obj_set(item, "arguments", await _restore_arguments(engine, args, mapping))
 
     def _restore_delta_audio(self, delta: Any, index: int, finished: bool, restore) -> None:
         """Feed streamed audio transcript fragments through their own restore
@@ -511,12 +549,14 @@ class PrivaiteGuardrail(CustomGuardrail):
                 tc_index = getattr(tool_call, "index", 0) or 0
                 # Pass `finished` so a fragment that arrives on the same chunk as
                 # finish_reason flushes its held-back tail instead of dropping it.
-                fn.arguments = restore(("tool", index, tc_index), args, finished)
+                # json_fragment: the fragment is JSON source text, so the restored
+                # original must be spliced in JSON-escaped.
+                fn.arguments = restore(("tool", index, tc_index), args, finished, True)
         function_call = getattr(delta, "function_call", None)
         if function_call is not None:
             fc_args = getattr(function_call, "arguments", None)
             if fc_args:
-                function_call.arguments = restore(("fc", index), fc_args, finished)
+                function_call.arguments = restore(("fc", index), fc_args, finished, True)
 
     async def async_post_call_streaming_iterator_hook(
         self, user_api_key_dict: Any, response: Any, request_data: dict
@@ -532,8 +572,15 @@ class PrivaiteGuardrail(CustomGuardrail):
         from privaite.streaming.buffer import StreamingDeAnonymizer
 
         mapping = PIIMapping()
+        # Second mapping for the argument channels: their fragments are JSON
+        # source text, so the original has to arrive JSON-escaped or the
+        # client's parse of the reassembled arguments fails on a quote, a
+        # backslash or a newline. (Placeholders need no escaping, so the fakes
+        # are the same on both sides.)
+        json_mapping = PIIMapping()
         for fake, original in fakes.items():
             mapping.add(original, fake, "PII")
+            json_mapping.add(_json_escape(original), fake, "PII")
 
         # One de-anonymizer buffer per streamed segment, keyed by (kind, choice
         # index, ...). With n>1 the provider interleaves chunks for different
@@ -542,10 +589,11 @@ class PrivaiteGuardrail(CustomGuardrail):
         # across chunks reassembles without mixing segments.
         buffers: dict[tuple, StreamingDeAnonymizer] = {}
 
-        def _restore(key: tuple, text: str, finished: bool) -> str:
+        def _restore(key: tuple, text: str, finished: bool, json_fragment: bool = False) -> str:
             deanon = buffers.get(key)
             if deanon is None:
-                deanon = buffers[key] = StreamingDeAnonymizer(mapping)
+                source = json_mapping if json_fragment else mapping
+                deanon = buffers[key] = StreamingDeAnonymizer(source)
             out = deanon.feed(text) if text else ""
             if finished:
                 out += deanon.flush()

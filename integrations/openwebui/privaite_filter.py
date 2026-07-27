@@ -21,9 +21,41 @@ description: Anonymize or block PII (text, tool calls, multimodal) before it rea
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+
+async def _restore_json_tree(engine: Any, value: Any, mapping: Any) -> Any:
+    """Restore every string leaf of a parsed JSON document (keys are not
+    rewritten, mirroring the core engine's walker)."""
+    if isinstance(value, str):
+        return await engine.process_response(value, mapping)
+    if isinstance(value, dict):
+        return {key: await _restore_json_tree(engine, item, mapping) for key, item in value.items()}
+    if isinstance(value, list):
+        return [await _restore_json_tree(engine, item, mapping) for item in value]
+    return value
+
+
+async def _restore_arguments(engine: Any, arguments: str, mapping: Any) -> str:
+    """Restore a function-call item's `arguments`: a JSON document inside a
+    string. Plain substitution would splice a raw quote, backslash or newline
+    from the original into a JSON string literal and the client's json.loads of
+    the arguments would fail; restore on the parsed tree and re-encode instead
+    (core parity: PIIEngine._deanonymize_arguments). When nothing changes, or
+    the string is not JSON, the previous behaviour is kept byte for byte."""
+    plain = await engine.process_response(arguments, mapping)
+    if plain == arguments:
+        return arguments
+    try:
+        parsed = json.loads(arguments)
+    except ValueError:
+        # Not JSON: the plain string restore is all there is.
+        return plain
+    return json.dumps(await _restore_json_tree(engine, parsed, mapping), ensure_ascii=False)
+
 
 _LANG_MODELS = {
     "en": "en_core_web_lg",
@@ -268,7 +300,7 @@ class Filter:
                 item = {**item, "content": new_parts}
             arguments = item.get("arguments")
             if isinstance(arguments, str) and arguments:
-                restored = await engine.process_response(arguments, mapping)
+                restored = await _restore_arguments(engine, arguments, mapping)
                 if restored != arguments:
                     item = {**item, "arguments": restored}
                     item_changed = True

@@ -1,6 +1,28 @@
 from __future__ import annotations
 
+import json
+
 from privaite.pii.mapping import PIIMapping
+
+
+def json_escape(value: str) -> str:
+    """The JSON string-literal encoding of value, without the surrounding
+    quotes: what a restored original must look like when spliced into streamed
+    JSON fragments (tool-call arguments arrive as JSON source text, so a raw
+    quote, backslash or newline would break the client's parse)."""
+    return json.dumps(value, ensure_ascii=False)[1:-1]
+
+
+def json_escaped_mapping(mapping: PIIMapping) -> PIIMapping:
+    """A derived mapping whose originals are JSON-string-escaped, for holdback
+    buffers restoring inside JSON source text. The fakes are left as-is:
+    placeholders contain no JSON-escaping characters, so they appear literally
+    in the fragments (a fake that does escape would never match either way,
+    with or without this derivation)."""
+    escaped = PIIMapping()
+    for fake, original in mapping.get_all_fakes().items():
+        escaped.add(json_escape(original), fake, mapping.get_entity_type(original) or "")
+    return escaped
 
 
 class _TrieNode:
