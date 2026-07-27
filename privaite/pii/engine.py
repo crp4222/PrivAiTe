@@ -458,6 +458,27 @@ class PIIEngine:
             logger.error("PII document processing failed; request will be blocked")
             raise PIIProcessingError() from None
 
+    async def gate_document(self, value: Any) -> None:
+        """Apply the block_entities gate to a document WITHOUT rewriting it.
+
+        For request fields that are deliberately relayed verbatim: the agent's
+        own prompt (Responses `instructions`, Anthropic `system`). An operator
+        who sets block_entities expects a hard stop on the whole REQUEST, not
+        only on the fields that get rewritten, so those fields are scanned for
+        the gate and the scrubbed copy is thrown away. The mapping is thrown
+        away with it, so nothing here can reach the relayed body or /stats.
+
+        No-op when no type is blocked: the default posture (`block_entities: []`)
+        pays no detection cost and relays exactly what it relayed before.
+
+        Raises PIIBlockedError when a blocked type is present, and the safe
+        PIIProcessingError on a detection failure (fail closed, same policy as
+        scrub_document).
+        """
+        if not self._blocked or not value:
+            return
+        await self.scrub_document(value)
+
     def restore_document(self, value: Any, mapping: PIIMapping | None) -> Any:
         """Restore originals in an arbitrary JSON document (or bare string).
 

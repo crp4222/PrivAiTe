@@ -20,7 +20,9 @@ is not left for a failure spend-log to persist.
 
 If `block_entities` is configured, a request containing any of those PII types is
 rejected with an HTTP 400 in the pre-call hook, before anything is forwarded to the
-model. The error names the offending type(s) only, never the underlying value.
+model. The error names the offending type(s) only, never the underlying value. The
+gate also covers the agent's own prompt (Responses `instructions`, Anthropic
+`system`): those fields are read for the gate only and still relayed verbatim.
 
 It reuses PrivAiTe's engine, so there is no detection or masking logic here.
 
@@ -35,6 +37,10 @@ from typing import Any, cast
 
 from litellm.integrations.custom_guardrail import CustomGuardrail
 from litellm.types.guardrails import GuardrailEventHooks
+
+# Request fields carrying the AGENT's own prompt, not the user's text: relayed
+# to the model verbatim (never rewritten), but still read by the block gate.
+_GATED_VERBATIM_FIELDS = ("instructions", "system")
 
 _LANG_MODELS = {
     "en": "en_core_web_lg",
@@ -254,6 +260,35 @@ class PrivaiteGuardrail(CustomGuardrail):
             prompt[:] = await engine.process_request_value(prompt, mapping)
         return scanned
 
+    def _has_gated_fields(self, data: dict) -> bool:
+        """True when the request carries an agent-prompt field the block gate
+        must read; keeps the pre-call early return from skipping a request whose
+        only text sits there. False unless block_entities is configured, since
+        nothing reads those fields otherwise."""
+        return bool(self.block_entities) and any(
+            data.get(field) for field in _GATED_VERBATIM_FIELDS
+        )
+
+    async def _gate_verbatim_fields(self, data: dict, engine: Any) -> None:
+        """Apply the block_entities gate to the request fields relayed verbatim:
+        the agent's own prompt (Responses `instructions`, Anthropic `system`).
+
+        Mirrors PIIEngine.gate_document on the core side: the field goes through
+        the same choke point and the scrubbed copy is thrown away, so a blocked
+        type rejects the whole request while the prompt still reaches the model
+        unchanged. Without this, an operator who sets block_entities gets a 200
+        whenever the blocked type sits in the prompt instead of a message.
+        No-op unless block_entities is configured, so the default posture reads
+        nothing. (scrub_document and not gate_document: it is the gate, and it
+        works against every privaite release this guardrail already requires.)
+        """
+        if not self.block_entities:
+            return
+        for field in _GATED_VERBATIM_FIELDS:
+            value = data.get(field)
+            if value:
+                await engine.scrub_document(value)
+
     @staticmethod
     def _prompt_variables(data: dict) -> dict | None:
         """Responses prompt-template variables carry user data (the template
@@ -281,6 +316,10 @@ class PrivaiteGuardrail(CustomGuardrail):
         # mirror that would silently drift behind the next gateway hardening.
         from privaite.gateway.scrub import _scrub_data_value, _scrub_responses_item
         from privaite.pii.mapping import PIIMapping
+
+        # Gate first: a blocked type in the agent's own prompt rejects the
+        # request without having touched the caller's dict.
+        await self._gate_verbatim_fields(data, engine)
 
         messages = data.get("messages")
         msg_list = messages if isinstance(messages, list) else []
@@ -338,6 +377,7 @@ class PrivaiteGuardrail(CustomGuardrail):
             and not data.get("input")
             and self._prompt_variables(data) is None
             and not self._has_aux_fields(data)
+            and not self._has_gated_fields(data)
         ):
             return data
 

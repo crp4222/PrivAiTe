@@ -92,6 +92,7 @@ def make_gateway_app(
     deanonymize: bool = True,
     gateway_enabled: bool = True,
     detector: PIIDetector | None = None,
+    block_entities: list[str] | None = None,
 ):
     config = PrivAiTeConfig(
         server=ServerConfig(host="127.0.0.1", port=8400),
@@ -102,6 +103,7 @@ def make_gateway_app(
             detectors=DetectorsConfig(presidio=PresidioDetectorConfig(enabled=False)),
             anonymization=AnonymizationConfig(method="placeholder"),
             deanonymization=DeanonymizationConfig(enabled=deanonymize),
+            block_entities=block_entities or [],
         ),
         gateway=GatewayConfig(enabled=gateway_enabled),
         logging=LoggingConfig(format="text", level="debug"),

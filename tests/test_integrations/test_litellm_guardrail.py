@@ -1198,3 +1198,99 @@ async def test_block_entities_fails_closed_when_privaite_too_old(monkeypatch):
     data = {"messages": [{"role": "user", "content": "bob@example.com"}]}
     with pytest.raises(RuntimeError, match="block_entities"):
         await gr.async_pre_call_hook(None, None, data, "completion")
+
+
+def _blocking_guardrail(types_: list[str] | None = None):
+    module = _load()
+    return module.PrivaiteGuardrail(
+        guardrail_name="privaite",
+        preset="light",
+        languages="en",
+        block_entities=types_ or ["EMAIL_ADDRESS"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_block_entities_covers_responses_instructions():
+    # The agent's own prompt is relayed verbatim by design, but block_entities is
+    # a hard stop on the REQUEST: a blocked type sitting only in `instructions`
+    # must reject with 400, forwarding nothing (gateway parity, engine gate).
+    from fastapi import HTTPException
+
+    gr = _blocking_guardrail()
+    data = {
+        "instructions": "You are Codex, escalate to bob@example.com.",
+        "input": "hello there",
+    }
+    with pytest.raises(HTTPException) as ei:
+        await gr.async_pre_call_hook(None, None, data, "aresponses")
+
+    assert ei.value.status_code == 400
+    detail = ei.value.detail
+    msg = detail["error"] if isinstance(detail, dict) else str(detail)
+    assert "EMAIL_ADDRESS" in msg
+    assert "bob@example.com" not in msg
+
+
+@pytest.mark.asyncio
+async def test_block_entities_covers_anthropic_system():
+    from fastapi import HTTPException
+
+    gr = _blocking_guardrail()
+    data = {
+        "system": "You relay mail for bob@example.com.",
+        "messages": [{"role": "user", "content": "hello there"}],
+    }
+    with pytest.raises(HTTPException) as ei:
+        await gr.async_pre_call_hook(None, None, data, "completion")
+
+    assert ei.value.status_code == 400
+    detail = ei.value.detail
+    msg = detail["error"] if isinstance(detail, dict) else str(detail)
+    assert "EMAIL_ADDRESS" in msg
+    assert "bob@example.com" not in msg
+
+
+@pytest.mark.asyncio
+async def test_block_entities_covers_instructions_only_request():
+    # Nothing but `instructions`: the pre-call early return must not skip the
+    # gate, otherwise the blocked type sails through untouched.
+    from fastapi import HTTPException
+
+    gr = _blocking_guardrail()
+    data = {"instructions": "You are Codex, escalate to bob@example.com."}
+    with pytest.raises(HTTPException) as ei:
+        await gr.async_pre_call_hook(None, None, data, "aresponses")
+    assert ei.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_unblocked_instructions_and_system_relayed_verbatim():
+    # No regression: the gate only rejects. The agent's own prompt keeps its
+    # real values (PERSON is detected there and deliberately NOT rewritten),
+    # while the user text is anonymized as usual.
+    gr = _blocking_guardrail(["US_SSN"])
+    instructions = "You are Codex, assistant of Marie Dupont (marie.dupont@acme.com)."
+    data = {"instructions": instructions, "input": "ping Marie Dupont"}
+    out = await gr.async_pre_call_hook(None, None, data, "aresponses")
+    assert out["instructions"] == instructions
+    assert "Marie Dupont" not in out["input"]
+
+    gr = _blocking_guardrail(["US_SSN"])
+    system = "You relay mail for Marie Dupont (marie.dupont@acme.com)."
+    data = {"system": system, "messages": [{"role": "user", "content": "ping Marie Dupont"}]}
+    out = await gr.async_pre_call_hook(None, None, data, "completion")
+    assert out["system"] == system
+    assert "Marie Dupont" not in json.dumps(out["messages"])
+
+
+@pytest.mark.asyncio
+async def test_instructions_not_scanned_when_nothing_is_blocked():
+    # Default posture (block_entities empty): the agent's own prompt is not read
+    # at all, so a request whose ONLY text is `instructions` stays a passthrough.
+    gr = _guardrail()
+    instructions = "You are Codex, assistant of Marie Dupont (marie.dupont@acme.com)."
+    data = {"instructions": instructions}
+    out = await gr.async_pre_call_hook(None, None, data, "aresponses")
+    assert out["instructions"] == instructions
+    assert not (out.get("metadata") or {}).get("privaite_map")

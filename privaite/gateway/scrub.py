@@ -2,9 +2,14 @@
 
 Only content-bearing subtrees are scanned, matching the documented boundary:
 tool/function definitions, the agent's own `system`/`instructions` prompt, and
-JSON object keys are never touched. Every scanned string still flows through the
-engine's single choke point (PIIEngine._anonymize_text) via scrub_document, so
-the block_entities gate and the fail-closed policy apply unchanged.
+JSON object keys are never REWRITTEN. Every scanned string still flows through
+the engine's single choke point (PIIEngine._anonymize_text) via scrub_document,
+so the block_entities gate and the fail-closed policy apply unchanged.
+
+The agent's own prompt is the one field that is read without being rewritten:
+`system`/`instructions` go through PIIEngine.gate_document, which runs the same
+gate and discards the scrubbed copy. So block_entities rejects the whole request
+wherever the type sits, while the prompt still reaches the provider verbatim.
 """
 
 from __future__ import annotations
@@ -109,6 +114,8 @@ async def scrub_anthropic_request(
     content, text-typed document sources and search_result blocks, plus the
     plaintext fields of any block type this build does not know. Untouched:
     `system`, `tools`/`tool_choice`, thinking blocks and binary media blocks.
+    `system` is still gated (see gate_document): relayed verbatim, but a
+    blocked type found there rejects the request.
     """
     mapping = PIIMapping()
     new_body = dict(body)
@@ -117,6 +124,10 @@ async def scrub_anthropic_request(
         new_body["messages"] = [
             await _scrub_anthropic_message(engine, message, mapping) for message in messages
         ]
+    # The agent's own prompt is relayed as it came in, but block_entities is a
+    # hard policy stop on the REQUEST: an operator who blocks a type must not
+    # get a 200 just because the type sat in `system` instead of a message.
+    await engine.gate_document(body.get("system"))
     return new_body, mapping
 
 
@@ -284,9 +295,10 @@ async def scrub_responses_request(
 ) -> tuple[dict[str, Any], PIIMapping]:
     """Scrub an OpenAI Responses request: `input` item by item (role message,
     tool calls and their outputs, typed actions, bare string) plus
-    `prompt.variables`. Top-level `instructions` stays untouched (the agent's
-    own prompt, parity with the Anthropic `system` field); opaque and binary
-    items are relayed byte-for-byte (see _RESPONSES_OPAQUE_TYPES)."""
+    `prompt.variables`. Top-level `instructions` is relayed untouched (the
+    agent's own prompt, parity with the Anthropic `system` field) but is still
+    gated (see gate_document); opaque and binary items are relayed
+    byte-for-byte (see _RESPONSES_OPAQUE_TYPES)."""
     mapping = PIIMapping()
     new_body = dict(body)
     input_value = body.get("input")
@@ -307,6 +319,8 @@ async def scrub_responses_request(
             for key, value in prompt["variables"].items()
         }
         new_body["prompt"] = new_prompt
+    # Relayed verbatim, still gated: same rule as the Anthropic `system` field.
+    await engine.gate_document(body.get("instructions"))
     return new_body, mapping
 
 

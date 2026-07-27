@@ -957,6 +957,99 @@ async def test_scrub_failure_fails_closed_nothing_forwarded():
 
 
 @pytest.mark.asyncio
+async def test_block_gate_covers_anthropic_system():
+    # The agent's own `system` prompt is relayed verbatim by design, but an
+    # operator who sets block_entities expects a hard stop on the REQUEST, not
+    # only on the fields that get rewritten. A blocked type present ONLY in
+    # `system` must reject with 400 and forward nothing.
+    app, upstream = make_gateway_app(block_entities=["EMAIL_ADDRESS"])
+    async with _client(app) as client:
+        resp = await client.post(
+            "/v1/messages",
+            json={
+                "model": "m",
+                "system": "You relay mail for marie@acme.com.",
+                "messages": [{"role": "user", "content": "hello there"}],
+            },
+        )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "pii_blocked"
+    assert "EMAIL_ADDRESS" in resp.json()["error"]["message"]
+    assert "marie@acme.com" not in resp.json()["error"]["message"]
+    assert upstream.request is None
+
+
+@pytest.mark.asyncio
+async def test_block_gate_covers_anthropic_system_block_list():
+    # `system` also accepts a list of text blocks: the gate must walk it.
+    app, upstream = make_gateway_app(block_entities=["EMAIL_ADDRESS"])
+    async with _client(app) as client:
+        resp = await client.post(
+            "/v1/messages",
+            json={
+                "model": "m",
+                "system": [{"type": "text", "text": "escalate to marie@acme.com"}],
+                "messages": [{"role": "user", "content": "hello there"}],
+            },
+        )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "pii_blocked"
+    assert upstream.request is None
+
+
+@pytest.mark.asyncio
+async def test_block_gate_covers_responses_instructions():
+    app, upstream = make_gateway_app(block_entities=["EMAIL_ADDRESS"])
+    async with _client(app) as client:
+        resp = await client.post(
+            "/v1/responses",
+            json={
+                "model": "m",
+                "instructions": "You are Codex, report to marie@acme.com.",
+                "input": "hello there",
+            },
+        )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "pii_blocked"
+    assert "marie@acme.com" not in resp.json()["error"]["message"]
+    assert upstream.request is None
+
+
+@pytest.mark.asyncio
+async def test_block_gate_leaves_unblocked_system_and_instructions_verbatim():
+    # No regression: the gate only rejects. With block_entities set but no
+    # blocked type present, the agent's own prompt is still relayed byte-for-byte
+    # (PERSON is detected there and deliberately NOT rewritten).
+    app, upstream = make_gateway_app(block_entities=["US_SSN"])
+    system = "You are an agent CLI helping Marie Dupont at marie@acme.com."
+    async with _client(app) as client:
+        resp = await client.post(
+            "/v1/messages",
+            json={
+                "model": "m",
+                "system": system,
+                "messages": [{"role": "user", "content": "ping Marie Dupont"}],
+            },
+        )
+    assert resp.status_code == 200
+    sent = upstream.sent_json()
+    assert sent["system"] == system
+    assert sent["messages"][0]["content"] == "ping <PERSON_1>"
+
+    app, upstream = make_gateway_app(block_entities=["US_SSN"])
+    instructions = "You are Codex, assistant of Marie Dupont (marie@acme.com)."
+    async with _client(app) as client:
+        resp = await client.post(
+            "/v1/responses",
+            json={"model": "m", "instructions": instructions, "input": "ping Marie Dupont"},
+        )
+    assert resp.status_code == 200
+    sent = upstream.sent_json()
+    assert sent["instructions"] == instructions
+    assert sent["input"] == "ping <PERSON_1>"
+
+
+@pytest.mark.asyncio
 async def test_header_hygiene_and_no_token_in_logs(gateway_app, caplog):
     app, upstream = gateway_app
     token = "Bearer sk-ant-supersecret-123456"
