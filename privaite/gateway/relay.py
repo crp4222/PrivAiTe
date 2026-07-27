@@ -22,11 +22,31 @@ logger = logging.getLogger("privaite.gateway.relay")
 # writes are bounded.
 UPSTREAM_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=60.0, pool=10.0)
 
-# Never forwarded upstream, even if an operator lists them: httpx derives them
-# from the connection and payload it actually sends.
+# Never forwarded upstream, even if an operator lists them. httpx derives the
+# connection and payload ones from the request it actually sends. accept-encoding
+# is dropped for a different reason: the gateway must READ the response to
+# restore it, so it may only negotiate an encoding it can decode. Relaying the
+# client's own accept-encoding lets the provider answer in brotli or zstd, which
+# httpx then hands back compressed; the JSON parse fails, restore is silently
+# skipped and the client gets a body it cannot read either (content-encoding is
+# stripped downstream). httpx advertises exactly the decoders it has.
 _NEVER_FORWARD = frozenset(
-    {"host", "content-length", "content-encoding", "transfer-encoding", "connection"}
+    {
+        "host",
+        "content-length",
+        "content-encoding",
+        "transfer-encoding",
+        "connection",
+        "accept-encoding",
+    }
 )
+
+# Forwarded even when an operator's allowlist omits them: the protocols do not
+# work without them (a provider rejects the JSON body with no content-type, the
+# Anthropic Messages API rejects a request with no version header). Dropping one
+# turns a valid request into a 400 that looks like the client's fault.
+# _NEVER_FORWARD still wins over this set.
+_ALWAYS_FORWARD = frozenset({"content-type", "anthropic-version"})
 
 # Stripped from the relayed response: the restored body has a different length
 # and httpx already decoded any content/transfer encoding.
@@ -41,28 +61,32 @@ def create_gateway_client() -> httpx.AsyncClient:
 
 def forward_request_headers(
     incoming: Mapping[str, str], allowlist: Iterable[str] | None
-) -> dict[str, str]:
+) -> list[tuple[str, str]]:
     """Relay the client's request headers verbatim to the upstream.
 
     A transparent gateway must be invisible: the client already chose which
     provider to trust and which headers to send it, and some providers select
     their request schema from a header (a dropped one makes the backend reject
     an otherwise valid body). So by default every incoming header is forwarded
-    except the ones httpx must derive from the connection it opens
-    (_NEVER_FORWARD). An explicit allowlist restricts the set for operators who
-    want it; _NEVER_FORWARD is still stripped in that case.
+    except _NEVER_FORWARD. An explicit allowlist restricts the set for operators
+    who want it; _NEVER_FORWARD is still stripped in that case, and the headers
+    the protocols require (_ALWAYS_FORWARD) are still relayed.
+
+    Returns pairs, not a mapping: a header name may legally appear more than
+    once on the wire (several `anthropic-beta` lines is the common case), and
+    collapsing those into one entry is not a verbatim relay. `incoming` is the
+    request's own header object, whose `items()` yields one entry per wire
+    header rather than one per distinct name.
     """
+    pairs = list(incoming.items())
     if allowlist is None:
-        return {k: v for k, v in incoming.items() if k.lower() not in _NEVER_FORWARD}
-    headers: dict[str, str] = {}
-    for name in allowlist:
-        lowered = name.lower()
-        if lowered in _NEVER_FORWARD:
-            continue
-        value = incoming.get(lowered)
-        if value is not None:
-            headers[lowered] = value
-    return headers
+        return [(name, value) for name, value in pairs if name.lower() not in _NEVER_FORWARD]
+    allowed = {name.lower() for name in allowlist} | _ALWAYS_FORWARD
+    return [
+        (name, value)
+        for name, value in pairs
+        if name.lower() in allowed and name.lower() not in _NEVER_FORWARD
+    ]
 
 
 def relay_response_headers(headers: httpx.Headers) -> dict[str, str]:
@@ -73,7 +97,7 @@ async def send_upstream(
     client: httpx.AsyncClient,
     url: str,
     query: str,
-    headers: dict[str, str],
+    headers: list[tuple[str, str]],
     content: bytes,
 ) -> httpx.Response | JSONResponse:
     """POST the body upstream, always in streaming mode: the caller decides from
