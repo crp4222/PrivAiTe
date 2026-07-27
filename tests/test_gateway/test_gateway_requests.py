@@ -275,6 +275,132 @@ async def test_anthropic_edge_block_shapes_pass_through_without_corruption(gatew
 
 
 @pytest.mark.asyncio
+async def test_anthropic_unknown_block_types_scanned_opaque_fields_untouched(gateway_app):
+    # Same class as the server_tool_use leak: a block type this build does not
+    # know must not be relayed unscanned. Real shapes that were falling through
+    # the fallback: web_search_tool_result (results carry a plaintext title and
+    # url next to an opaque encrypted_content), code_execution_tool_result
+    # (stdout/stderr), and any block the API gains after this release.
+    app, upstream = gateway_app
+    thinking = {"type": "thinking", "thinking": "about Marie Dupont", "signature": "sig-1"}
+    redacted = {"type": "redacted_thinking", "data": "EroBCkYIBRgC-marie@acme.com-blob"}
+    encrypted = "gAAAAAB-marie@acme.com-opaque-do-not-touch"
+    body = {
+        "model": "claude-test",
+        "max_tokens": 64,
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [
+                    thinking,
+                    redacted,
+                    {
+                        "type": "web_search_tool_result",
+                        "tool_use_id": "srvtoolu_1",
+                        "content": [
+                            {
+                                "type": "web_search_result",
+                                "url": "https://intranet.example/people/marie@acme.com",
+                                "title": "profile of Marie Dupont",
+                                "encrypted_content": encrypted,
+                            }
+                        ],
+                    },
+                    {
+                        "type": "code_execution_tool_result",
+                        "tool_use_id": "srvtoolu_2",
+                        # A single nested block, not a list: the web_fetch and
+                        # code_execution results wrap one result object.
+                        "content": {
+                            "type": "code_execution_result",
+                            "stdout": "owner Marie Dupont <marie@acme.com>",
+                            "stderr": "",
+                            "return_code": 0,
+                        },
+                    },
+                    {
+                        "type": "future_block_from_a_later_api",
+                        "id": "fb_1",
+                        "text": "note about Marie Dupont",
+                        "input": {"to": "marie@acme.com", "count": 3},
+                    },
+                ],
+            }
+        ],
+    }
+    async with _client(app) as client:
+        resp = await client.post("/v1/messages", json=body)
+
+    assert resp.status_code == 200
+    blocks = upstream.sent_json()["messages"][0]["content"]
+    # Thinking and redacted thinking (its opaque data blob) stay byte-for-byte.
+    assert blocks[0] == thinking
+    assert blocks[1] == redacted
+    search_result = blocks[2]["content"][0]
+    assert search_result["title"] == "profile of <PERSON_1>"
+    assert search_result["url"] == "https://intranet.example/people/<EMAIL_ADDRESS_1>"
+    # The encrypted payload is provider-validated: never read, never rewritten.
+    assert search_result["encrypted_content"] == encrypted
+    assert blocks[3]["content"]["stdout"] == "owner <PERSON_1> <<EMAIL_ADDRESS_1>>"
+    assert blocks[3]["content"]["return_code"] == 0
+    assert blocks[4]["text"] == "note about <PERSON_1>"
+    assert blocks[4]["input"] == {"to": "<EMAIL_ADDRESS_1>", "count": 3}
+    assert blocks[4]["id"] == "fb_1"
+    # Outside thinking and the encrypted blob, no planted value reaches upstream.
+    forwarded = json.dumps(blocks[2:]).replace(encrypted, "")
+    assert "Marie Dupont" not in forwarded
+    assert "marie@acme.com" not in forwarded
+
+
+@pytest.mark.asyncio
+async def test_anthropic_unknown_block_binary_source_relayed_byte_for_byte(gateway_app):
+    # The generic scan must not walk a media payload: on Anthropic the binary
+    # blob sits under `source.data`, so only a text/content source is scanned.
+    app, upstream = gateway_app
+    binary_source = {
+        "type": "base64",
+        "media_type": "image/webp",
+        "data": "UklGR-marie@acme.com-UklGR",
+    }
+    body = {
+        "model": "claude-test",
+        "max_tokens": 64,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "future_media_block",
+                        "source": binary_source,
+                        "title": "photo of Marie Dupont",
+                    },
+                    {
+                        "type": "future_document_block",
+                        "source": {
+                            "type": "text",
+                            "media_type": "text/plain",
+                            "data": "call marie@acme.com",
+                        },
+                    },
+                    {"type": "future_url_block", "source": {"type": "url", "url": "https://x/y"}},
+                ],
+            }
+        ],
+    }
+    async with _client(app) as client:
+        resp = await client.post("/v1/messages", json=body)
+
+    assert resp.status_code == 200
+    blocks = upstream.sent_json()["messages"][0]["content"]
+    assert blocks[0]["source"] == binary_source
+    assert blocks[0]["title"] == "photo of <PERSON_1>"
+    assert blocks[1]["source"]["data"] == "call <EMAIL_ADDRESS_1>"
+    assert blocks[1]["source"]["media_type"] == "text/plain"
+    # A pointer source is dereferenced by the provider: relayed as it came in.
+    assert blocks[2] == body["messages"][0]["content"][2]
+
+
+@pytest.mark.asyncio
 async def test_count_tokens_scrubbed_and_query_relayed(gateway_app):
     app, upstream = gateway_app
     async with _client(app) as client:

@@ -29,6 +29,25 @@ _THINKING_TYPES = frozenset({"thinking", "redacted_thinking"})
 _TOOL_USE_TYPES = frozenset({"tool_use", "server_tool_use", "mcp_tool_use"})
 _TOOL_RESULT_TYPES = frozenset({"tool_result", "mcp_tool_result"})
 
+# Anthropic blocks whose whole payload is binary or a pointer: the blob lives
+# under `source.data` (or a file id), there is no plaintext sibling to scan.
+# Relayed byte-for-byte, parity with _RESPONSES_OPAQUE_TYPES.
+_ANTHROPIC_OPAQUE_TYPES = frozenset({"image", "container_upload"})
+
+# Field names that carry plaintext on the Anthropic block schema, used by the
+# fallback for block types this build does not know. It is an ALLOWLIST on
+# purpose: it cannot corrupt a payload it never reads, so a base64 blob under
+# `source.data`, a thinking `signature`, a web-search `encrypted_content` and
+# every id stay byte-for-byte, while an unknown block that carries text is
+# still scanned instead of relayed raw. `stdout`/`stderr` are the
+# code-execution results; `source` and `url` are plaintext strings here (a
+# fetch-me pointer is a dict `source`, which goes through the source rule).
+_GENERIC_TEXT_FIELDS = ("text", "title", "context", "source", "url", "reason", "stdout", "stderr")
+
+# Fields holding an arbitrary JSON payload on an unknown block (a future
+# tool-use variant's `input`, a tool result's `output`): walked leaf by leaf.
+_GENERIC_DATA_FIELDS = ("input", "output")
+
 # Responses input items relayed byte-for-byte. Either their payload is opaque
 # or binary (encrypted reasoning/compaction, a screenshot, a generated image:
 # rewriting base64 corrupts it and the provider validates encrypted content),
@@ -87,7 +106,8 @@ async def scrub_anthropic_request(
 
     Scanned: messages[] string content, text blocks, tool_use /
     server_tool_use / mcp_tool_use input, tool_result / mcp_tool_result
-    content, text-typed document sources and search_result blocks. Untouched:
+    content, text-typed document sources and search_result blocks, plus the
+    plaintext fields of any block type this build does not know. Untouched:
     `system`, `tools`/`tool_choice`, thinking blocks and binary media blocks.
     """
     mapping = PIIMapping()
@@ -133,9 +153,34 @@ async def _scrub_anthropic_block(engine: PIIEngine, block: Any, mapping: PIIMapp
         return await _scrub_document_block(engine, block, mapping)
     if btype == "search_result":
         return await _scrub_search_result_block(engine, block, mapping)
-    # Binary media (image, base64/url/file documents) and unknown block shapes
-    # carry no scannable text.
-    return block
+    if btype in _ANTHROPIC_OPAQUE_TYPES:
+        return block
+    return await _scrub_unknown_block(engine, block, mapping)
+
+
+async def _scrub_unknown_block(
+    engine: PIIEngine, block: dict[str, Any], mapping: PIIMapping
+) -> dict[str, Any]:
+    """Fallback for a block type this build does not know: a beta block, or one
+    the API gains after this release.
+
+    Relaying an unknown shape unscanned is exactly how the server_tool_use
+    round-trip leak happened, so text is scanned by default here; the same hole
+    silently hid the code-execution `stdout`/`stderr` results. Only the
+    allowlisted plaintext fields are read (see _GENERIC_TEXT_FIELDS), so binary
+    and opaque payloads are relayed byte-for-byte, and thinking blocks never
+    reach this function at all.
+    """
+    new_block = await _scrub_str_fields(engine, block, _GENERIC_TEXT_FIELDS, mapping)
+    for field in _GENERIC_DATA_FIELDS:
+        if block.get(field) is not None:
+            new_block[field], _ = await engine.scrub_document(block[field], mapping)
+    if "content" in block:
+        new_block["content"] = await _scrub_block_content(engine, block["content"], mapping)
+    source = block.get("source")
+    if isinstance(source, dict):
+        new_block["source"] = await _scrub_block_source(engine, source, mapping)
+    return new_block
 
 
 async def _scrub_str_fields(
@@ -172,9 +217,10 @@ async def _scrub_tool_result_block(
 
 
 async def _scrub_block_content(engine: PIIEngine, inner: Any, mapping: PIIMapping) -> Any:
-    """A block's `content` payload: a bare string or a list of nested blocks.
-    A bare string INSIDE the list is user text too and restore would restore
-    it, so it is scanned (same rule as the engine's content walker)."""
+    """A block's `content` payload: a bare string, a list of nested blocks, or a
+    single nested block (a web_fetch_result wraps one document there). A bare
+    string INSIDE the list is user text too and restore would restore it, so it
+    is scanned (same rule as the engine's content walker)."""
     if isinstance(inner, str):
         scrubbed, _ = await engine.scrub_document(inner, mapping)
         return scrubbed
@@ -185,6 +231,8 @@ async def _scrub_block_content(engine: PIIEngine, inner: Any, mapping: PIIMappin
             else await _scrub_anthropic_block(engine, part, mapping)
             for part in inner
         ]
+    if isinstance(inner, dict):
+        return await _scrub_anthropic_block(engine, inner, mapping)
     return inner
 
 
@@ -197,17 +245,27 @@ async def _scrub_document_block(
     would corrupt the document, so they are relayed whole."""
     new_block = await _scrub_str_fields(engine, block, ("title", "context"), mapping)
     source = block.get("source")
-    if not isinstance(source, dict):
-        return new_block
-    if source.get("type") == "text" and isinstance(source.get("data"), str):
+    if isinstance(source, dict):
+        new_block["source"] = await _scrub_block_source(engine, source, mapping)
+    return new_block
+
+
+async def _scrub_block_source(
+    engine: PIIEngine, source: dict[str, Any], mapping: PIIMapping
+) -> dict[str, Any]:
+    """A block `source` object: only a "text" or "content" source is plaintext.
+    base64/url/file sources are binary payloads or pointers, returned as they
+    came in (the blob lives under `data`: rewriting it corrupts the payload)."""
+    stype = source.get("type")
+    if stype == "text" and isinstance(source.get("data"), str):
         new_source = dict(source)
         new_source["data"], _ = await engine.scrub_document(source["data"], mapping)
-        new_block["source"] = new_source
-    elif source.get("type") == "content":
+        return new_source
+    if stype == "content":
         new_source = dict(source)
         new_source["content"] = await _scrub_block_content(engine, source.get("content"), mapping)
-        new_block["source"] = new_source
-    return new_block
+        return new_source
+    return source
 
 
 async def _scrub_search_result_block(
