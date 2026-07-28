@@ -801,3 +801,47 @@ def _collect_responses_deltas(stream: str) -> str:
         if data.get("type") == "response.output_text.delta":
             out.append(data.get("delta", ""))
     return "".join(out)
+
+
+@pytest.mark.asyncio
+async def test_dict_valued_type_key_does_not_abort_the_restore(gateway_app):
+    # A tool schema can carry a property literally named "type" whose value is an
+    # object. `type` is only a block discriminator when it is a string, so the
+    # skip check must not test an unhashable value for membership: doing so
+    # raised TypeError and aborted the whole restore pass, which reached Codex
+    # through its own stock tool schema.
+    app, upstream = gateway_app
+    upstream.set_json(
+        {
+            "id": "r",
+            "tools": [{"input_schema": {"properties": {"type": {"type": "object"}}}}],
+            "output": [
+                {"type": "message", "content": [{"type": "output_text", "text": "<PERSON_1>"}]}
+            ],
+        }
+    )
+    async with _client(app) as client:
+        resp = await client.post("/v1/responses", json=_RESPONSES_REQUEST)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["output"][0]["content"][0]["text"] == "Marie Dupont"
+    # the schema itself is walked and relayed unchanged
+    assert body["tools"][0]["input_schema"]["properties"]["type"] == {"type": "object"}
+
+
+@pytest.mark.asyncio
+async def test_unexpected_restore_failure_withholds_the_body(gateway_app, monkeypatch):
+    # An unexpected restore error must keep the documented pii_error shape and
+    # withhold the body, not surface as a bare 500 with a traceback: the
+    # non-streaming path used to catch only PIIProcessingError.
+    app, upstream = gateway_app
+    upstream.set_json({"id": "r", "output": [{"type": "message", "content": []}]})
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr("privaite.gateway.routes.restore_tree", boom)
+    async with _client(app) as client:
+        resp = await client.post("/v1/responses", json=_RESPONSES_REQUEST)
+    assert resp.status_code == 500
+    assert resp.json()["error"]["code"] == "pii_error"

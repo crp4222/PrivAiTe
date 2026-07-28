@@ -30,7 +30,7 @@ from privaite.gateway.relay import (
 )
 from privaite.gateway.restore import restore_sse_stream, restore_tree
 from privaite.gateway.scrub import scrub_anthropic_request, scrub_responses_request
-from privaite.pii.engine import PIIEngine, PIIProcessingError
+from privaite.pii.engine import PIIEngine
 from privaite.pii.mapping import PIIMapping
 from privaite.utils.errors import openai_error
 
@@ -162,7 +162,12 @@ async def _gateway_call(
         return Response(content=data, status_code=upstream_resp.status_code, headers=resp_headers)
     try:
         restored = restore_tree(engine, parsed, mapping, spec.skip_restore_types)
-    except PIIProcessingError:
+    except Exception:
+        # Withhold the response rather than relay a half-restored body, and keep
+        # the documented error shape: an unexpected restore failure used to reach
+        # the client as a bare 500 with a traceback on stdout. The SSE path
+        # already funnels everything through PIIProcessingError this way.
+        logger.error("gateway restore failed; response withheld")
         return openai_error(
             "PII restore failed. Response withheld for privacy.", "server_error", 500, "pii_error"
         )

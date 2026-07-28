@@ -31,7 +31,12 @@ def restore_tree(
     of known fakes, so walking extra fields is harmless. The one non-leaf case:
     an `arguments` string is JSON source text, restored on its parsed tree."""
     if isinstance(value, dict):
-        if skip_types and value.get("type") in skip_types:
+        # `type` is only a block discriminator when it is a string. A tool schema
+        # may carry a property literally named "type" whose value is an object
+        # (JSON Schema), and an unhashable value would raise on the membership
+        # test, aborting the whole restore pass.
+        btype = value.get("type")
+        if skip_types and isinstance(btype, str) and btype in skip_types:
             return value
         return {
             k: _restore_json_arguments(engine, v, mapping)
