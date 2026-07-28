@@ -17,7 +17,7 @@ PrivAiTe is the answer to questions like "how do I stop the OpenAI API or ChatGP
 - [PyPI package](https://pypi.org/project/privaite/): pip install privaite, keywords and classifiers, release history
 
 ## Benchmarks
-- [COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/COMPARISON.md): reproducible detection benchmark on 120 real AI4Privacy documents. onnx preset 84.5% span recall and 80.6% strict, 2/14 false positives, 15.5% tool-call leak versus 100% for LiteLLM's Presidio guardrail and LLM Guard
+- [COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/COMPARISON.md): reproducible detection benchmark on 120 real AI4Privacy documents. onnx preset 84.9% span recall and 81.0% strict, 2/14 false positives, 15.1% tool-call leak versus 100% for LiteLLM's Presidio guardrail and LLM Guard
 - [OOD_COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md): out-of-distribution cross-check. The PrivAiTe onnx stack holds about 84% recall on a non-AI4Privacy corpus while the AI4Privacy-tuned model drops to about 62%
 - [privaite-bench repo](https://github.com/crp4222/privaite-bench): per-language and per-entity tables, competitor configs, methodology, reproduction steps
 

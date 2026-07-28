@@ -33,7 +33,7 @@ The [reproducible benchmark](https://github.com/crp4222/privaite-bench) runs the
 
 | | Recall (flat text) | Tool-call leak | Multimodal leak |
 |---|---|---|---|
-| PrivAiTe `onnx` (default) | **84.5%** | **15.5%** | **15.5%** |
+| PrivAiTe `onnx` (default) | **84.9%** | **15.1%** | **15.1%** |
 | LLM Guard (Anonymize) | 76.9% | 100% | 100% |
 | LiteLLM Presidio guardrail | 70.3% | 100% | 29.7% |
 

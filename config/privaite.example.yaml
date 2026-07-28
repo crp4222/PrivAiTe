@@ -55,7 +55,7 @@ providers:
 
 pii:
   enabled: true
-  # Full ONNX suite (default): ~84.5% recall on the benchmark, at ~543 ms average
+  # Full ONNX suite (default): ~84.9% recall on the benchmark, at ~543 ms average
   # in-process detection time per benchmark document (privaite-bench
   # COMPARISON.md; that is detection time on one document, not end-to-end request
   # latency, and it is hardware-dependent). Detects everything including secrets

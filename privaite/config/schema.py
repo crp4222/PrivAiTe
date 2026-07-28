@@ -293,7 +293,7 @@ _ONNX_PRESIDIO_ENTITIES = [
 
 class PIIConfig(StrictModel):
     enabled: bool = True
-    # Default to the full ONNX suite (~84.5% recall on the benchmark, ~749ms):
+    # Default to the full ONNX suite (~84.9% recall on the benchmark, ~749ms):
     # it detects everything the light preset does plus secrets and passwords.
     # preset: "light" is the fast Presidio-only path (~62% recall, near-zero
     # latency); preset: null drives detectors by hand. Do NOT also pin

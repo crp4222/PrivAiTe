@@ -37,7 +37,7 @@ them as invariants, not suggestions.
    `block_entities` type no enabled detector can emit (conservative check: skipped
    when a detector's producible set is unknown) all raise at boot.
 7. **Config defaults are the safety posture, do not flip them casually.**
-   `preset: onnx` (~84.5% recall), `on_error: block`, `deanonymization.fuzzy_matching: false`
+   `preset: onnx` (~84.9% recall), `on_error: block`, `deanonymization.fuzzy_matching: false`
    (fuzzy can mis-substitute), detector `trust_remote_code: false`, `block_entities: []`.
 
 ## What is and isn't scanned (know the surface)

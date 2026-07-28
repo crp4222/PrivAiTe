@@ -62,6 +62,9 @@ pii:
   preset: onnx    # or "light": faster, no model download, classic PII only
 EOF
 
+# Your real provider key: the config above interpolates it, and startup fails if it is unset.
+export OPENAI_API_KEY=sk-...
+
 PRIVAITE_API_KEYS=change-me python -m privaite --config privaite.yaml
 ```
 
@@ -112,12 +115,12 @@ Measured on 120 real documents from the open [AI4Privacy `pii-masking-200k`](htt
 
 | Solution | Recall (span) | Recall (strict) | False positives | Tool-call protection |
 |---|---|---|---|---|
-| `onnx` (default) | **84.5%** | **80.6%** | 2 / 14 | **100%** |
+| `onnx` (default) | **84.9%** | **81.0%** | 2 / 14 | **100%** |
 | `light` (full Presidio) | 62.4% | 57.9% | 3 / 14 | **100%** |
 | LiteLLM Presidio guardrail | 70.3% | 65.3% | 3 / 14 | 0.0% |
 | LLM Guard (Anonymize) | 76.9% | 74.9% | 5 / 14 | 0.0% |
 
-Read the 100% precisely, it is structural, not absolute: of the PII PrivAiTe detects in plain text, 100% is also removed from tool-call JSON. End to end, its tool-call leak equals its detection misses (15.5% on this corpus with the `onnx` preset), the same misses flat text has.
+Read the 100% precisely, it is structural, not absolute: of the PII PrivAiTe detects in plain text, 100% is also removed from tool-call JSON. End to end, its tool-call leak equals its detection misses (15.1% on this corpus with the `onnx` preset), the same misses flat text has.
 
 Two honesty notes, both favoring caution. LLM Guard's detection model is fine-tuned on the exact dataset behind this corpus, so its recall here is optimistic; PrivAiTe's default model is not (OpenAI's model card states it did not train on it). An out-of-distribution cross-check on two independent corpora confirms the default generalizes: ~84% held on Gretel finance text while the AI4Privacy-tuned model drops to ~62% ([OOD_COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md)).
 
@@ -129,7 +132,7 @@ There is also a live agent-workflow benchmark: a repository with 24 planted PII 
 
 | Preset | What runs | Recall\* | False positives | Latency | Secrets |
 |--------|-----------|----------|-----------------|---------|---------|
-| `onnx` (default) | Presidio + Privacy Filter | **84.5%** | 2 / 14 | ~0.5s | **yes** |
+| `onnx` (default) | Presidio + Privacy Filter | **84.9%** | 2 / 14 | ~0.5s | **yes** |
 | `light` | Presidio only | 62.4% | 3 / 14 | ~60ms | no |
 | `max` | onnx + GLiNER | higher OOD | more | ~0.7s | **yes** |
 
@@ -137,7 +140,7 @@ There is also a live agent-workflow benchmark: a repository with 24 planted PII 
 
 **`onnx`** = maximum coverage: secrets, passwords, API keys, unusual names, addresses. **`light`** = fastest, near-zero false positives, classic PII only, no addresses/URLs/secrets. How the engines work and what stays off by default: [docs/detection.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md).
 
-> **Footgun:** do not pin `detectors.presidio.entities` to a short allowlist on the `light` path. It restricts detection to only those types and roughly halves recall (to ~35%). Leave `entities` unset; the proxy logs a warning at startup if it detects a low-recall configuration.
+> **Footgun:** do not pin `detectors.presidio.entities` to a short allowlist on the `light` path. It restricts detection to only those types and roughly halves recall (to ~36%). Leave `entities` unset; the proxy logs a warning at startup if it detects a low-recall configuration.
 
 ## What it scans
 
@@ -753,7 +756,7 @@ The [reproducible benchmark](https://github.com/crp4222/privaite-bench) runs the
 
 | | Recall (flat text) | Tool-call leak | Multimodal leak |
 |---|---|---|---|
-| PrivAiTe `onnx` (default) | **84.5%** | **15.5%** | **15.5%** |
+| PrivAiTe `onnx` (default) | **84.9%** | **15.1%** | **15.1%** |
 | LLM Guard (Anonymize) | 76.9% | 100% | 100% |
 | LiteLLM Presidio guardrail | 70.3% | 100% | 29.7% |
 
