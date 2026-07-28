@@ -4,6 +4,41 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] - 2026-07-28
+
+### Fixed
+- Restored values are escaped when they are spliced into tool-call arguments, so
+  a value carrying a quote, a backslash or a newline keeps the arguments valid
+  JSON on the streaming path and in both in-process integrations. The gateway
+  already did this.
+- Gateway restore handles a `type` key holding an object, which any tool schema
+  with a property named `type` produces, and an unexpected restore failure
+  returns the documented error shape.
+- The gateway no longer forwards the client's `accept-encoding`, so responses
+  always arrive in an encoding it can decode. Duplicate header names are relayed
+  verbatim, and a header allowlist keeps `content-type` and `anthropic-version`.
+- Anthropic blocks of an unrecognized type are scanned through the engine.
+  Binary, opaque, thinking and encrypted payloads still travel byte for byte.
+- `block_entities` covers the agent prompt fields the gateway relays verbatim
+  (Responses `instructions`, Anthropic `system`), so a blocked type there stops
+  the request.
+- An unknown configuration key refuses startup and names the offending path.
+- `/ready` reports the engine's real state, the container healthcheck targets it,
+  and the image runs as a non-root user.
+- Registered recognizers contribute their entity types to the Presidio allowlist,
+  a named capture group in a custom pattern defines the span, and an unknown
+  `device` value is refused at startup.
+
+### Changed
+- Detection recall is 84.9% span and 81.0% strict, up from 84.5 and 80.6, with
+  false positives unchanged. The `light` preset moves to 36.5% for the same
+  reason.
+- Documentation now covers the measured limit of secret detection (a `KEY=value`
+  assignment is detected on its own and missed once about one preceding line of
+  log-shaped context is present, on every surface), the irreversible entity
+  overrides in the shipped configs, and the gateway routes accepting requests
+  without a PrivAiTe key by design.
+
 ## [0.4.0] - 2026-07-20
 
 ### Added

@@ -8,7 +8,7 @@ text.
 ## Install
 
 1. Make sure `privaite` is available to Open WebUI. The filter declares
-   `requirements: privaite>=0.4.0`, so Open WebUI installs it automatically from
+   `requirements: privaite>=0.4.1`, so Open WebUI installs it automatically from
    PyPI. You can also install it into the Open WebUI environment yourself
    (`pip install privaite`), which is the recommended path: see the first-run
    memory note below. Note that Open WebUI only resolves that requirement when
@@ -32,6 +32,15 @@ older one the filter refuses the request rather than silently forwarding the PII
 
 ## Notes
 
+- **Open WebUI's own task calls bypass every filter, including this one.** Title
+  generation, tag generation and follow-up suggestions are issued by Open WebUI's
+  Task Model, which calls the provider directly without running any Filter
+  function's `inlet`. Verified live: the chat message itself is scrubbed, the
+  task call carrying the same text is not. That is Open WebUI's architecture, not
+  something this filter can intercept, and it applies to any redaction filter.
+  If those calls must not leave your network, point the Task Model at a local
+  model (Admin, Settings, Interface, Task Model) or disable the features.
+
 - **First use can get the container OOM-killed. Pre-install instead.** The
   filter runs Presidio and spaCy inside Open WebUI and downloads the spaCy models
   for your languages on first use (en_core_web_lg alone is ~560MB); the default
@@ -44,7 +53,7 @@ older one the filter refuses the request rather than silently forwarding the PII
 
   ```dockerfile
   FROM ghcr.io/open-webui/open-webui:main
-  RUN pip install --no-cache-dir privaite>=0.4.0 && \
+  RUN pip install --no-cache-dir privaite>=0.4.1 && \
       python -m spacy download en_core_web_lg
   ```
 
