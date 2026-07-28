@@ -170,7 +170,9 @@ def test_provider_litellm_params_stay_permissive():
 
 @pytest.mark.parametrize(
     "name",
-    ["privaite.yaml", "privaite.openai.yaml", "privaite.example.yaml"],
+    # The tracked ones only: config/privaite.yaml is a local operator file, so
+    # asserting on it passes on a developer machine and fails in CI.
+    ["privaite.openai.yaml", "privaite.example.yaml"],
 )
 def test_shipped_configs_still_load(name, monkeypatch):
     # The Docker image boots on one of these three; strict key checking must not
