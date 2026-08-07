@@ -142,6 +142,10 @@ There is also a live agent-workflow benchmark: a repository with 24 planted PII 
 
 > **Footgun:** do not pin `detectors.presidio.entities` to a short allowlist on the `light` path. It restricts detection to only those types and roughly halves recall (to ~36%). Leave `entities` unset; the proxy logs a warning at startup if it detects a low-recall configuration.
 
+## Your policy, your types
+
+The presets are the statistical half of the answer: a benchmarked detector with a measured recall. The other half is declarative, and it is yours. What counts as sensitive *in your deployment* is written in YAML, no retraining involved: define your own types with regex [`custom_patterns`](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#custom-regex-patterns), decide each type's fate with [`entity_overrides`](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#entity-overrides-per-type-methods) (restored, faked, masked, or destroyed), and list what must never leave at all, even as a placeholder, under [`block_entities`](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#blocking-specific-pii-types-hard-policy-gate). The whole policy is deterministic, can be [dry-run](https://github.com/crp4222/PrivAiTe/blob/main/docs/verify.md) before you trust it, and the proxy refuses to start if a block rule can never fire. The narrative and a worked example: [docs/policy.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/policy.md).
+
 ## What it scans
 
 Before anything is forwarded: `messages[].content` (plain string or multimodal text parts), `tool_calls[].function.arguments` and the legacy `function_call.arguments` (parsed as JSON, scrubbed value by value including bare numeric leaves, keys and function names intact), `/v1/completions` `prompt` and `suffix`, `/v1/embeddings` `input`, chat `prediction.content` (predicted outputs) and `web_search_options.user_location`. On the way back, values are restored in content, tool calls, reasoning traces, refusals and audio transcripts, streaming included.
@@ -187,6 +191,7 @@ Also browsable as a site: [crp4222.github.io/PrivAiTe](https://crp4222.github.io
 
 - [How detection works](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md): the two engines, what each catches, what stays off by default, known limitations
 - [Configuration reference](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md): providers, Docker with custom config, anonymization methods, `block_entities`, custom patterns, languages, pinned model revisions
+- [Your policy, your types](https://github.com/crp4222/PrivAiTe/blob/main/docs/policy.md): the declarative policy layer as one story: custom types, per-type fates, hard blocks, dry-run, and where its determinism ends
 - [API reference](https://github.com/crp4222/PrivAiTe/blob/main/docs/api.md): endpoints, the exact scanned/unscanned surface, strict mode, passthrough caveats
 - [Verify what gets redacted](https://github.com/crp4222/PrivAiTe/blob/main/docs/verify.md): audit the proxy on your own data, dry-run inspect endpoint
 - [Feature comparison](https://github.com/crp4222/PrivAiTe/blob/main/docs/comparison.md) and the [reproducible benchmark](https://github.com/crp4222/privaite-bench)
@@ -600,6 +605,125 @@ is killed. `device: "coreml"` stays available as an explicit opt-in.
 
 
 ---
+<!-- source: docs/policy.md -->
+
+# Your policy, your types
+
+PrivAiTe's answer to "what leaves the machine" has two halves. The statistical
+half is the detector suite: benchmarked, best-effort, with a
+[measured recall](../README.md#benchmark) that will never be 100%. The
+declarative half is yours. Three configuration mechanisms, documented
+separately in the [configuration reference](configuration.md), together form
+something bigger than three settings: a policy, written in YAML, applied
+deterministically, without retraining anything or waiting for a release.
+
+| The question | The mechanism |
+|---|---|
+| What counts as sensitive here, beyond the built-in types? | [`custom_patterns`](configuration.md#custom-regex-patterns) |
+| What happens to each type on the way out? | [`entity_overrides`](configuration.md#entity-overrides-per-type-methods) |
+| What must never leave at all, even as a stand-in? | [`block_entities`](configuration.md#blocking-specific-pii-types-hard-policy-gate) |
+
+This page is the narrative for how they compose; each option's full reference
+stays on the configuration page.
+
+## A worked example
+
+One block, reading top to bottom like the policy it is:
+
+```yaml
+pii:
+  # What counts as sensitive here. Internal identifiers the built-in types
+  # cannot know about, declared as regex. The named group says "the value is
+  # here": the label stays readable, the value alone is replaced.
+  custom_patterns:
+    - pattern: "KD-\\d{6}"
+      entity_type: "CUSTOMER_ID"
+    - pattern: "api_key=(?P<value>[A-Za-z0-9_\\-]{16,})"
+      entity_type: "SECRET"
+
+  # What happens to each type on the way out. The default is a reversible
+  # placeholder, restored in the reply. The overrides are the exceptions.
+  anonymization:
+    method: "placeholder"
+    entity_overrides:
+      CREDIT_CARD:
+        method: "mask"       # ****************, irreversible
+        masking_char: "*"
+      SECRET:
+        method: "redact"     # [SECRET], irreversible, the original is destroyed
+
+  # What must never leave at all, even as a placeholder. A request carrying
+  # one of these is rejected with 400; the error names the type, never the value.
+  block_entities: ["US_SSN", "CUSTOMER_ID"]
+```
+
+In prose: customer IDs are recognized and never leave the network at all, a
+request carrying one is refused outright. API keys are secrets and secrets are
+destroyed on the way out, not stored for restoration. Card numbers go out
+masked and stay masked in the reply. Everything else the detectors find is
+pseudonymized and restored, so the application still receives usable answers.
+
+Note the interlock between the first and last mechanism: the `CUSTOMER_ID`
+pattern is what makes the `CUSTOMER_ID` block rule enforceable. Remove the
+pattern and the proxy [refuses to start](#what-makes-it-enforceable) rather
+than keep a rule that can never fire.
+
+## What makes it enforceable
+
+Four properties, each there because a policy you cannot verify is a promise,
+not a policy.
+
+- **Deterministic.** A regex matches or it does not; a listed type is blocked
+  or it is not. The same request produces the same outcome every time. There is
+  no model judging your policy and no score drifting with the surrounding
+  context. (One honest boundary to this claim, below.)
+- **Dry-runnable before you trust it.** The opt-in
+  [`/v1/pii/inspect` endpoint](verify.md) replays the whole policy on text you
+  choose: it returns the detections, the exact string the provider would have
+  seen, and `would_block`, the types your `block_entities` rules would have
+  rejected. Nothing is forwarded, logged, or counted. Turning
+  `deanonymization.enabled` off gives the same proof on live traffic.
+- **Never silently unenforceable.** The proxy refuses to start if a
+  `block_entities` type cannot be emitted by any enabled detector (for example
+  `US_PASSPORT` under the default `onnx` preset). A dead rule is treated as a
+  configuration bug, not a decoration.
+- **Never silently overridden.** `custom_patterns` types are exempt from the
+  presets' Presidio entity allowlist, so a preset change cannot quietly switch
+  your own types off.
+
+The policy also runs everywhere the engine runs: plain message text, text parts
+of multimodal messages, and tool-call JSON arguments. In
+[gateway mode](gateway.md), even the agent prompt fields that are deliberately
+relayed verbatim (the Anthropic `system` field, the Responses `instructions`
+field) are still scanned for blocked types, so a `block_entities` rule stops a
+request whose forbidden type sits in the one place nothing rewrites.
+
+## Where determinism ends
+
+The claim above is precise: the policy layer is deterministic *given what the
+detectors report*. For a regex-defined type — a custom pattern, or a
+checksummed Presidio type like `CREDIT_CARD` or `IBAN_CODE` — detection itself
+is deterministic too, so the whole chain is. For an ML-detected type like
+`PERSON`, the rule is deterministic but the detection feeding it is
+statistical: a `block_entities: ["PERSON"]` rule fires on every person the
+detector finds and inherits the detector's
+[measured recall](../README.md#benchmark) for the ones it does not. If a type
+absolutely must be caught, give it a structure the regex layer can hold onto.
+
+## What a regex cannot say
+
+This layer expresses **structured** policy: identifiers, references,
+`key=value` shapes, anything with a describable form. It cannot express
+"anything that looks like a medical condition" — that is a semantic category,
+and semantic detection is the ML model's job, at its benchmarked, best-effort
+recall. The promise here is *your structured policy, applied
+deterministically*, not *write any policy in plain language*. For how this
+differs from the guard models that do take plain-language policies, and what
+they give up for it, see
+[the comparison page](comparison.md#guard-models-answer-a-different-question).
+
+
+---
 <!-- source: docs/api.md -->
 
 # API reference
@@ -769,7 +893,42 @@ Contamination note, in the competitors' favor and still insufficient: LLM Guard'
 - **Pick Presidio** if you want a detection library to embed in your own pipeline and you will handle the proxying, reversal, and tool-call cases yourself.
 - **Pick LLM Guard** if you want a broader prompt-security toolkit (prompt injection, toxicity) and PII is one part of it.
 - **Pick LiteLLM's guardrail** if you already run the LiteLLM proxy and only need flat message-text PII handling.
+- **Pick a guard model** (Llama Guard, OpenAI's gpt-oss-safeguard, Mistral's Shieldstral) if your question is "is this content acceptable?" rather than "what personal data is in it, and how do I get it back?": they classify, they do not redact. [Why the two don't substitute for each other](#guard-models-answer-a-different-question).
 - **Pick PrivAiTe** if you want a drop-in proxy that protects the whole prompt-egress path, including tool-call arguments and multimodal content, reversibly, with zero telemetry, and works with any OpenAI-compatible client.
+
+## Guard models answer a different question
+
+The open guard models (Llama Guard, OpenAI's gpt-oss-safeguard, Mistral's
+Shieldstral as of August 2026) take a document and a moderation policy — the
+recent ones accept the policy as plain language at inference time — and return
+a verdict: acceptable or not, as a probability. That is content-safety
+classification, and it differs from what PrivAiTe does in two structural ways,
+not two incidental ones.
+
+**A verdict has no spans.** A guard model reports *that* a document crosses
+the policy, not *where* the offending value sits. Without character offsets it
+cannot replace a value with a placeholder, cannot restore it in the reply, and
+its only enforcement is to pass or reject the request whole. PrivAiTe's entire
+mechanism — replace on the way out, restore on the way back, tool-call
+arguments included — depends on spans, which is why its detectors are span
+extractors and a verdict model cannot slot in as one.
+
+**A judged policy is probabilistic; a declared one is not.** A plain-language
+policy is flexible, and the model judging it returns a score: the same
+borderline text can land on either side of the threshold depending on the
+surrounding context, and the model cards themselves note reduced reliability
+on long or obfuscated inputs. PrivAiTe's [policy layer](policy.md) is
+deterministic rules over span detections: the same request always produces the
+same outcome, the whole policy is [dry-runnable](verify.md) before you trust
+it, and a block rule that can never fire refuses to start instead of silently
+never firing. When the audience is an auditor rather than a demo, that
+difference is the product.
+
+Honest in both directions: a guard model expresses semantic policies a regex
+never will ("anything that describes self-harm"), and covers harmful-content
+moderation, which PrivAiTe deliberately does not do at all. The two compose
+rather than compete — a guard model deciding what is acceptable, PrivAiTe
+deciding what leaves for the provider.
 
 ## Reproduce it
 

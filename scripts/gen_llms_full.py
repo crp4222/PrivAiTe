@@ -29,6 +29,7 @@ SOURCES = (
     "README.md",
     "docs/detection.md",
     "docs/configuration.md",
+    "docs/policy.md",
     "docs/api.md",
     "docs/verify.md",
     "docs/comparison.md",

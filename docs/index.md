@@ -152,6 +152,7 @@ full quickstart, config reference, and threat model are in the
 
 - [How detection works](detection.md): the two engines, what each catches, known limitations
 - [Configuration reference](configuration.md): providers, presets, anonymization methods, `block_entities`, custom patterns
+- [Your policy, your types](policy.md): the three mechanisms above as one deterministic, dry-runnable policy
 - [API reference](api.md): endpoints and the exact scanned/unscanned request surface
 - [Verify what gets redacted](verify.md): audit the proxy on your own data
 - [Agent CLI gateway](gateway.md): Claude Code setup, Codex setup (beta), scanned surface, honest limits
