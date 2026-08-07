@@ -133,6 +133,10 @@ There is also a live agent-workflow benchmark: a repository with 24 planted PII 
 
 > **Footgun:** do not pin `detectors.presidio.entities` to a short allowlist on the `light` path. It restricts detection to only those types and roughly halves recall (to ~36%). Leave `entities` unset; the proxy logs a warning at startup if it detects a low-recall configuration.
 
+## Your policy, your types
+
+The presets are the statistical half of the answer: a benchmarked detector with a measured recall. The other half is declarative, and it is yours. What counts as sensitive *in your deployment* is written in YAML, no retraining involved: define your own types with regex [`custom_patterns`](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#custom-regex-patterns), decide each type's fate with [`entity_overrides`](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#entity-overrides-per-type-methods) (restored, faked, masked, or destroyed), and list what must never leave at all, even as a placeholder, under [`block_entities`](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#blocking-specific-pii-types-hard-policy-gate). The whole policy is deterministic, can be [dry-run](https://github.com/crp4222/PrivAiTe/blob/main/docs/verify.md) before you trust it, and the proxy refuses to start if a block rule can never fire. The narrative and a worked example: [docs/policy.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/policy.md).
+
 ## What it scans
 
 Before anything is forwarded: `messages[].content` (plain string or multimodal text parts), `tool_calls[].function.arguments` and the legacy `function_call.arguments` (parsed as JSON, scrubbed value by value including bare numeric leaves, keys and function names intact), `/v1/completions` `prompt` and `suffix`, `/v1/embeddings` `input`, chat `prediction.content` (predicted outputs) and `web_search_options.user_location`. On the way back, values are restored in content, tool calls, reasoning traces, refusals and audio transcripts, streaming included.
@@ -178,6 +182,7 @@ Also browsable as a site: [crp4222.github.io/PrivAiTe](https://crp4222.github.io
 
 - [How detection works](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md): the two engines, what each catches, what stays off by default, known limitations
 - [Configuration reference](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md): providers, Docker with custom config, anonymization methods, `block_entities`, custom patterns, languages, pinned model revisions
+- [Your policy, your types](https://github.com/crp4222/PrivAiTe/blob/main/docs/policy.md): the declarative policy layer as one story: custom types, per-type fates, hard blocks, dry-run, and where its determinism ends
 - [API reference](https://github.com/crp4222/PrivAiTe/blob/main/docs/api.md): endpoints, the exact scanned/unscanned surface, strict mode, passthrough caveats
 - [Verify what gets redacted](https://github.com/crp4222/PrivAiTe/blob/main/docs/verify.md): audit the proxy on your own data, dry-run inspect endpoint
 - [Feature comparison](https://github.com/crp4222/PrivAiTe/blob/main/docs/comparison.md) and the [reproducible benchmark](https://github.com/crp4222/privaite-bench)

@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- A policy page (`docs/policy.md`) presenting `custom_patterns`,
+  `entity_overrides` and `block_entities` as one declarative policy: a worked
+  example combining the three, the four properties that make it enforceable
+  (determinism, the inspect dry-run, the startup refusal of dead block rules,
+  the preset-allowlist exemption), the boundary where a rule on an ML-detected
+  type inherits the detector's recall, and the structured-only limit. Linked
+  from the README preset section and the docs index.
+
+### Changed
+- The comparison page gains a guard-model section (Llama Guard,
+  gpt-oss-safeguard, Shieldstral): document-level verdicts carry no spans, so
+  they cannot replace or restore values, and a model-judged policy is
+  probabilistic where PrivAiTe's policy layer is deterministic; guard models
+  in turn cover semantic moderation PrivAiTe deliberately does not.
+
 ## [0.4.1] - 2026-07-28
 
 ### Fixed

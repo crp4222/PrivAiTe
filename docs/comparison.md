@@ -2,7 +2,8 @@
 description: >-
   PrivAiTe vs Microsoft Presidio, Protect AI LLM Guard and LiteLLM's Presidio
   guardrail: recall, false positives and tool-call PII coverage, measured on a
-  reproducible benchmark.
+  reproducible benchmark. Plus why guard models (Llama Guard, Shieldstral)
+  answer a different question.
 ---
 
 # PrivAiTe vs Presidio, LLM Guard, and LiteLLM PII masking
@@ -46,7 +47,42 @@ Contamination note, in the competitors' favor and still insufficient: LLM Guard'
 - **Pick Presidio** if you want a detection library to embed in your own pipeline and you will handle the proxying, reversal, and tool-call cases yourself.
 - **Pick LLM Guard** if you want a broader prompt-security toolkit (prompt injection, toxicity) and PII is one part of it.
 - **Pick LiteLLM's guardrail** if you already run the LiteLLM proxy and only need flat message-text PII handling.
+- **Pick a guard model** (Llama Guard, OpenAI's gpt-oss-safeguard, Mistral's Shieldstral) if your question is "is this content acceptable?" rather than "what personal data is in it, and how do I get it back?": they classify, they do not redact. [Why the two don't substitute for each other](#guard-models-answer-a-different-question).
 - **Pick PrivAiTe** if you want a drop-in proxy that protects the whole prompt-egress path, including tool-call arguments and multimodal content, reversibly, with zero telemetry, and works with any OpenAI-compatible client.
+
+## Guard models answer a different question
+
+The open guard models (Llama Guard, OpenAI's gpt-oss-safeguard, Mistral's
+Shieldstral as of August 2026) take a document and a moderation policy — the
+recent ones accept the policy as plain language at inference time — and return
+a verdict: acceptable or not, as a probability. That is content-safety
+classification, and it differs from what PrivAiTe does in two structural ways,
+not two incidental ones.
+
+**A verdict has no spans.** A guard model reports *that* a document crosses
+the policy, not *where* the offending value sits. Without character offsets it
+cannot replace a value with a placeholder, cannot restore it in the reply, and
+its only enforcement is to pass or reject the request whole. PrivAiTe's entire
+mechanism — replace on the way out, restore on the way back, tool-call
+arguments included — depends on spans, which is why its detectors are span
+extractors and a verdict model cannot slot in as one.
+
+**A judged policy is probabilistic; a declared one is not.** A plain-language
+policy is flexible, and the model judging it returns a score: the same
+borderline text can land on either side of the threshold depending on the
+surrounding context, and the model cards themselves note reduced reliability
+on long or obfuscated inputs. PrivAiTe's [policy layer](policy.md) is
+deterministic rules over span detections: the same request always produces the
+same outcome, the whole policy is [dry-runnable](verify.md) before you trust
+it, and a block rule that can never fire refuses to start instead of silently
+never firing. When the audience is an auditor rather than a demo, that
+difference is the product.
+
+Honest in both directions: a guard model expresses semantic policies a regex
+never will ("anything that describes self-harm"), and covers harmful-content
+moderation, which PrivAiTe deliberately does not do at all. The two compose
+rather than compete — a guard model deciding what is acceptable, PrivAiTe
+deciding what leaves for the provider.
 
 ## Reproduce it
 
