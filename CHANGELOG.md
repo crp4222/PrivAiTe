@@ -16,6 +16,9 @@ All notable changes to this project are documented here. The format follows
   from the README preset section and the docs index.
 
 ### Changed
+- Open WebUI filter 0.1.9: the version had stayed at 0.1.8 while the file gained
+  the tool-call argument escaping and moved its floor to `privaite>=0.4.1`, so
+  an installed copy could not be told apart from the current one.
 - The comparison page gains a guard-model section (Llama Guard,
   gpt-oss-safeguard, Shieldstral): document-level verdicts carry no spans, so
   they cannot replace or restore values, and a model-judged policy is
