@@ -9,7 +9,7 @@ Self-hosted PII redaction proxy for LLM APIs.
 
 **A drop-in LLM proxy that replaces PII before it reaches the provider, including inside tool-call arguments and multimodal content, with zero telemetry.**
 
-Claude Code reading a repository with 24 planted secrets and PII values put **24 of 24** on the wire to its provider. Through PrivAiTe's agent gateway, **0 of 24** reached it on that fixture, and **2 of 24** on a larger realistic session. Those numbers come from wire-level captures of real agent sessions, and the two that still got through are documented rather than rounded away: [the measurement](https://github.com/crp4222/PrivAiTe/blob/main/docs/agent-leak-measurement.md), [what it misses](https://github.com/crp4222/PrivAiTe#threat-model).
+Told in writing to report its config variables but **never their values**, Claude Code sent 3 of 4 secrets to its provider anyway: the same secrets also sat in a log file the task had it read. Over that session **23 of 24** planted values reached the provider; through PrivAiTe's agent gateway, **2 of 24**. Wire-level captures of real agent sessions, and the two that still get through are documented rather than rounded away: [the measurement](https://github.com/crp4222/PrivAiTe/blob/main/docs/agent-leak-measurement.md), [what it misses](https://github.com/crp4222/PrivAiTe#threat-model).
 
 ```
 You type: "Je m'appelle Marie Dupont, email marie@acme.com"
