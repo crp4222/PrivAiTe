@@ -7,7 +7,9 @@ Self-hosted PII redaction proxy for LLM APIs.
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-green.svg)](https://github.com/crp4222/PrivAiTe/blob/main/LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/privaite.svg)](https://pypi.org/project/privaite/)
 
-**A drop-in LLM proxy that replaces PII before it reaches the provider, including inside tool-call arguments and multimodal content, with zero telemetry. Most types are restored in the reply; the shipped configs mask card numbers and redact secrets, which is irreversible on purpose, so those two never come back.**
+**A drop-in LLM proxy that replaces PII before it reaches the provider, including inside tool-call arguments and multimodal content, with zero telemetry.**
+
+Claude Code reading a repository with 24 planted secrets and PII values put **24 of 24** on the wire to its provider. Through PrivAiTe's agent gateway, **0 of 24** reached it on that fixture, and **2 of 24** on a larger realistic session. Those numbers come from wire-level captures of real agent sessions, and the two that still got through are documented rather than rounded away: [the measurement](https://github.com/crp4222/PrivAiTe/blob/main/docs/agent-leak-measurement.md), [what it misses](https://github.com/crp4222/PrivAiTe#threat-model).
 
 ```
 You type: "Je m'appelle Marie Dupont, email marie@acme.com"
@@ -87,7 +89,7 @@ pii:
 ANTHROPIC_BASE_URL=http://localhost:8400 claude
 ```
 
-Enable the detection cache when you use the gateway: agent CLIs resend the whole conversation every turn, and without the cache every turn re-scans the entire history (roughly 50 seconds per turn on a large measured session, about a second with the cache on). The [threat model](https://github.com/crp4222/PrivAiTe#threat-model) spells out the memory tradeoff.
+Enable the detection cache when you use the gateway: agent CLIs resend the whole conversation every turn, and without the cache every turn re-scans the entire history (on a large measured session the per-request scrub peaked at 42 s with Claude Code and 72 s with Codex, against a 1 to 3 s median with the cache on). The [threat model](https://github.com/crp4222/PrivAiTe#threat-model) spells out the memory tradeoff.
 
 **Codex (beta).** The gateway also exposes `/v1/responses` (OpenAI Responses API), which is what Codex speaks. That path passes the same test suite but has had less live validation than Claude Code, so it is labeled beta; setup is in [docs/gateway.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/gateway.md#codex-beta).
 
@@ -117,7 +119,7 @@ Two honesty notes, both favoring caution. LLM Guard's detection model is fine-tu
 
 Per-language and per-entity tables, competitor configs, methodology, reproduction: [privaite-bench](https://github.com/crp4222/privaite-bench). Feature comparison: [docs/comparison.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/comparison.md).
 
-There is also a live agent-workflow benchmark: a repository with 24 planted PII values and secrets, driven through real Claude Code and Codex sessions, with a recording proxy measuring what actually reaches the provider. Directly, Claude Code sent 24/24 planted values and Codex 20/24. Through the [gateway](https://github.com/crp4222/PrivAiTe/blob/main/docs/gateway.md) with the default `onnx` preset, 0/24 reached the provider on that fixture; on a larger realistic session, 2 of 24 still got through, both secrets in `key=value` log lines that the detector catches on their own but misses once a line of log-shaped context precedes them (the mechanism, and the fact that it affects every surface, is in the [threat model](https://github.com/crp4222/PrivAiTe#threat-model)), so treat it as a strong measured reduction, not zero leaks. Full matrix, latency and cache measurements: [agent_workflow/RESULTS.md](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md).
+There is also a live agent-workflow benchmark: a repository with 24 planted PII values and secrets, driven through real Claude Code and Codex sessions, with a recording proxy measuring what actually reaches the provider. Directly, Claude Code sent 24/24 planted values and Codex 20/24. Through the [gateway](https://github.com/crp4222/PrivAiTe/blob/main/docs/gateway.md) with the default `onnx` preset, 0/24 reached the provider on that fixture; on a larger realistic session, 2 of 24 still got through, both secrets in `key=value` log lines that the detector catches on their own but misses once a line of log-shaped context precedes them (the mechanism, and the fact that it affects every surface, is in the [threat model](https://github.com/crp4222/PrivAiTe#threat-model)), so treat it as a strong measured reduction, not zero leaks. The write-up of the finding, method and miss mechanism is [here](https://github.com/crp4222/PrivAiTe/blob/main/docs/agent-leak-measurement.md); the full matrix, latency and cache measurements are in [agent_workflow/RESULTS.md](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md).
 
 ## Presets
 

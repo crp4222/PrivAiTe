@@ -156,6 +156,7 @@ full quickstart, config reference, and threat model are in the
 - [API reference](api.md): endpoints and the exact scanned/unscanned request surface
 - [Verify what gets redacted](verify.md): audit the proxy on your own data
 - [Agent CLI gateway](gateway.md): Claude Code setup, Codex setup (beta), scanned surface, honest limits
+- [What a coding agent sends to its provider](agent-leak-measurement.md): wire-level measurement of real Claude Code and Codex sessions, 24/24 unprotected, 0/24 and 2/24 through the gateway, with the miss mechanism
 - [PrivAiTe vs Presidio, LLM Guard, LiteLLM](comparison.md): feature and benchmark comparison
 
 ---

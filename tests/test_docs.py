@@ -39,6 +39,40 @@ def test_llms_txt_and_its_docs_copy_are_identical() -> None:
     assert root_copy == docs_copy
 
 
+def test_llms_txt_announces_the_shipped_versions() -> None:
+    """llms.txt states the current release in prose, and prose is invisible to the
+    concatenation check: it sat on 0.4.0 / filter 0.1.8 for a whole release while
+    `gen_llms_full.py --check` reported everything up to date. This is the file
+    whose entire purpose is being read by assistants, so a stale version there is
+    the one that gets quoted back at people."""
+    import re
+
+    text = (REPO_ROOT / "llms.txt").read_text()
+    pyproject = (REPO_ROOT / "pyproject.toml").read_text()
+    shipped = re.search(r'^version = "([^"]+)"', pyproject, re.MULTILINE)
+    assert shipped is not None
+    package_version = shipped.group(1)
+
+    filter_src = (REPO_ROOT / "integrations" / "openwebui" / "privaite_filter.py").read_text()
+    filter_match = re.search(r"^version: (\S+)", filter_src, re.MULTILINE)
+    assert filter_match is not None
+    filter_version = filter_match.group(1)
+
+    assert f"privaite {package_version} on PyPI" in text, (
+        f"llms.txt does not announce the shipped package version {package_version}"
+    )
+    assert f"current release privaite {package_version}" in text
+    assert f"filter v{filter_version}" in text, (
+        f"llms.txt does not announce the shipped filter version {filter_version}"
+    )
+    assert f"Filter Function (v{filter_version})" in text
+
+    # No older version may linger anywhere in the file.
+    announced = set(re.findall(r"privaite (\d+\.\d+\.\d+)", text))
+    stale = {v for v in announced if v != package_version}
+    assert not stale, f"llms.txt still mentions superseded versions: {sorted(stale)}"
+
+
 @pytest.mark.parametrize("rel", ["README.md", "docs/detection.md", "docs/gateway.md"])
 def test_the_miss_mechanism_is_stated_the_same_way_everywhere(rel: str) -> None:
     """The 2/24 miss is the project's only known live failure and its published

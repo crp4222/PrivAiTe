@@ -34,6 +34,7 @@ SOURCES = (
     "docs/verify.md",
     "docs/comparison.md",
     "docs/gateway.md",
+    "docs/agent-leak-measurement.md",
 )
 
 
