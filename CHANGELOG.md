@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.4.2] - 2026-08-14
 
 ### Added
 - A policy page (`docs/policy.md`) presenting `custom_patterns`,
@@ -14,6 +14,11 @@ All notable changes to this project are documented here. The format follows
   the preset-allowlist exemption), the boundary where a rule on an ML-detected
   type inherits the detector's recall, and the structured-only limit. Linked
   from the README preset section and the docs index.
+- A measurement page (`docs/agent-leak-measurement.md`): what a coding agent
+  actually sends to its provider, measured at the wire on real Claude Code and
+  Codex sessions. Includes the controls that answer "your prompt did the work"
+  (an ordinary question with no mention of `.env` leaks the same 23 of 24 on the
+  realistic fixture), the reproduced miss mechanism, and the cost.
 
 ### Changed
 - Open WebUI filter 0.1.9: the version had stayed at 0.1.8 while the file gained
@@ -24,6 +29,21 @@ All notable changes to this project are documented here. The format follows
   they cannot replace or restore values, and a model-judged policy is
   probabilistic where PrivAiTe's policy layer is deterministic; guard models
   in turn cover semantic moderation PrivAiTe deliberately does not.
+- The README leads with the measurement rather than with a per-type caveat: the
+  irreversible handling of `CREDIT_CARD` and `SECRET` is unchanged and still
+  stated, one paragraph lower.
+- Gateway scrub cost is restated from the 0.4.1 benchmark run in the README and
+  `docs/gateway.md`: the per-request maximum without the detection cache is 42 s
+  (Claude Code) and 72 s (Codex), against a 1 to 3 s median with it on. The
+  previous "roughly 50 seconds per turn" predated that run.
+
+- Open WebUI filter 0.1.10: the declared floor moves to `privaite>=0.4.2`, which
+  changes the file, so the version moves with it.
+
+### Fixed
+- `llms.txt` announced privaite 0.4.0 and filter 0.1.8 for a whole release. It
+  states the current version in prose, which the concatenation check could not
+  see, so a test now pins those strings to the shipped versions.
 
 ## [0.4.1] - 2026-07-28
 

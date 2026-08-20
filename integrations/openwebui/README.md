@@ -8,7 +8,7 @@ text.
 ## Install
 
 1. Make sure `privaite` is available to Open WebUI. The filter declares
-   `requirements: privaite>=0.4.1`, so Open WebUI installs it automatically from
+   `requirements: privaite>=0.4.2`, so Open WebUI installs it automatically from
    PyPI. You can also install it into the Open WebUI environment yourself
    (`pip install privaite`), which is the recommended path: see the first-run
    memory note below. Note that Open WebUI only resolves that requirement when
@@ -53,7 +53,7 @@ older one the filter refuses the request rather than silently forwarding the PII
 
   ```dockerfile
   FROM ghcr.io/open-webui/open-webui:main
-  RUN pip install --no-cache-dir privaite>=0.4.1 && \
+  RUN pip install --no-cache-dir privaite>=0.4.2 && \
       python -m spacy download en_core_web_lg
   ```
 
