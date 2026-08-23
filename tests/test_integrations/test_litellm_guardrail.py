@@ -1431,3 +1431,244 @@ async def test_streaming_tool_arguments_stay_valid_json_with_special_chars():
                     out += tc.function.arguments
 
     assert json.loads(out) == {"to": _SPECIALS_ORIGINAL, "urgent": True}
+
+
+def _bare_delta(**fields):
+    """A streamed delta carrying only the given fields (the others None), the
+    shape of the finish chunk most providers send: delta {} + finish_reason."""
+    base = dict(content=None, tool_calls=None, function_call=None)
+    base.update(fields)
+    return types.SimpleNamespace(**base)
+
+
+def _choice_chunk(delta, finish=None, index=0):
+    return types.SimpleNamespace(
+        choices=[types.SimpleNamespace(index=index, delta=delta, finish_reason=finish)]
+    )
+
+
+# A fake that is a natural word, as fake_replacement produces: the restorer
+# holds back any tail that could begin it ("Jean" for "Jean Martin"), so a
+# channel ending on such a word loses it unless the end of the stream flushes.
+_WORD_MAP = {"Jean Martin": "Marie Dupont"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["reasoning_content", "reasoning", "refusal"])
+async def test_streaming_flushes_text_field_tail_onto_a_bare_finish_chunk(field):
+    gr = _guardrail()
+    data = {"metadata": {"privaite_map": dict(_WORD_MAP)}}
+
+    async def _source():
+        yield _choice_chunk(_bare_delta(**{field: "Call Jean Martin, then Jean"}))
+        yield _choice_chunk(_bare_delta(**{field: None}), finish="stop")
+
+    out = ""
+    async for chunk in gr.async_post_call_streaming_iterator_hook(None, _source(), data):
+        for choice in chunk.choices:
+            out += getattr(choice.delta, field, None) or ""
+    assert out == "Call Marie Dupont, then Jean"
+
+
+@pytest.mark.asyncio
+async def test_streaming_flushes_tool_tail_onto_a_bare_finish_chunk():
+    # A provider that stops mid-argument (finish_reason "length") sends the
+    # finish on a chunk with no tool_calls slot. The held fragment must still
+    # go out, on that chunk, under the same tool_call index: the client
+    # reassembles arguments per index and must see every byte it was sent.
+    gr = _guardrail()
+    data = {"messages": [{"role": "user", "content": "email marie.dupont@acme.com"}]}
+    data = await gr.async_pre_call_hook(None, None, data, "completion")
+    fakes = data["metadata"]["privaite_map"]
+    email = next(f for f, o in fakes.items() if o == "marie.dupont@acme.com")
+    head = email[: len(email) // 2]
+
+    def _tool_delta(args):
+        return _bare_delta(
+            tool_calls=[
+                types.SimpleNamespace(index=2, function=types.SimpleNamespace(arguments=args))
+            ]
+        )
+
+    async def _source():
+        yield _choice_chunk(_tool_delta('{"e": "' + head))
+        yield _choice_chunk(_bare_delta(), finish="length")
+
+    out = {}
+    finish_chunk = None
+    async for chunk in gr.async_post_call_streaming_iterator_hook(None, _source(), data):
+        for choice in chunk.choices:
+            if choice.finish_reason:
+                finish_chunk = chunk
+            for tc in choice.delta.tool_calls or []:
+                args = _obj_get_any(tc, "function", "arguments")
+                slot = _obj_get_any(tc, "index")
+                out[slot] = out.get(slot, "") + (args or "")
+    assert out == {2: '{"e": "' + head}
+    assert finish_chunk is not None and finish_chunk.choices[0].delta.tool_calls
+
+
+@pytest.mark.asyncio
+async def test_streaming_flushes_function_call_tail_onto_a_bare_finish_chunk():
+    gr = _guardrail()
+    data = {"metadata": {"privaite_map": dict(_WORD_MAP)}}
+
+    async def _source():
+        yield _choice_chunk(
+            _bare_delta(function_call=types.SimpleNamespace(arguments='{"to": "Jean'))
+        )
+        yield _choice_chunk(_bare_delta(), finish="length")
+
+    out = ""
+    async for chunk in gr.async_post_call_streaming_iterator_hook(None, _source(), data):
+        for choice in chunk.choices:
+            out += _obj_get_any(choice.delta, "function_call", "arguments") or ""
+    assert out == '{"to": "Jean'
+
+
+@pytest.mark.asyncio
+async def test_streaming_drains_held_tails_when_the_stream_ends_without_finish_reason():
+    # Some providers close the stream without ever sending finish_reason. What
+    # the buffers still hold goes out as trailing chunks instead of vanishing
+    # with the generator: content here, and a tool fragment on another choice.
+    gr = _guardrail()
+    data = {"metadata": {"privaite_map": dict(_WORD_MAP)}}
+
+    async def _source():
+        yield _choice_chunk(_bare_delta(content="Ask Jean Martin or Jean"))
+        yield _choice_chunk(
+            _bare_delta(
+                tool_calls=[
+                    types.SimpleNamespace(
+                        index=0, function=types.SimpleNamespace(arguments='{"to": "Jean')
+                    )
+                ]
+            ),
+            index=1,
+        )
+
+    content, args, finishes = "", "", []
+    async for chunk in gr.async_post_call_streaming_iterator_hook(None, _source(), data):
+        for choice in chunk.choices:
+            finishes.append(choice.finish_reason)
+            if choice.index == 0:
+                content += choice.delta.content or ""
+            else:
+                for tc in choice.delta.tool_calls or []:
+                    args += _obj_get_any(tc, "function", "arguments") or ""
+    assert content == "Ask Marie Dupont or Jean"
+    assert args == '{"to": "Jean'
+    assert finishes == [None] * len(finishes)
+
+
+def _obj_get_any(obj, *path):
+    """Walk dict-or-object attributes; the guardrail may create a carrier as a
+    plain dict on a finish delta that had none."""
+    for key in path:
+        if obj is None:
+            return None
+        obj = obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+    return obj
+
+
+@pytest.mark.asyncio
+async def test_streaming_finish_chunk_with_empty_slots_gets_the_tails_under_them():
+    # A finish chunk may carry the tool_call slot and the function_call holder
+    # with empty arguments. Their restore skips an empty fragment, so the sweep
+    # appends the held tail under the existing holder: no duplicate slot.
+    gr = _guardrail()
+    data = {"metadata": {"privaite_map": dict(_WORD_MAP)}}
+
+    def _slots(args, fc_args):
+        return _bare_delta(
+            tool_calls=[
+                types.SimpleNamespace(index=2, function=types.SimpleNamespace(arguments=args))
+            ],
+            function_call=types.SimpleNamespace(arguments=fc_args),
+        )
+
+    async def _source():
+        yield _choice_chunk(_slots('{"to": "Jean', '{"cc": "Jean'))
+        yield _choice_chunk(_slots("", ""), finish="length")
+
+    chunks = []
+    async for chunk in gr.async_post_call_streaming_iterator_hook(None, _source(), data):
+        chunks.append(chunk)
+    finish = chunks[-1].choices[0].delta
+    assert len(finish.tool_calls) == 1
+    assert finish.tool_calls[0].index == 2
+    assert finish.tool_calls[0].function.arguments == "Jean"
+    assert finish.function_call.arguments == "Jean"
+
+
+@pytest.mark.asyncio
+async def test_streaming_drain_chunk_clears_usage_and_carries_audio():
+    # The drained chunk is a clone of the last chunk of its choice: it must not
+    # repeat that chunk's usage, and the audio tail gets its own carrier.
+    gr = _guardrail()
+    data = {"metadata": {"privaite_map": dict(_WORD_MAP)}}
+
+    async def _source():
+        chunk = _choice_chunk(_bare_delta(audio={"transcript": "Jean Martin and Jean"}))
+        chunk.usage = types.SimpleNamespace(total_tokens=3)
+        yield chunk
+
+    chunks = []
+    async for chunk in gr.async_post_call_streaming_iterator_hook(None, _source(), data):
+        chunks.append(chunk)
+    assert len(chunks) == 2
+    first, drained = chunks
+    assert first.choices[0].delta.audio["transcript"] == "Marie Dupont and "
+    assert first.usage.total_tokens == 3
+    assert drained.usage is None
+    assert drained.choices[0].finish_reason is None
+    assert drained.choices[0].delta.audio == {"transcript": "Jean"}
+    assert drained.choices[0].delta.content is None
+
+
+@pytest.mark.asyncio
+async def test_streaming_tails_on_real_litellm_chunks_stay_serializable():
+    # The same two shapes on litellm's own pydantic chunk types: a carrier
+    # created on a bare finish Delta and a drained clone must both still
+    # serialize the way the proxy does it (model_dump_json).
+    from litellm.types.utils import (
+        ChatCompletionDeltaToolCall,
+        Delta,
+        Function,
+        ModelResponseStream,
+        StreamingChoices,
+    )
+
+    gr = _guardrail()
+    data = {"metadata": {"privaite_map": dict(_WORD_MAP)}}
+
+    def _chunk(delta, finish=None):
+        choice = StreamingChoices(index=0, delta=delta, finish_reason=finish)
+        return ModelResponseStream(id="chunk", model="m", choices=[choice])
+
+    async def _source():
+        call = ChatCompletionDeltaToolCall(
+            index=0, type="function", function=Function(arguments='{"to": "Jean')
+        )
+        yield _chunk(Delta(content=None, tool_calls=[call]))
+        yield _chunk(Delta(content=None), finish="length")
+
+    async def _no_finish():
+        yield _chunk(Delta(content=None, reasoning_content="then Jean"))
+
+    payloads = []
+    async for chunk in gr.async_post_call_streaming_iterator_hook(None, _source(), data):
+        payloads.append(json.loads(chunk.model_dump_json(exclude_none=True)))
+    finish = payloads[-1]["choices"][0]
+    assert finish["finish_reason"] == "length"
+    assert finish["delta"]["tool_calls"][0]["index"] == 0
+    assert finish["delta"]["tool_calls"][0]["function"]["arguments"] == "Jean"
+
+    data = {"metadata": {"privaite_map": dict(_WORD_MAP)}}
+    payloads = []
+    async for chunk in gr.async_post_call_streaming_iterator_hook(None, _no_finish(), data):
+        payloads.append(json.loads(chunk.model_dump_json(exclude_none=True)))
+    traces = [p["choices"][0]["delta"].get("reasoning_content") for p in payloads]
+    assert traces == ["then ", "Jean"]
+    assert "finish_reason" not in payloads[-1]["choices"][0]
+    assert payloads[-1]["id"] == "chunk"

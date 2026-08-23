@@ -33,6 +33,7 @@ dot-notation. See integrations/litellm/README.md.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 from typing import Any, cast
 
@@ -65,6 +66,78 @@ def _obj_set(obj: Any, key: str, value: Any) -> None:
         obj[key] = value
     else:
         setattr(obj, key, value)
+
+
+def _append_nested(delta: Any, carrier: str, field: str, remaining: str) -> None:
+    """Append text to delta.<carrier>.<field>, creating the carrier as a plain
+    dict when the delta has none (a bare finish delta carries no function_call
+    or audio object)."""
+    holder = _obj_get(delta, carrier)
+    if holder is None:
+        _obj_set(delta, carrier, {field: remaining})
+    else:
+        _obj_set(holder, field, (_obj_get(holder, field) or "") + remaining)
+
+
+def _append_tool_remainder(delta: Any, tc_index: int, remaining: str) -> None:
+    """Append a held argument fragment under its tool_call index, creating the
+    slot when the delta has none: the client reassembles arguments per index."""
+    calls = _obj_get(delta, "tool_calls")
+    if calls is None:
+        calls = []
+        _obj_set(delta, "tool_calls", calls)
+    for call in calls:
+        if (_obj_get(call, "index") or 0) == tc_index:
+            _append_nested(call, "function", "arguments", remaining)
+            return
+    calls.append({"index": tc_index, "function": {"arguments": remaining}})
+
+
+def _append_remainder(delta: Any, key: tuple, remaining: str) -> None:
+    """Append a restore buffer's held tail onto a streamed delta. The key is
+    (kind, choice index[, tool_call index]) as built by the streaming hook."""
+    kind = key[0]
+    if kind == "tool":
+        _append_tool_remainder(delta, key[2], remaining)
+    elif kind == "fc":
+        _append_nested(delta, "function_call", "arguments", remaining)
+    elif kind == "audio":
+        _append_nested(delta, "audio", "transcript", remaining)
+    else:
+        # content and the text fields (reasoning_content, reasoning, refusal)
+        _obj_set(delta, kind, (_obj_get(delta, kind) or "") + remaining)
+
+
+_DELTA_CHANNELS = (
+    "content",
+    "reasoning_content",
+    "reasoning",
+    "refusal",
+    "audio",
+    "tool_calls",
+    "function_call",
+)
+
+
+def _drain_chunk(template: Any, key: tuple, remaining: str) -> Any:
+    """A trailing chunk carrying one held tail after the provider closed the
+    stream without a finish_reason: a clone of the last chunk of that choice
+    (same id, model and object as the rest of the stream) reduced to that one
+    choice, its delta cleared, no finish_reason and no usage."""
+    chunk = copy.deepcopy(template)
+    index = key[1]
+    choices = [c for c in _obj_get(chunk, "choices") or [] if (_obj_get(c, "index") or 0) == index]
+    choice = choices[0]
+    _obj_set(chunk, "choices", [choice])
+    if _obj_get(chunk, "usage") is not None:
+        _obj_set(chunk, "usage", None)
+    _obj_set(choice, "finish_reason", None)
+    delta = _obj_get(choice, "delta")
+    for field in _DELTA_CHANNELS:
+        if _obj_get(delta, field) is not None:
+            _obj_set(delta, field, None)
+    _append_remainder(delta, key, remaining)
+    return chunk
 
 
 def _json_escape(value: str) -> str:
@@ -596,20 +669,47 @@ class PrivaiteGuardrail(CustomGuardrail):
                 deanon = buffers[key] = StreamingDeAnonymizer(source)
             out = deanon.feed(text) if text else ""
             if finished:
-                out += deanon.flush()
+                # The channel is closed: drop its buffer so the sweeps below
+                # never flush it a second time.
+                out += buffers.pop(key).flush()
             return out
 
+        def _close_open(index: int | None) -> list[tuple[tuple, str]]:
+            """Flush and drop every buffer still open for this choice (every
+            choice when index is None); returns the non-empty tails."""
+            tails = []
+            for key in [k for k in buffers if index is None or k[1] == index]:
+                remaining = buffers.pop(key).flush()
+                if remaining:
+                    tails.append((key, remaining))
+            return tails
+
         # The buffer holds back partial placeholders that span chunk boundaries.
-        # Whatever remains is flushed onto the chunk that carries finish_reason.
+        # Whatever remains is flushed onto the chunk that carries finish_reason:
+        # by the channel's own restore when the finish delta carries it, and by
+        # the sweep below when it does not (the common finish shape is a bare
+        # `delta: {}`, which carries none of the tool/function/reasoning slots;
+        # the tail is appended and its carrier created, never dropped).
+        last_chunk: dict[int, Any] = {}
         async for chunk in response:
             for choice in getattr(chunk, "choices", None) or []:
                 delta = getattr(choice, "delta", None)
                 if delta is None:
                     continue
                 index = getattr(choice, "index", 0) or 0
+                last_chunk[index] = chunk
                 finished = getattr(choice, "finish_reason", None) is not None
                 self._restore_delta(delta, index, finished, _restore)
+                if finished:
+                    for key, remaining in _close_open(index):
+                        _append_remainder(delta, key, remaining)
             yield chunk
+        # The provider closed the stream without a finish_reason for a choice:
+        # its held tails go out as trailing chunks rather than vanishing here.
+        for key, remaining in _close_open(None):
+            template = last_chunk.get(key[1])
+            if template is not None:
+                yield _drain_chunk(template, key, remaining)
 
     async def async_post_call_failure_hook(
         self,

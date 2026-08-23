@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- LiteLLM guardrail: the streaming restore dropped a held-back tail whenever
+  the finish chunk did not carry that channel. The common bare `delta: {}`
+  finish lost the end of a reasoning trace or a refusal, and the fragment of a
+  tool-call or function-call argument cut by `finish_reason: length`; a stream
+  closed without any `finish_reason` lost the tail of every channel, content
+  included. The finish chunk now flushes every open buffer of its choice,
+  creating the carrier it lacks, and trailing chunks drain what remains,
+  mirroring the core streaming handler.
 - `fake_replacement`: the first retry after a collision asked the generator for
   variant 0, the seed of the initial candidate, so it reproduced the collision
   and the retry budget was effectively 9 of 10. Retries now walk variants 1 to
