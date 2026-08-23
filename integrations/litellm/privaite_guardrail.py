@@ -35,6 +35,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+from collections.abc import Callable, Iterator
 from typing import Any, cast
 
 from litellm.integrations.custom_guardrail import CustomGuardrail
@@ -138,6 +139,82 @@ def _drain_chunk(template: Any, key: tuple, remaining: str) -> Any:
             _obj_set(delta, field, None)
     _append_remainder(delta, key, remaining)
     return chunk
+
+
+class _StreamRestorer:
+    """Restore state for one streamed response.
+
+    One de-anonymizer buffer per streamed segment, keyed by (kind, choice
+    index, ...): with n>1 the provider interleaves chunks for different
+    choices, and tool-call arguments stream as fragments per tool_call index;
+    each segment keeps its own boundary buffer so a placeholder split across
+    chunks reassembles without mixing segments. The buffer holds back partial
+    placeholders that span chunk boundaries; whatever remains is flushed onto
+    the chunk that carries finish_reason (by the channel's own restore when
+    the finish delta carries it, by the sweep in restore_chunk when it does
+    not: the common finish shape is a bare `delta: {}`), or, when the provider
+    closes the stream without a finish_reason, drained as trailing chunks
+    cloned from the last chunk seen for that choice. A held tail is never
+    dropped."""
+
+    def __init__(
+        self, mapping: object, json_mapping: object, make_buffer: Callable[..., object]
+    ) -> None:
+        self._mapping = mapping
+        # For the argument channels: their fragments are JSON source text, so the
+        # original has to arrive JSON-escaped or the client's parse of the
+        # reassembled arguments fails on a quote, a backslash or a newline.
+        # (Placeholders need no escaping, so the fakes are the same on both sides.)
+        self._json_mapping = json_mapping
+        self._make_buffer = make_buffer
+        self._buffers: dict = {}
+        self._last_chunk: dict = {}
+
+    def restore(self, key: tuple, text: str, finished: bool, json_fragment: bool = False) -> str:
+        if key not in self._buffers:
+            self._buffers[key] = self._make_buffer(
+                self._json_mapping if json_fragment else self._mapping
+            )
+        deanon = self._buffers[key]
+        out = deanon.feed(text) if text else ""
+        if finished:
+            # The channel is closed: drop its buffer so a sweep never flushes
+            # it a second time.
+            out += self._buffers.pop(key).flush()
+        return out
+
+    def close_open(self, index: int | None) -> tuple[tuple[tuple, str], ...]:
+        """Flush and drop every buffer still open for this choice (every choice
+        when index is None); returns the non-empty tails."""
+        tails = []
+        for key in [k for k in self._buffers if index is None or k[1] == index]:
+            remaining = self._buffers.pop(key).flush()
+            if remaining:
+                tails.append((key, remaining))
+        return tuple(tails)
+
+    def restore_chunk(self, chunk: object, restore_delta: Callable[..., None]) -> None:
+        """Restore every choice of one chunk in place; on a finished choice,
+        append the tails of the channels its finish delta does not carry."""
+        for choice in getattr(chunk, "choices", None) or []:
+            delta = getattr(choice, "delta", None)
+            if delta is None:
+                continue
+            index = getattr(choice, "index", 0) or 0
+            self._last_chunk[index] = chunk
+            finished = getattr(choice, "finish_reason", None) is not None
+            restore_delta(delta, index, finished, self.restore)
+            if finished:
+                for key, remaining in self.close_open(index):
+                    _append_remainder(delta, key, remaining)
+
+    def drain(self) -> Iterator[object]:
+        """Trailing chunks for the tails still held after the provider closed
+        the stream without a finish_reason for their choice."""
+        for key, remaining in self.close_open(None):
+            template = self._last_chunk.get(key[1])
+            if template is not None:
+                yield _drain_chunk(template, key, remaining)
 
 
 def _json_escape(value: str) -> str:
@@ -655,61 +732,12 @@ class PrivaiteGuardrail(CustomGuardrail):
             mapping.add(original, fake, "PII")
             json_mapping.add(_json_escape(original), fake, "PII")
 
-        # One de-anonymizer buffer per streamed segment, keyed by (kind, choice
-        # index, ...). With n>1 the provider interleaves chunks for different
-        # choices, and tool-call arguments stream as fragments per tool_call
-        # index; each segment keeps its own boundary buffer so a placeholder split
-        # across chunks reassembles without mixing segments.
-        buffers: dict[tuple, StreamingDeAnonymizer] = {}
-
-        def _restore(key: tuple, text: str, finished: bool, json_fragment: bool = False) -> str:
-            deanon = buffers.get(key)
-            if deanon is None:
-                source = json_mapping if json_fragment else mapping
-                deanon = buffers[key] = StreamingDeAnonymizer(source)
-            out = deanon.feed(text) if text else ""
-            if finished:
-                # The channel is closed: drop its buffer so the sweeps below
-                # never flush it a second time.
-                out += buffers.pop(key).flush()
-            return out
-
-        def _close_open(index: int | None) -> list[tuple[tuple, str]]:
-            """Flush and drop every buffer still open for this choice (every
-            choice when index is None); returns the non-empty tails."""
-            tails = []
-            for key in [k for k in buffers if index is None or k[1] == index]:
-                remaining = buffers.pop(key).flush()
-                if remaining:
-                    tails.append((key, remaining))
-            return tails
-
-        # The buffer holds back partial placeholders that span chunk boundaries.
-        # Whatever remains is flushed onto the chunk that carries finish_reason:
-        # by the channel's own restore when the finish delta carries it, and by
-        # the sweep below when it does not (the common finish shape is a bare
-        # `delta: {}`, which carries none of the tool/function/reasoning slots;
-        # the tail is appended and its carrier created, never dropped).
-        last_chunk: dict[int, Any] = {}
+        restorer = _StreamRestorer(mapping, json_mapping, StreamingDeAnonymizer)
         async for chunk in response:
-            for choice in getattr(chunk, "choices", None) or []:
-                delta = getattr(choice, "delta", None)
-                if delta is None:
-                    continue
-                index = getattr(choice, "index", 0) or 0
-                last_chunk[index] = chunk
-                finished = getattr(choice, "finish_reason", None) is not None
-                self._restore_delta(delta, index, finished, _restore)
-                if finished:
-                    for key, remaining in _close_open(index):
-                        _append_remainder(delta, key, remaining)
+            restorer.restore_chunk(chunk, self._restore_delta)
             yield chunk
-        # The provider closed the stream without a finish_reason for a choice:
-        # its held tails go out as trailing chunks rather than vanishing here.
-        for key, remaining in _close_open(None):
-            template = last_chunk.get(key[1])
-            if template is not None:
-                yield _drain_chunk(template, key, remaining)
+        for drained in restorer.drain():
+            yield drained
 
     async def async_post_call_failure_hook(
         self,
