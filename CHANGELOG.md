@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [0.4.2] - 2026-08-14
+## [0.4.2] - 2026-08-23
 
 ### Added
 - A policy page (`docs/policy.md`) presenting `custom_patterns`,
