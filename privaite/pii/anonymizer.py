@@ -78,8 +78,10 @@ class Anonymizer:
             fake = self.generator.generate(entity_type, original)
             retries = 0
             while (fake == original or mapping.get_original(fake) is not None) and retries < 10:
-                fake = self.generator.generate_variant(entity_type, original, retries)
+                # generate() is variant 0: asking for it again would reproduce
+                # the candidate that just collided, so the retries walk 1..10.
                 retries += 1
+                fake = self.generator.generate_variant(entity_type, original, retries)
             if fake == original or mapping.get_original(fake) is not None:
                 # Retry exhaustion used to return the colliding value anyway,
                 # silently forwarding the original or cross-restoring another

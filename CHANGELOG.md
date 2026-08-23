@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- `fake_replacement`: the first retry after a collision asked the generator for
+  variant 0, the seed of the initial candidate, so it reproduced the collision
+  and the retry budget was effectively 9 of 10. Retries now walk variants 1 to
+  10.
+
 ## [0.4.2] - 2026-08-23
 
 ### Added

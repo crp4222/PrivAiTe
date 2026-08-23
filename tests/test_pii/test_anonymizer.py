@@ -288,3 +288,25 @@ def test_fake_replacement_recovers_via_variant_before_exhaustion():
     result = anon.anonymize("Hi John Smith", [_entity("PERSON", "John Smith", 3, 13)], mapping)
     assert result == "Hi Safe Fake"
     assert mapping.get_original("Safe Fake") == "John Smith"
+
+
+def test_fake_replacement_retries_never_reuse_the_initial_seed():
+    # generate() and generate_variant(..., 0) share salt 0: a retry asking for
+    # variant 0 reproduces the very candidate that just collided and burns one
+    # of the ten attempts for nothing. The retries must walk variants 1..10.
+    config = AnonymizationConfig(faker_locale=["en_US"], method="fake_replacement")
+    anon = Anonymizer(config)
+    gen = anon.generator
+    assert gen.generate_variant("PERSON", "John Smith", 0) == gen.generate("PERSON", "John Smith")
+
+    asked: list[int] = []
+
+    def _variant(etype: str, original: str, variant: int) -> str:
+        asked.append(variant)
+        return original  # keep colliding so every retry is exercised
+
+    anon.generator.generate = lambda etype, original: original
+    anon.generator.generate_variant = _variant
+    with pytest.raises(FakeReplacementExhaustedError):
+        anon.anonymize("Hi John Smith", [_entity("PERSON", "John Smith", 3, 13)], PIIMapping())
+    assert asked == list(range(1, 11))
