@@ -142,6 +142,17 @@ carries any payload other than fully-held-back content.
 core behavior change (fuzzy, block gate, a new restored/scanned field) must be
 mirrored in both.
 
+Each integration ships as ONE self-contained file (the filter is pasted verbatim
+onto the Open WebUI hub), so helpers they share exist as **copies**, not imports:
+`_restore_json_tree` and `_restore_arguments` today. The copies are the accepted
+price of that constraint, and the failure mode is real: a fix landing in one copy
+and not the other (it happened to the filter's declared privaite floor, which
+stayed behind while the file's content moved on). When you touch a shared helper
+or a mirrored behavior, apply it to BOTH files in the same change, then run
+`tests/test_integrations/test_parity.py`: it compares the copies' ASTs and fails
+on drift, and its `SHARED_HELPERS` list must grow when a new copied helper
+appears. If the change is deliberately one-sided, say why in the commit message.
+
 - OpenWebUI filter: `outlet` must **pop** the reversible map (Open WebUI may persist
   message metadata); do not stash it when `deanonymize` is off; clear any
   client-supplied incoming map in `inlet`.
