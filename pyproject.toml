@@ -71,7 +71,7 @@ dev = [
     "coverage>=7.0",
     # Pin the formatter too: a floating Ruff release can legitimately rewrite
     # already-formatted files, making the documented pre-release gate unstable.
-    "ruff==0.16.0",
+    "ruff==0.16.4",
     "mypy>=1.10",
 ]
 
