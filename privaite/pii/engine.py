@@ -13,6 +13,7 @@ from privaite.pii.deanonymizer import DeAnonymizer
 from privaite.pii.detector_base import PIIDetector
 from privaite.pii.entity import PIIEntity, merge_entities
 from privaite.pii.mapping import PIIMapping
+from privaite.pii.window_cache import inference_request
 
 logger = logging.getLogger("privaite.pii.engine")
 
@@ -225,6 +226,7 @@ class PIIEngine:
             await detector.shutdown()
         self._ready = False
 
+    @inference_request
     async def process_request(
         self, messages: list[dict[str, Any]]
     ) -> tuple[list[dict[str, Any]], PIIMapping]:
@@ -282,6 +284,7 @@ class PIIEngine:
         langs = self.config.detectors.presidio.languages
         return langs[0] if langs else "en"
 
+    @inference_request
     async def process_request_value(self, value: Any, mapping: PIIMapping) -> Any:
         """Anonymize one auxiliary request-side value (a string, or a JSON-like
         dict/list structure whose string and long-numeric leaves are scrubbed)
@@ -439,6 +442,7 @@ class PIIEngine:
             return [await self._walk_anonymize(item, mapping, language) for item in value]
         return value
 
+    @inference_request
     async def scrub_document(
         self, value: Any, mapping: PIIMapping | None = None
     ) -> tuple[Any, PIIMapping]:

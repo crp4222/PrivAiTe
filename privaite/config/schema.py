@@ -135,6 +135,9 @@ class OnnxDetectorConfig(_PrivacyFilterDetectorConfig):
     onnx_variant: str = "q4f16"
     max_length: int = 128000
     cache_dir: str | None = None
+    # Reuse identical ONNX input windows during one scrub call only. Unlike the
+    # opt-in detection_cache, nothing survives the request (including on error).
+    deduplicate_windows: bool = True
 
 
 class BertNERDetectorConfig(StrictModel):

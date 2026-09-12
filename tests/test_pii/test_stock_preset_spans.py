@@ -102,3 +102,27 @@ async def test_stock_preset_emits_a_span_containing_a_backslash(stock_engine):
     spans = await _span_texts(stock_engine, _BACKSLASH_PATHS)
 
     assert any("\\" in span for span in spans), "no backslash-carrying span in the stock detections"
+
+
+@requires_stock_model
+@pytest.mark.asyncio
+async def test_stock_preset_preserves_tool_result_syntax_and_restores_only_values(stock_engine):
+    import json
+
+    email = "camille.martin@example.com"
+    phone = "+33 6 12 34 56 78"
+    messages = [
+        {"role": "tool", "content": f"7: SUPPORT_EMAIL={email}"},
+        {"role": "tool", "content": f"Support contact: <{email}>"},
+        {"role": "tool", "content": json.dumps({"email": email, "phone": phone})},
+    ]
+    scrubbed, mapping = await stock_engine.process_request(messages)
+    email_token = mapping.get_fake(email)
+    assert email_token is not None
+    assert scrubbed[0]["content"] == f"7: SUPPORT_EMAIL={email_token}"
+    assert scrubbed[1]["content"] == f"Support contact: <{email_token}>"
+    assert json.loads(scrubbed[2]["content"]) == {
+        "email": email_token,
+        "phone": mapping.get_fake(phone),
+    }
+    assert await stock_engine.process_response(email_token, mapping) == email

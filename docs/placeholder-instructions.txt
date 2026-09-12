@@ -1,0 +1,14 @@
+Some input values are replaced locally with privacy placeholders such as
+<EMAIL_ADDRESS_1>, <PERSON_1>, or <PHONE_NUMBER_1>. Treat them as opaque values.
+
+When referring to one of these values, copy its placeholder exactly, preserving
+the brackets, spelling, case and number. This also applies to tool arguments and
+structured output. Keep the surrounding JSON or other required format valid.
+
+Do not replace placeholders with plausible examples, rename them, infer their
+original values, or invent a value that is missing from the input. State when
+the available information is insufficient to complete the task.
+
+[SECRET] and masked values are intentionally unrecoverable. Do not try to
+reconstruct them. These instructions do not grant permission to read files or
+use tools; continue to follow the application's access and approval rules.

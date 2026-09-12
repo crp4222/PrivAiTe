@@ -121,6 +121,34 @@ pii:
 map, so nothing is restored in responses for those types (and two values that mask
 to the same string can never cross-restore).
 
+### Helping an agent preserve placeholders
+
+Restoration matches the actual placeholder, not the model's interpretation of it.
+If the model invents a plausible email instead of copying `<EMAIL_ADDRESS_1>`,
+there is no matching value to restore. A cooperative agent can use these
+instructions in its system/developer prompt (also available as a
+[copyable English file](placeholder-instructions.txt)):
+
+> Preserve privacy placeholders exactly, including in tool arguments and structured
+> output. Do not rename them, substitute plausible examples, or infer their original
+> values. Keep the surrounding output format valid. Treat `[SECRET]` and masked
+> values as unrecoverable. State when required information is missing.
+
+PrivAiTe does not inject this prompt automatically or change agent permissions.
+The instruction improves response fidelity; it does not enforce confidentiality
+or make an untrusted endpoint obey. If a lab endpoint replaces client system
+messages, place the instruction in the effective operator prompt for a cooperative
+test, or explicitly test the behavior without it.
+
+Incorrect detection boundaries are a separate issue: copying a placeholder exactly
+also restores any extra characters mistakenly included in its original value.
+The built-in detectors now preserve matched surrounding quotes/angle brackets for
+emails, phones and URLs, common email assignment labels (including line-numbered
+tool results), and the `<path>` wrapper around a detected path. Refinement happens
+before overlapping detections are merged. Arbitrary punctuation in secrets and
+explicit custom-pattern boundaries are not trimmed. Path contents are still
+scanned, and false positives or other over-broad spans remain possible.
+
 ## Entity overrides (per-type methods)
 
 `anonymization.method` is the default for every type; `entity_overrides` changes
@@ -183,6 +211,29 @@ type or enabling a detector that produces it (a `label_mapping` value, a Presidi
 entity, or a `custom_patterns` entity type).
 
 ## Detection cache (agent sessions)
+
+### Repeated ONNX windows within one request
+
+The ONNX detector reuses predictions for **identical model input windows within
+one scrub operation** by default (`pii.detectors.onnx.deduplicate_windows: true`).
+Small changes to a log header no longer force identical windows farther down that
+log to be evaluated again when several tool results appear in the same request.
+The model, window size, overlap, thresholds and scan coverage stay the same.
+
+This is separate from the opt-in cache below. Each outer engine or gateway scrub
+call gets its own bounded cache (128 windows). Keys are salted hashes of the
+session identity and the exact input tensors, including their shapes and masks.
+Only per-token detection labels and confidence scores are kept. Text, input token
+IDs, logits, original offsets and reversible maps are not cached. Offsets are
+taken from the current text. The cache is cleared at the end of the operation,
+including on errors and cancellation; a late worker cannot repopulate it.
+
+In-process integrations inherit this through their engine calls. Separate engine
+calls outside a shared scope do not retain predictions between them. Concurrent
+requests have separate caches. This optimization helps repeated content, not a
+stream of entirely new windows; set `deduplicate_windows: false` for an A/B check.
+
+### Repeated text across requests
 
 Agent CLIs (Claude Code, Codex) resend the entire growing conversation on every
 turn, so the proxy re-scans mostly identical bytes: O(n) detector work per turn,

@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from privaite.config.schema import PresidioDetectorConfig
+from privaite.pii.boundaries import refine_boundary
 from privaite.pii.detector_base import PIIDetector
 from privaite.pii.entity import PIIEntity
 
@@ -179,15 +180,17 @@ class PresidioDetector(PIIDetector):
             ):
                 continue
 
+            entity = PIIEntity(
+                entity_type=result.entity_type,
+                text=span,
+                start=result.start,
+                end=result.end,
+                score=result.score,
+                source="presidio",
+            )
+            # An explicit custom regex controls its own match/capture boundary.
             pii_entities.append(
-                PIIEntity(
-                    entity_type=result.entity_type,
-                    text=span,
-                    start=result.start,
-                    end=result.end,
-                    score=result.score,
-                    source="presidio",
-                )
+                entity if recognizer == "CustomPatternRecognizer" else refine_boundary(text, entity)
             )
 
         return pii_entities

@@ -9,8 +9,10 @@ from typing import Any
 import numpy as np
 
 from privaite.config.schema import OnnxDetectorConfig
+from privaite.pii.boundaries import refine_boundary
 from privaite.pii.detector_base import PIIDetector
 from privaite.pii.entity import PIIEntity
+from privaite.pii.window_cache import current_window_cache, inference_request
 
 logger = logging.getLogger("privaite.pii.detector_onnx")
 
@@ -336,6 +338,7 @@ class OnnxPrivacyFilterDetector(PIIDetector):
         # boot, so this is no longer a silent catch-all for typos.
         return ["CPUExecutionProvider"]
 
+    @inference_request
     async def detect(self, text: str, language: str = "en") -> list[PIIEntity]:
         if self._session is None or self._tokenizer is None:
             raise RuntimeError("OnnxPrivacyFilterDetector not initialized")
@@ -362,7 +365,7 @@ class OnnxPrivacyFilterDetector(PIIDetector):
                 )
             )
 
-        return pii_entities
+        return [refine_boundary(text, entity) for entity in pii_entities]
 
     def _window_geometry(self) -> tuple[int, int]:
         """Effective (window, overlap) in tokens. ``max_length`` used to be a
@@ -398,11 +401,25 @@ class OnnxPrivacyFilterDetector(PIIDetector):
             if key in input_names and key in encoding:
                 feed[key] = np.asarray([encoding[key][row]], dtype=np.int64)
 
-        logits = self._session.run(None, feed)[0][0]
-        exp = np.exp(logits - logits.max(axis=-1, keepdims=True))
-        probs = exp / exp.sum(axis=-1, keepdims=True)
-        pred_ids = probs.argmax(axis=-1)
-        pred_scores = probs.max(axis=-1)
+        cache = current_window_cache() if self.config.deduplicate_windows else None
+        cache_key = None
+        if cache is not None:
+            cache_key = cache.key(
+                self._session,
+                [(name, value.shape, value.tobytes()) for name, value in sorted(feed.items())],
+            )
+        predictions = cache.get(cache_key) if cache is not None and cache_key is not None else None
+        if predictions is None:
+            logits = self._session.run(None, feed)[0][0]
+            exp = np.exp(logits - logits.max(axis=-1, keepdims=True))
+            probs = exp / exp.sum(axis=-1, keepdims=True)
+            predictions = (
+                tuple(int(label) for label in probs.argmax(axis=-1)),
+                tuple(float(score) for score in probs.max(axis=-1)),
+            )
+            if cache is not None and cache_key is not None:
+                cache.put(cache_key, predictions)
+        pred_ids, pred_scores = predictions
 
         labels: list[str] = []
         scores: list[float] = []

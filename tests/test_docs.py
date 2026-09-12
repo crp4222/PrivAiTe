@@ -58,10 +58,10 @@ def test_llms_txt_announces_the_shipped_versions() -> None:
     assert filter_match is not None
     filter_version = filter_match.group(1)
 
-    assert f"privaite {package_version} on PyPI" in text, (
+    assert f"Source version: privaite {package_version}" in text, (
         f"llms.txt does not announce the shipped package version {package_version}"
     )
-    assert f"current release privaite {package_version}" in text
+    assert f"current source privaite {package_version}" in text
     assert f"filter v{filter_version}" in text, (
         f"llms.txt does not announce the shipped filter version {filter_version}"
     )

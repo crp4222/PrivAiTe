@@ -4,9 +4,27 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.4.3] - 2026-09-12
+
+### Added
+- Copyable English instructions for agents to preserve privacy placeholders in
+  responses and tool arguments, with the distinction between prompting, detection
+  boundaries and irreversible redaction documented.
+
+### Changed
+- ONNX reuses identical input-window predictions during an engine/gateway scrub
+  call. The request-local, 128-window cache holds salted hashes and detection
+  metadata only, uses each text's live offsets, and closes on completion, failure
+  or cancellation. It is isolated between requests and can be disabled with
+  `pii.detectors.onnx.deduplicate_windows: false` for comparison.
+- Open WebUI filter 0.1.11 requires `privaite>=0.4.3`; both in-process integrations
+  inherit the detector changes from the shared engine.
 
 ### Fixed
+- Built-in email, phone and URL detections no longer consume matched surrounding
+  delimiters, common email assignment labels or `<path>` wrappers. Boundaries are
+  refined before union merging, so a padded detection cannot widen a correctly
+  bounded neighbour. Secret punctuation and custom-pattern spans stay intact.
 - The ONNX detector reported spans that included the space preceding the value
   (`' Marie Dupont'`), because the tokenizer attaches that space to the word.
   The anonymizer then swallowed the separator (`'I am<PERSON_1>'`) and the

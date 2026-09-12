@@ -117,6 +117,8 @@ Read the 100% precisely, it is structural, not absolute: of the PII PrivAiTe det
 
 Two honesty notes, both favoring caution. LLM Guard's detection model is fine-tuned on the exact dataset behind this corpus, so its recall here is optimistic; PrivAiTe's default model is not (OpenAI's model card states it did not train on it). An out-of-distribution cross-check on two independent corpora confirms the default generalizes: ~84% held on Gretel finance text while the AI4Privacy-tuned model drops to ~62% ([OOD_COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md)).
 
+Rechecked against the 0.4.3 source on 2026-09-12: recall, strict recall and clean-document false positives are unchanged. The `onnx` and `light` latencies below are means per corpus document from that local run, not large agent-request latency guarantees.
+
 Per-language and per-entity tables, competitor configs, methodology, reproduction: [privaite-bench](https://github.com/crp4222/privaite-bench). Feature comparison: [docs/comparison.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/comparison.md).
 
 There is also a live agent-workflow benchmark: a repository with 24 planted PII values and secrets, driven through real Claude Code and Codex sessions, with a recording proxy measuring what actually reaches the provider. Directly, Claude Code sent 24/24 planted values and Codex 20/24. Through the [gateway](https://github.com/crp4222/PrivAiTe/blob/main/docs/gateway.md) with the default `onnx` preset, 0/24 reached the provider on that fixture; on a larger realistic session, 2 of 24 still got through, both secrets in `key=value` log lines that the detector catches on their own but misses once a line of log-shaped context precedes them (the mechanism, and the fact that it affects every surface, is in the [threat model](https://github.com/crp4222/PrivAiTe#threat-model)), so treat it as a strong measured reduction, not zero leaks. The write-up of the finding, method and miss mechanism is [here](https://github.com/crp4222/PrivAiTe/blob/main/docs/agent-leak-measurement.md); the full matrix, latency and cache measurements are in [agent_workflow/RESULTS.md](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md).
@@ -125,8 +127,8 @@ There is also a live agent-workflow benchmark: a repository with 24 planted PII 
 
 | Preset | What runs | Recall\* | False positives | Latency | Secrets |
 |--------|-----------|----------|-----------------|---------|---------|
-| `onnx` (default) | Presidio + Privacy Filter | **84.9%** | 2 / 14 | ~0.5s | **yes** |
-| `light` | Presidio only | 62.4% | 3 / 14 | ~60ms | no |
+| `onnx` (default) | Presidio + Privacy Filter | **84.9%** | 2 / 14 | ~630ms | **yes** |
+| `light` | Presidio only | 62.4% | 3 / 14 | ~105ms | no |
 | `max` | onnx + GLiNER | higher OOD | more | ~0.7s | **yes** |
 
 \*Span recall on the AI4Privacy benchmark above. `max` adds GLiNER (trained on data independent of AI4Privacy): on out-of-distribution corpora it raises recall by several points at the cost of more false positives and a torch dependency (`pip install 'privaite[gliner]'`); with it selected but not installed, the proxy fails at startup with an install hint rather than silently degrading.
@@ -149,6 +151,12 @@ NOT scanned (know your surface): `messages[].name`, top-level `user`/`metadata`,
 
 PrivAiTe performs **local pseudonymization**, not guaranteed anonymization. Detection runs on your machine; the real ↔ placeholder mapping lives in memory only for the duration of a request and is dropped afterwards.
 
+Identical ONNX windows can reuse detection predictions within that same scrub
+operation. This bounded cache contains salted input hashes and detection labels/
+scores only, uses the current text's offsets, and is cleared on completion or
+cancellation. It does not retain input text, token IDs or mappings between requests.
+See [request-local window reuse](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#repeated-onnx-windows-within-one-request).
+
 **What it protects against:** the LLM provider storing, training on, or logging your raw PII. The provider receives placeholders (`<PERSON_1>`, …) for everything the detector catches, across message content, tool-call arguments, and multimodal text.
 
 **What it does NOT protect against:**
@@ -158,6 +166,10 @@ PrivAiTe performs **local pseudonymization**, not guaranteed anonymization. Dete
 - **Re-identification from context.** Even with names replaced, the surrounding text can stay identifying ("the CEO of `<ORG_1>` who resigned in March").
 - **A compromised local machine.** The mapping and raw text live in local memory; this is not a defense against a local attacker.
 - **The provider correlating** requests within a session.
+- **A model inventing replacement values.** Restoration requires the model to
+  preserve the placeholder. The [English agent instructions](https://github.com/crp4222/PrivAiTe/blob/main/docs/placeholder-instructions.txt)
+  help a cooperative model copy placeholders, including in tool arguments; they
+  cannot enforce its behavior or repair a missed detection.
 - **The agent itself, in [gateway mode](https://github.com/crp4222/PrivAiTe/blob/main/docs/gateway.md).** The CLI keeps the real values in its own context and local transcripts; only the traffic to the provider is scrubbed. And the agent's own prompt (the Anthropic `system` field, the Responses `instructions` field) is relayed unscanned, so PII in your `CLAUDE.md` or injected project context reaches the provider.
 
 **If you enable the detection cache** (`pii.detection_cache`, off by default), one nuance is added to the promise above. The reversible mapping is still per-request and still dropped when the request ends. But the cache keeps PII-derived **metadata** in process memory for up to its TTL (default 30 minutes) after a request ends: salted BLAKE2b hashes of recently scanned text fragments, plus the positions, types, scores and detector sources of the PII spans found in them. An expired entry is never served again; it is removed from memory on the first cache write after its expiry, and the whole cache is cleared at shutdown, so only a process that goes completely idle keeps its last (expired, unusable) entries longer, until that next write or shutdown. No text, no PII values, no anonymized output, and nothing on disk. The honest delta: an attacker who can already read process memory (who today sees every in-flight request and its full mapping) additionally gains, for up to the TTL after traffic stops (longer only in the idle-process case above), (a) confirmation that a specific candidate text was recently processed, since the hash salt sits in the same memory, and (b) the positions and types of PII inside documents they obtained elsewhere. They gain no raw values and no ability to reverse placeholders. In multi-user deployments there is also a dedup timing side channel: the cache is shared across auth keys, and a cache hit is observably faster than a miss, so one user can in principle probe whether an exact text was recently sent by another. Leave the cache off if any of this matters for your deployment; enable it for [agent CLI sessions](https://github.com/crp4222/PrivAiTe/blob/main/docs/gateway.md), where it removes the cost of re-scanning the entire resent conversation on every turn.

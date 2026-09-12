@@ -19,6 +19,7 @@ from typing import Any
 
 from privaite.pii.engine import PIIEngine
 from privaite.pii.mapping import PIIMapping
+from privaite.pii.window_cache import inference_request
 
 # Anthropic rejects modified thinking blocks echoed back on a later turn, so
 # they are never scrubbed on the way out (nor restored on the way back).
@@ -104,6 +105,7 @@ _BINARY_PART_TYPES = frozenset(
 )
 
 
+@inference_request
 async def scrub_anthropic_request(
     engine: PIIEngine, body: dict[str, Any]
 ) -> tuple[dict[str, Any], PIIMapping]:
@@ -290,6 +292,7 @@ async def _scrub_search_result_block(
     return new_block
 
 
+@inference_request
 async def scrub_responses_request(
     engine: PIIEngine, body: dict[str, Any]
 ) -> tuple[dict[str, Any], PIIMapping]:
