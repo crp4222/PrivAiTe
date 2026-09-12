@@ -552,3 +552,50 @@ async def test_initialize_creates_session_with_selected_providers(monkeypatch, t
     assert created["tokenizer_args"] == ("openai/privacy-filter", False)
     assert detector._session.get_providers() == ["CPUExecutionProvider"]
     assert detector._tokenizer == "tokenizer"
+
+
+# ---------------------------------------------------------------------------
+# Span boundaries: the tokenizer includes the space before a word
+# ---------------------------------------------------------------------------
+
+
+def test_multi_token_span_drops_the_leading_space_from_the_tokenizer():
+    # Offsets come straight from the tokenizer, which attaches the preceding
+    # space to the word. Kept, the anonymizer produced 'I am<PERSON_1>' and the
+    # restore put the space back inside the value: double spaces in text, and a
+    # tool-call argument like {"to": " marie@..."} sent verbatim by the client.
+    text = "I am Marie Dupont"
+    labels = ["O", "O", "B-PERSON", "E-PERSON"]
+    scores = [0.1, 0.1, 0.9, 0.9]
+    offsets = [(0, 1), (1, 4), (4, 10), (10, 17)]
+    spans = decode_bioes_spans(labels, scores, offsets, text)
+    assert [(s["start"], s["end"]) for s in spans] == [(5, 17)]
+    assert spans[0]["text"] == "Marie Dupont"
+
+
+def test_single_token_span_is_trimmed_the_same_way():
+    text = "I am Marie"
+    labels = ["O", "O", "S-PERSON"]
+    scores = [0.1, 0.1, 0.9]
+    offsets = [(0, 1), (1, 4), (4, 10)]
+    spans = decode_bioes_spans(labels, scores, offsets, text)
+    assert [(s["start"], s["end"], s["text"]) for s in spans] == [(5, 10, "Marie")]
+
+
+def test_trailing_whitespace_is_trimmed_too():
+    text = "Marie  is here"
+    labels = ["B-PERSON", "E-PERSON"]
+    scores = [0.9, 0.9]
+    offsets = [(0, 5), (5, 7)]
+    spans = decode_bioes_spans(labels, scores, offsets, text)
+    assert [(s["start"], s["end"], s["text"]) for s in spans] == [(0, 5, "Marie")]
+
+
+def test_whitespace_only_span_is_dropped_entirely():
+    # Trimming must not leave a zero-length span behind: an empty placeholder
+    # would map to nothing and corrupt the restore offsets.
+    text = "a   b"
+    labels = ["O", "S-PERSON", "O"]
+    scores = [0.1, 0.9, 0.1]
+    offsets = [(0, 1), (1, 4), (4, 5)]
+    assert decode_bioes_spans(labels, scores, offsets, text) == []

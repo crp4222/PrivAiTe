@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- The ONNX detector reported spans that included the space preceding the value
+  (`' Marie Dupont'`), because the tokenizer attaches that space to the word.
+  The anonymizer then swallowed the separator (`'I am<PERSON_1>'`) and the
+  restore put the space back INSIDE the value: replies came back with double
+  spaces, and a tool-call argument came back as `{"to": " marie@..."}`, which
+  the client sends verbatim. Spans are now trimmed where they are decoded,
+  which also stops the union merge from widening a correctly bounded Presidio
+  span onto its neighbour.
 - LiteLLM guardrail: the streaming restore dropped a held-back tail whenever
   the finish chunk did not carry that channel. The common bare `delta: {}`
   finish lost the end of a reasoning trace or a refusal, and the fragment of a

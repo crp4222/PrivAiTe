@@ -117,6 +117,42 @@ def _parse_tag(label: str) -> tuple[str, str]:
     return (prefix, entity)
 
 
+def _append_span(
+    spans: list[dict],
+    text: str,
+    entity_type: str,
+    start: int,
+    end: int,
+    score: float,
+) -> None:
+    """Append one span, with surrounding whitespace trimmed off.
+
+    The tokenizer reports offsets that include the space preceding a word, so a
+    raw span reads `' Marie Dupont'`. Kept as is, the anonymizer swallows the
+    separator (`'I am<PERSON_1>'`) and the restore puts it back INSIDE the
+    value: text comes back with double spaces, and a structured field such as a
+    tool-call argument comes back as `{"to": " marie@..."}`, which the client
+    then sends verbatim. Whitespace is never PII, so trimming here loses
+    nothing and keeps every downstream span honest (the union merge widens
+    overlapping spans, so one padded span would otherwise pad its neighbours).
+    """
+    while start < end and text[start].isspace():
+        start += 1
+    while end > start and text[end - 1].isspace():
+        end -= 1
+    if start >= end:
+        return
+    spans.append(
+        {
+            "entity_type": entity_type,
+            "text": text[start:end],
+            "start": start,
+            "end": end,
+            "score": score,
+        }
+    )
+
+
 def decode_bioes_spans(
     labels: Sequence[str],
     scores: Sequence[float],
@@ -135,15 +171,7 @@ def decode_bioes_spans(
         start = offsets[current_tokens[0]][0]
         end = offsets[current_tokens[-1]][1]
         avg_score = float(np.mean([scores[i] for i in current_tokens]))
-        spans.append(
-            {
-                "entity_type": current_type,
-                "text": text[start:end],
-                "start": start,
-                "end": end,
-                "score": avg_score,
-            }
-        )
+        _append_span(spans, text, current_type, start, end, avg_score)
         current_tokens, current_type = [], None
 
     for idx, label in enumerate(labels):
@@ -152,15 +180,7 @@ def decode_bioes_spans(
         if prefix == "S":
             _flush()
             s, e = offsets[idx][0], offsets[idx][1]
-            spans.append(
-                {
-                    "entity_type": etype,
-                    "text": text[s:e],
-                    "start": s,
-                    "end": e,
-                    "score": float(scores[idx]),
-                }
-            )
+            _append_span(spans, text, etype, s, e, float(scores[idx]))
 
         elif prefix == "B":
             _flush()
