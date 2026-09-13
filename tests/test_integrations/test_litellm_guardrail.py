@@ -27,6 +27,19 @@ def _guardrail():
 
 
 @pytest.mark.asyncio
+async def test_pre_call_scrubs_structured_secret_in_tool_output():
+    gr = _guardrail()
+    data = await gr.async_pre_call_hook(
+        None,
+        None,
+        {"messages": [{"role": "tool", "content": "INFO status=ok\npresented_key=fixture-only"}]},
+        "completion",
+    )
+    assert "fixture-only" not in data["messages"][0]["content"]
+    assert "presented_key=" in data["messages"][0]["content"]
+
+
+@pytest.mark.asyncio
 async def test_pre_call_anonymizes_text_and_tool_call_args():
     gr = _guardrail()
     data = {

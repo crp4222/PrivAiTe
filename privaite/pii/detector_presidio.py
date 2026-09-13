@@ -22,11 +22,13 @@ def build_recognizers(lang: str, custom_patterns: Sequence[Any] = ()) -> list[An
     from privaite.pii.recognizer_context import ContextualNameRecognizer
     from privaite.pii.recognizer_fr_date import FrenchDateRecognizer
     from privaite.pii.recognizer_location import ContextualLocationRecognizer
+    from privaite.pii.recognizer_secret import StructuredSecretRecognizer
 
     recognizers: list[Any] = [
         ContextualNameRecognizer(supported_language=lang),
         FrenchDateRecognizer(supported_language=lang),
         ContextualLocationRecognizer(supported_language=lang),
+        StructuredSecretRecognizer(supported_language=lang),
     ]
     if custom_patterns:
         from privaite.pii.recognizer_custom import CustomPatternRecognizer

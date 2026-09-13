@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Local structured-secret recognition for common credential assignments in
+  plaintext tool outputs, connection URI passwords and Authorization bearer
+  values. These rules run with Presidio under both `light` and `onnx`, preserve
+  labels and quoted delimiters, and supplement all other detectors.
+
+### Fixed
+- Overlapping types now obey the configured privacy policy before detector
+  confidence: blocked types win, then irreversible types, then the existing
+  resolution strategy. A detected secret can no longer become reversible or
+  bypass a block rule just because an overlapping email has a higher score.
+- Detection-cache keys include the overlap-relevant policy to prevent stale
+  merged types after a policy change. Cached data remains hashes and spans only.
+
 ## [0.4.3] - 2026-09-12
 
 ### Added

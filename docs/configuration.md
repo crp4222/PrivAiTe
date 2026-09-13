@@ -183,6 +183,13 @@ reply; keep it, or extend it to more types, if you would rather they never come
 back at all. Each override takes `method` (`placeholder`, `fake_replacement`,
 `redact`, `mask`) and, for `mask`, `masking_char`.
 
+**Unreleased source:** when entity types overlap, `block_entities` takes
+precedence, then irreversible methods (`redact`/`mask`), then the configured
+overlap resolution. This prevents a higher-confidence EMAIL span from making
+an overlapping redacted SECRET reversible. All detected characters remain
+covered by the merged span. Both redact and mask have equal priority; neither
+can be restored. The detection cache includes the policy in its fingerprint.
+
 An override is about *how* a type is replaced. If a type must not be sent at
 all, even as a stand-in, use [`block_entities`](#blocking-specific-pii-types-hard-policy-gate)
 instead: that rejects the whole request.

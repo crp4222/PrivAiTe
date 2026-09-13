@@ -608,6 +608,8 @@ class PIIEngine:
                 json.dumps([p.model_dump() for p in cfg.custom_patterns], sort_keys=True),
                 cfg.merge_strategy,
                 cfg.overlap_resolution,
+                self.anonymizer.config.model_dump_json(),
+                json.dumps(sorted(self._blocked)),
             )
         )
         return hashlib.blake2b(payload.encode("utf-8"), digest_size=16).digest()
@@ -651,6 +653,14 @@ class PIIEngine:
                 strategy=self.config.merge_strategy,
                 overlap_resolution=self.config.overlap_resolution,
                 source_text=text,
+                type_priorities={
+                    entity.entity_type: (
+                        2
+                        if entity.entity_type in self._blocked
+                        else int(self.anonymizer.is_irreversible(entity.entity_type))
+                    )
+                    for entity in all_entities
+                },
             )
         except Exception:
             # merge_entities receives source_text for overlap resolution; keep

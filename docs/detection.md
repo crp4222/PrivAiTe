@@ -24,8 +24,9 @@ The default engine. Handles structured PII through pattern matching and basic NE
 | Person names (capitalized, 2+ words) | spaCy NER, only kept if all words are capitalized |
 | Person names (lowercase or single word) | Contextual regex, only after "je m'appelle X", "my name is X", "ich heiße X", "Nom: X", etc. |
 | Dates (FR/DE) | Custom regex, "15 mars 1987", "3. März 1990" |
+| Structured secrets (unreleased source) | PrivAiTe patterns for credential assignments, URI passwords and Authorization bearer values |
 
-Presidio is fast (tens of ms/request) and produces very few false positives on code, news articles, and technical text. The tradeoff: it misses names that spaCy doesn't recognize (unusual names, single-word names without context) and doesn't detect secrets/passwords.
+Presidio is faster than the contextual model and produces few false positives on the clean benchmark documents. It misses names that spaCy doesn't recognize and arbitrary passwords without a recognized field name or URI/header structure.
 
 ## OpenAI Privacy Filter: contextual ML model
 
@@ -38,13 +39,13 @@ Presidio is fast (tens of ms/request) and produces very few false positives on c
 | Account numbers | Detects bank account numbers, policy numbers, etc. |
 | Dates (all languages) | ML-based, not limited to FR/DE regex |
 
-The Privacy Filter is slower (~400ms/request) and occasionally flags technical identifiers as account numbers (e.g., "CMD-2024-98765"). It runs as a second pass alongside Presidio, which handles the regex-based entities while the Privacy Filter handles contextual NER.
+The Privacy Filter adds model-inference cost and occasionally flags technical identifiers as account numbers (e.g., "CMD-2024-98765"). It runs concurrently with Presidio, which handles structured formats while the Privacy Filter handles contextual NER. Cost depends on input length; the benchmark reports the combined engine latency.
 
 ## Why two engines?
 
 Neither is perfect alone:
 
-- **Presidio alone** misses names that spaCy doesn't recognize, and can't detect secrets. But it has very few false positives.
+- **Presidio with PrivAiTe's recognizers** catches specific credential formats, but misses unfamiliar names and secrets without those structural cues.
 - **Privacy Filter alone** misses some names in credit/list formats, and doesn't have regex validators for IBAN/credit card checksums.
 - **Both together** cover each other's blind spots. Presidio handles structured formats with validation, the Privacy Filter handles context-dependent PII.
 
@@ -55,30 +56,51 @@ The default `onnx` preset does detect personal addresses (as `LOCATION`) and per
 - **Generic place names (the Presidio LOCATION recognizer):** "Paris" or "London" on their own aren't PII, and spaCy flags ordinary words ("Kubernetes", "Saturday") as locations. The `onnx` preset keeps this recognizer off and relies on the model's context-aware address detection instead. PrivAiTe's own cue-based location patterns ("elle habite à X", "lives in X", "domicilié à X") do fire under every preset: they require a residence cue, so they do not carry spaCy's false-positive rate. Any recognizer PrivAiTe registers, and any `custom_patterns` type, is exempt from a preset's entity allowlist; the allowlist only scopes Presidio's own recognizers.
 - **The Presidio URL regex:** it matches code like `logging.getLogger` because `.ge` is a valid TLD. The `onnx` preset keeps it off, and the model still catches genuine personal URLs.
 
-On the `light` preset (Presidio only), addresses and URLs are not detected. Secrets and passwords are detected only by the `onnx` preset. Any recognizer can be turned on in the YAML config.
+The `light` preset has no contextual Privacy Filter model. The unreleased source adds the same structured-secret rules to every preset that enables Presidio. Broad password recognition still requires an ML detector; these rules do not make `light` equivalent to `onnx`.
+
+## Structured credentials and overlapping types (unreleased)
+
+The new rules supplement detection; they never short-circuit the NLP engines.
+They recognize common assignment names (`api_key`, `apiKey`, `access_token`,
+`refresh_token`, `auth_token`, `client_secret`, `password`, `passwd`,
+`smtp_secret`, `presented_key`) and underscore-prefixed environment variants
+such as `OPENAI_API_KEY` and `DB_PASSWORD`, case-insensitively. They also
+recognize passwords in `scheme://user:password@host` and plaintext
+`Authorization: Bearer ...` headers.
+
+For quoted assignments, only the value is replaced: `api_key="demo-only"`
+becomes `api_key="[SECRET]"` with the shipped redaction policy. Escaped quotes
+are included in the value. Bare values extend to whitespace; punctuation may
+be part of a password and is not stripped. Use quotes when a comma or brace
+must be unambiguously preserved as syntax.
+
+Overlapping detections now respect policy before confidence: a blocked type
+wins over other types; a type configured with `redact` or `mask` wins over a
+reversible type. Equal-policy matches use the configured overlap resolution.
+The union still covers every detected character, so an overlapping EMAIL
+detection can widen a URI password's redaction to include the host. The cache
+fingerprint includes this policy; it cannot replay an obsolete winner.
+
+These changes are in source, **not the published 0.4.3 package**. The earlier
+agent-session measurements remain historical results; an offline replay of
+the synthetic fixture is not a new live-agent measurement.
+The [regression replay report](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/STRUCTURED_SECRETS.md)
+contains the before/after counts, individual timings and reproduction commands.
 
 ## Known limitations
 
 - **Single-word names** from spaCy are dropped (too many false positives). Caught by contextual patterns ("Nom: X") or the `onnx` preset.
 - **Lowercase names** need intro patterns ("je m'appelle X"). The `onnx` preset catches them without patterns.
 - **Informal dates** ("last Tuesday", "il y a deux ans") are not detected.
-- **Secrets in log output, once a line of context precedes them.** This one is
-  measured and reproducible, not a hypothesis. The two secrets behind the agent
-  benchmark's 2/24 figure are detected on their own: in `.env` assignment form
-  and on an isolated log line, both are scrubbed. They are missed once roughly
-  **one preceding line of log-shaped context** sits in front of them. A 7-line,
-  ~1 KB excerpt of that log already reproduces it (the API key survives all 5 of
-  its occurrences there, the SMTP password 4 of 5), and 41-line windows leak
-  4 of 5 and 3 of 5. The effect is **order dependent**: text appended *after*
-  the line never triggers it, only text before it does. It is a property of the
-  detector, so it holds on every surface that runs the engine (the
-  OpenAI-compatible proxy, the Open WebUI filter, the LiteLLM guardrail), not
-  only on the [agent CLI gateway](gateway.md). If you pipe raw application logs
-  through an LLM, assume secrets in them can survive.
-- **A password inside a connection URL can be typed as an email.** Presidio's
-  `EMAIL_ADDRESS` recognizer scores 1.0 over the userinfo part of a URI, so
-  `postgres://user:pass@host/db` can be detected and replaced as an email rather
-  than as a `SECRET`. It still leaves the machine as a placeholder, but under the
-  shipped configs it is then reversible (placeholder) instead of irreversible
-  (redact), which is not what an operator blocking or redacting secrets expects.
+- **Secrets without recognized structure can still survive.** The contextual
+  model missed two secrets in the historical agent benchmark when preceding
+  log lines changed its predictions. The new patterns target that fixture's
+  `presented_key` and `smtp_secret` fields; arbitrary field names, encoded or
+  fragmented values and unfamiliar formats still need detection or custom rules.
+  Parsed tool-call JSON is scanned value by value: a `password` object key is
+  not automatically supplied as context to a bare string value.
+- **Boundaries remain conservative.** Policy-aware merging prevents a detected
+  SECRET from becoming reversible because EMAIL scored higher. It cannot
+  correct a missing SECRET detection, and overlapping spans can still remove
+  useful surrounding text.
 - **Unscanned request fields**: see [the scanned surface](api.md#what-gets-anonymized).
