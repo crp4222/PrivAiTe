@@ -53,7 +53,7 @@ older one the filter refuses the request rather than silently forwarding the PII
 
   ```dockerfile
   FROM ghcr.io/open-webui/open-webui:main
-  RUN pip install --no-cache-dir privaite>=0.4.3 && \
+  RUN pip install --no-cache-dir "privaite>=0.4.3" && \
       python -m spacy download en_core_web_lg
   ```
 

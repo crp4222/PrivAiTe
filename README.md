@@ -30,17 +30,17 @@ This is local pseudonymization, not anonymization, and detection is best-effort 
 docker run -d -p 8400:8400 \
   -e PRIVAITE_API_KEYS=change-me \
   -e OPENAI_API_KEY=sk-... \
-  ghcr.io/crp4222/privaite
+  ghcr.io/crp4222/privaite:0.4.3
 ```
 
-The same image is on Docker Hub too: swap the last line for `crp4222/privaite` if you prefer pulling from there.
+The same image is on Docker Hub too: swap the last line for `crp4222/privaite:0.4.3` if you prefer pulling from there. Release details: [PrivAiTe 0.4.3](https://github.com/crp4222/PrivAiTe/releases/tag/v0.4.3).
 
 Two keys, two roles: `PRIVAITE_API_KEYS` is the key your client sends to PrivAiTe (pick any value); `OPENAI_API_KEY` is your real provider key, which stays in the container and never reaches your client. This exposes `gpt-4o-mini` and `gpt-4o`; for any other provider (Ollama, Azure, anything LiteLLM supports), mount a config: [configuration](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#docker-with-a-custom-config).
 
 **pip:**
 
 ```bash
-pip install privaite
+python -m pip install --upgrade "privaite>=0.4.3"
 # One spaCy model per scanned language; the default preset scans EN + FR.
 python -m spacy download en_core_web_lg && python -m spacy download fr_core_news_md
 
