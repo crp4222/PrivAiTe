@@ -11,6 +11,9 @@ All notable changes to this project are documented here. The format follows
   plaintext tool outputs, connection URI passwords and Authorization bearer
   values. These rules run with Presidio under both `light` and `onnx`, preserve
   labels and quoted delimiters, and supplement all other detectors.
+- Documentation of the external Privy protocol-trace evaluation and experimental
+  Kiji ONNX comparison, including lower coverage, excessive redaction and
+  remaining SQL password misses. No new detection preset is enabled.
 
 ### Fixed
 - Overlapping types now obey the configured privacy policy before detector

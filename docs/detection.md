@@ -87,6 +87,23 @@ the synthetic fixture is not a new live-agent measurement.
 The [regression replay report](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/STRUCTURED_SECRETS.md)
 contains the before/after counts, individual timings and reproduction commands.
 
+## Experimental model evaluation
+
+The [Privy and Kiji benchmark](https://github.com/crp4222/privaite-bench/blob/main/KIJI_PRIVY.md)
+checks the unreleased source on 300 synthetic protocol traces, the existing
+120-document multilingual corpus, clean inputs, and long-log regressions.
+Kiji is an adapter in the benchmark repository, not a supported PrivAiTe preset.
+
+On Privy's 491 annotated spans, the current `onnx` stack fully removes 258
+(52.55%). Replacing Privacy Filter with the tested Kiji ONNX artifact while
+keeping the same Presidio configuration removes 147 (29.94%), with lower
+character precision and lower latency. Password coverage drops from 12/15
+to 2/15. These results support retaining the current default; they also expose
+its remaining misses, including three passwords in SQL traces. A successful
+replay of the planted log credentials does not establish detection of arbitrary
+protocol data. The report gives per-type counts, artifact limitations, latency,
+and the results of adding Kiji alongside the existing engines.
+
 ## Known limitations
 
 - **Single-word names** from spaCy are dropped (too many false positives). Caught by contextual patterns ("Nom: X") or the `onnx` preset.

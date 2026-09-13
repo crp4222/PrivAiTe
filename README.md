@@ -129,6 +129,8 @@ Rechecked against the unreleased structured-secret source on 2026-09-13: `onnx` 
 
 Per-language and per-entity tables, competitor configs, methodology, reproduction: [privaite-bench](https://github.com/crp4222/privaite-bench). Feature comparison: [docs/comparison.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/comparison.md).
 
+**Protocol traces are harder.** A separate [Privy and Kiji evaluation](https://github.com/crp4222/privaite-bench/blob/main/KIJI_PRIVY.md) tests the unreleased source on 300 synthetic JSON, HTML, XML and SQL traces. The current `onnx` stack fully covers 258/491 annotated spans (52.55%); this stricter character-coverage metric differs from the literal recall above. Replacing Privacy Filter with the tested Kiji ONNX artifact is faster but lowers coverage to 147/491 (29.94%), including only 2/15 password spans versus 12/15. Kiji remains a benchmark experiment, with no new production preset.
+
 The historical live agent-workflow benchmark uses 24 planted values in a repository, real Claude Code and Codex sessions, and a recording proxy. Directly, Claude Code sent 24/24 values and Codex 20/24; through PrivAiTe, none reached the provider on the small fixture and two secrets survived on the larger session. The [write-up](https://github.com/crp4222/PrivAiTe/blob/main/docs/agent-leak-measurement.md) retains those original results. The new structured-secret rules address the reproduced formats; offline regression replays do not replace the [live-session measurements](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md).
 
 ## Presets
