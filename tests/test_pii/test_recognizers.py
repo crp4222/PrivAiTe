@@ -170,3 +170,23 @@ class TestDateRecognizerLanguageScope:
         # language would have silently dropped it for English and Dutch.
         rec = FrenchDateRecognizer(supported_language=lang)
         assert rec.analyze("born 15/03/1987", ["DATE_TIME"], None)
+
+
+class TestDisabledRecognizersIsTypoProof:
+    def test_an_unknown_name_is_refused_at_config_load(self):
+        """Silently ignoring it would leave the operator reading their own YAML
+        as proof the masking is off while it is still on."""
+        from pydantic import ValidationError
+
+        from privaite.config.schema import PresidioDetectorConfig
+
+        with pytest.raises(ValidationError, match="FrenchDateRecogniser"):
+            PresidioDetectorConfig(disabled_recognizers=["FrenchDateRecogniser"])
+
+    def test_every_registered_recognizer_is_a_valid_name(self):
+        """The name list is a literal, so it can drift away from what is really
+        registered: then a legitimate name gets refused at boot."""
+        from privaite.pii.detector_presidio import build_recognizers
+        from privaite.pii.recognizer_names import BUILTIN_RECOGNIZER_NAMES
+
+        assert {r.name for r in build_recognizers("en")} == set(BUILTIN_RECOGNIZER_NAMES)

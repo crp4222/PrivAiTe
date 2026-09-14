@@ -21,7 +21,9 @@ All notable changes to this project are documented here. The format follows
   PrivAiTe registers itself, by name. Empty by default, so secret and contextual
   detection are unchanged. A startup warning now names the types those
   recognizers can emit that the `entities` allowlist does not scope, which is
-  the behaviour that made an allowlist read as if it had disabled them.
+  the behaviour that made an allowlist read as if it had disabled them. An
+  unknown name in the list is refused when the config loads: this knob widens
+  what reaches the provider, so a typo must not read as a working setting.
 - Local structured-secret recognition for common credential assignments in
   plaintext tool outputs, connection URI passwords and Authorization bearer
   values. These rules run with Presidio under both `light` and `onnx`, preserve

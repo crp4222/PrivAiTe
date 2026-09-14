@@ -367,7 +367,9 @@ Accepted names: `ContextualNameRecognizer`, `FrenchDateRecognizer`,
 by default, so secret and contextual detection keep working unless you say
 otherwise. Disabling one also narrows what `block_entities` considers
 enforceable, so a rule that only that recognizer could satisfy is refused at
-boot rather than never firing.
+boot rather than never firing. An unrecognized name is refused when the config
+loads, so a typo cannot leave you believing a recognizer is off while it is
+still masking.
 
 ## Detector model revisions
 
