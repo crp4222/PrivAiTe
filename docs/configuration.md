@@ -331,6 +331,44 @@ The default list is `["fr", "en"]`, so a fresh install fetches `fr_core_news_md`
 on first boot if it is missing; set `languages: ["en"]` for an English-only,
 no-surprise-download setup.
 
+## Built-in recognizers
+
+On top of Presidio's own recognizers, PrivAiTe registers a few of its own:
+contextual names, contextual locations, structured secrets and dates. Two things
+about them are worth knowing, because neither is obvious from the config:
+
+**The `entities` allowlist does not scope them.** It scopes Presidio's own
+recognizers to the types the preset trusts them for; ours are exempt, otherwise
+a preset allowlist that happens to omit their type (the location recognizer
+emits `LOCATION`, the secret one emits `SECRET`) would register them on every
+analyzer and filter them out of every result, silently. So removing a type from
+`entities` does **not** stop a built-in recognizer emitting it. Their types are
+named in a warning at startup when they fall outside the allowlist.
+
+**Language-specific vocabulary follows the language.** The date recognizer
+carries French and German month names and applies each only to that language.
+Applying both to every configured language is how an English or Dutch
+deployment used to see `11 September` and `11 April` masked while `11 October`
+and `11 March` went through: the masked ones are exactly the months spelled like
+the German ones. Its numeric, birth-word pattern (`born 15/03/1987`) carries no
+month vocabulary and stays active for every language.
+
+To switch one off, name it:
+
+```yaml
+pii:
+  detectors:
+    presidio:
+      disabled_recognizers: ["FrenchDateRecognizer"]
+```
+
+Accepted names: `ContextualNameRecognizer`, `FrenchDateRecognizer`,
+`ContextualLocationRecognizer`, `StructuredSecretRecognizer`. The list is empty
+by default, so secret and contextual detection keep working unless you say
+otherwise. Disabling one also narrows what `block_entities` considers
+enforceable, so a rule that only that recognizer could satisfy is refused at
+boot rather than never firing.
+
 ## Detector model revisions
 
 The built-in Hugging Face detector models are pinned to immutable commits, so a

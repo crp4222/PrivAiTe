@@ -105,7 +105,7 @@ class PIIEngine:
             # inside the Presidio detector and are exempt from its entity
             # allowlist, so they widen what it can emit.
             producible |= {p.entity_type for p in self.config.custom_patterns}
-            producible |= builtin_recognizer_entity_types()
+            producible |= builtin_recognizer_entity_types(detectors.presidio.disabled_recognizers)
         for cfg in enabled_ml:
             if not cfg.label_mapping:
                 return None  # unknown label set: treat as able to emit anything

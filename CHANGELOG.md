@@ -6,7 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- The date recognizer applied its French AND German month names to every
+  configured language, so a deployment on other languages masked exactly the
+  months spelled like the German ones (`April`, `August`, `September`,
+  `November`, `juni`, `juli`, `oktober`) and left the rest of the calendar
+  alone: a third of the year, with no way to turn it off, since the recognizers
+  PrivAiTe registers are exempt from the `entities` allowlist. Each month list
+  now applies only to its own language, and the numeric birth-date pattern,
+  which carries no month vocabulary, stays active everywhere (issue #31).
+
 ### Added
+- `pii.detectors.presidio.disabled_recognizers`: switch off a recognizer
+  PrivAiTe registers itself, by name. Empty by default, so secret and contextual
+  detection are unchanged. A startup warning now names the types those
+  recognizers can emit that the `entities` allowlist does not scope, which is
+  the behaviour that made an allowlist read as if it had disabled them.
 - Local structured-secret recognition for common credential assignments in
   plaintext tool outputs, connection URI passwords and Authorization bearer
   values. These rules run with Presidio under both `light` and `onnx`, preserve

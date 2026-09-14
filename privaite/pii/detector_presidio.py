@@ -13,12 +13,24 @@ from privaite.pii.entity import PIIEntity
 logger = logging.getLogger("privaite.pii.detector_presidio")
 
 
-def build_recognizers(lang: str, custom_patterns: Sequence[Any] = ()) -> list[Any]:
+def build_recognizers(
+    lang: str,
+    custom_patterns: Sequence[Any] = (),
+    disabled: Sequence[str] = (),
+) -> list[Any]:
     """The recognizers PrivAiTe adds on top of Presidio's own, for one language.
 
     Their supported entity types are exempt from the configured entity allowlist
     (see ``PresidioDetector.detect``), so anything reasoning about what Presidio
-    can emit has to build the list here rather than restate it."""
+    can emit has to build the list here rather than restate it.
+
+    A recognizer carrying language-specific vocabulary selects it from the
+    language it is built for, so registering it everywhere costs nothing: the
+    date recognizer used to apply French AND German months to every configured
+    language (issue #31). Names in ``disabled`` are dropped, which is the only
+    way to switch one off, since the allowlist deliberately does not scope
+    them.
+    """
     from privaite.pii.recognizer_context import ContextualNameRecognizer
     from privaite.pii.recognizer_fr_date import FrenchDateRecognizer
     from privaite.pii.recognizer_location import ContextualLocationRecognizer
@@ -34,18 +46,24 @@ def build_recognizers(lang: str, custom_patterns: Sequence[Any] = ()) -> list[An
         from privaite.pii.recognizer_custom import CustomPatternRecognizer
 
         recognizers.append(CustomPatternRecognizer(list(custom_patterns), supported_language=lang))
+    if disabled:
+        dropped = set(disabled)
+        recognizers = [r for r in recognizers if r.name not in dropped]
     return recognizers
 
 
-def builtin_recognizer_entity_types() -> set[str]:
-    """Entity types the recognizers PrivAiTe always registers can emit.
+def builtin_recognizer_entity_types(disabled: Sequence[str] = ()) -> set[str]:
+    """Entity types the recognizers PrivAiTe registers can emit, for these
+    languages and with these recognizers disabled.
 
     They are exempt from the Presidio entity allowlist, so the engine's
     `block_entities` producible check must count them: without this, blocking
     LOCATION on a Presidio-only allowlist config would be refused at boot as
     unenforceable while the contextual location recognizer can in fact emit it.
+    Disabling one narrows that set, so the check stays honest for an operator
+    who switched a recognizer off.
     """
-    return {t for rec in build_recognizers("en") for t in rec.supported_entities}
+    return {t for rec in build_recognizers("en", disabled=disabled) for t in rec.supported_entities}
 
 
 class PresidioDetector(PIIDetector):
@@ -107,7 +125,9 @@ class PresidioDetector(PIIDetector):
         )
 
         for lang in self.config.languages:
-            for recognizer in build_recognizers(lang, self._custom_patterns):
+            for recognizer in build_recognizers(
+                lang, self._custom_patterns, self.config.disabled_recognizers
+            ):
                 self._analyzer.registry.add_recognizer(recognizer)
                 self._own_recognizers.setdefault(recognizer.name, set()).update(
                     recognizer.supported_entities
@@ -115,6 +135,25 @@ class PresidioDetector(PIIDetector):
 
         if self._custom_patterns:
             logger.info("Registered %d custom patterns", len(self._custom_patterns))
+
+        # Discoverability: an operator who removes a type from `entities` expects
+        # it gone, but the recognizers registered above are exempt from that
+        # allowlist by design. Say so once at startup, naming the types and the
+        # knob, rather than letting the config read as if it had scoped them.
+        if self.config.entities:
+            unscoped = {
+                t
+                for types in self._own_recognizers.values()
+                for t in types
+                if t not in set(self.config.entities)
+            }
+            if unscoped:
+                logger.warning(
+                    "Built-in recognizers can emit %s, which the entities "
+                    "allowlist does not scope; disable them with "
+                    "pii.detectors.presidio.disabled_recognizers if unwanted",
+                    ", ".join(sorted(unscoped)),
+                )
 
         logger.info(
             "Presidio analyzer initialized with languages: %s",
