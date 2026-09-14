@@ -119,6 +119,15 @@ def _parse_tag(label: str) -> tuple[str, str]:
     return (prefix, entity)
 
 
+def _is_word_char(char: str) -> bool:
+    """Letters, digits and underscore: what a word may not be cut inside of.
+
+    Deliberately excludes the hyphen, so extending a truncated span cannot run
+    across a compound and swallow a neighbouring value.
+    """
+    return char.isalnum() or char == "_"
+
+
 def _append_span(
     spans: list[dict],
     text: str,
@@ -127,7 +136,7 @@ def _append_span(
     end: int,
     score: float,
 ) -> None:
-    """Append one span, with surrounding whitespace trimmed off.
+    """Append one span, snapped to the value it is supposed to cover.
 
     The tokenizer reports offsets that include the space preceding a word, so a
     raw span reads `' Marie Dupont'`. Kept as is, the anonymizer swallows the
@@ -137,13 +146,34 @@ def _append_span(
     then sends verbatim. Whitespace is never PII, so trimming here loses
     nothing and keeps every downstream span honest (the union merge widens
     overlapping spans, so one padded span would otherwise pad its neighbours).
+
+    A path separator is attached the same way, and a name never starts with
+    one: `/Users/marie-claire` was reported as `'/marie-claire'`, which masks
+    the separator and hands the provider a broken path. A URL is the one type
+    whose value may legitimately begin with a separator, so it keeps it.
+
+    In that same position the model can tag only the FIRST sub-token of the
+    segment, which is worse than a cosmetic problem: `'/Users/marie'` came back
+    as `'/m'`, so the output read `/Users<PERSON_1>arie` and `arie` reached the
+    provider in clear. Partial masking is a leak, so a span that starts right
+    after a separator is extended to the end of its word. The extension is
+    deliberately limited to that position and stops at any non-word character:
+    elsewhere in a text a short span is the model's answer, not a truncation,
+    and an unbounded extension would swallow whatever run of characters it sits
+    in. A hyphenated segment is therefore only covered up to the hyphen.
     """
     while start < end and text[start].isspace():
         start += 1
     while end > start and text[end - 1].isspace():
         end -= 1
+    if entity_type != "URL":
+        while start < end and text[start] in "/\\":
+            start += 1
     if start >= end:
         return
+    if start > 0 and text[start - 1] in "/\\":
+        while end < len(text) and _is_word_char(text[end]) and _is_word_char(text[end - 1]):
+            end += 1
     spans.append(
         {
             "entity_type": entity_type,
