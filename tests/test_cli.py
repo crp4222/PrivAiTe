@@ -141,3 +141,43 @@ def test_unknown_option_is_a_usage_error(fake_boot):
     result = CliRunner().invoke(main, ["--bogus"])
     assert result.exit_code == 2
     assert "run_kwargs" not in fake_boot
+
+
+def test_the_documented_quickstart_still_starts_the_server(fake_boot):
+    """`python -m privaite --config x.yaml` is in every README, Dockerfile and
+    compose file in the wild. Adding a subcommand must not turn it into an error."""
+    result = CliRunner().invoke(main, ["--config", "some.yaml"])
+    assert result.exit_code == 0
+    assert "Starting PrivAiTe on" in result.output
+
+
+def test_verify_is_exposed_as_a_subcommand():
+    result = CliRunner().invoke(main, ["--help"])
+    assert result.exit_code == 0
+    assert "verify" in result.output
+
+    help_text = CliRunner().invoke(main, ["verify", "--help"])
+    assert help_text.exit_code == 0
+    assert "--preset" in help_text.output
+    assert "--json" in help_text.output
+
+
+def test_verify_exits_non_zero_when_something_leaked(monkeypatch):
+    """It is meant to be usable as a gate, so a leak must not exit 0."""
+    from privaite import verify as verify_module
+    from privaite.verify import PLANTED, Finding, VerificationResult
+
+    def fake_verify(preset: str = "onnx") -> VerificationResult:
+        return VerificationResult(
+            preset=preset,
+            direct=[Finding(v, t, w, on_the_wire=True) for v, t, w in PLANTED],
+            through_proxy=[Finding(v, t, w, on_the_wire=True) for v, t, w in PLANTED],
+            placeholders=[],
+            restored=True,
+            elapsed_ms=1.0,
+        )
+
+    monkeypatch.setattr(verify_module, "verify", fake_verify)
+    result = CliRunner().invoke(main, ["verify", "--preset", "light"])
+    assert result.exit_code == 1
+    assert "FAILED" in result.output

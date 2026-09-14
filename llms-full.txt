@@ -959,14 +959,41 @@ For a stricter posture, set `pii.strict: true`: any request whose content can't 
 
 # Verify what gets redacted
 
-Do not trust the proxy blindly: check it on your own data. Two built-in ways, both
-local. For the quickest proof, run the
-[tool-call leak demo](https://github.com/crp4222/PrivAiTe/blob/main/examples/demo_tool_call_leak.py)
-first: it shows you exactly what a provider receives, without and with PrivAiTe.
+Do not trust the proxy blindly: check it on your own data. Everything below runs
+on 127.0.0.1, uses no provider credential, and sends nothing anywhere.
 
-## 1. See exactly what the provider receives
+## 1. One command, reads the wire
 
-Turn de-anonymization off and send test traffic:
+```
+privaite verify
+```
+
+It starts a throwaway provider that records exactly what it receives, sends the
+same agent-shaped request twice (straight to it, then through a real PrivAiTe
+app), and prints both request bodies side by side. The planted values sit in the
+three places an agent puts them: message text, tool-call arguments, and tool
+output. It exits non-zero if any of them reached the wire, so it works as a gate
+in a script, and `--json` gives the machine-readable form.
+
+```
+  value                                          where                  direct   proxied
+  Marie Dupont                                   message text             LEAK     clean
+  marie.dupont@example.invalid                   tool-call argument       LEAK     clean
+  4111 1111 1111 1111                            tool-call argument       LEAK     clean
+  SERVICE_API_KEY=sk-demo-0000-not-a-real-key    tool output              LEAK     clean
+```
+
+The `direct` column is the baseline: it is also what a text-only guardrail
+forwards for the two structured fields, since those never pass through its
+scrubber. `--preset light` skips the model download at the cost of recall.
+
+This output is what to paste into an issue when something leaks, and it is
+reproducible by anyone without your setup or your data.
+
+## 2. See what the provider receives, on your own traffic
+
+The command above uses planted values. For your own, turn de-anonymization off
+and send real test traffic:
 
 ```yaml
 pii:
@@ -979,7 +1006,7 @@ literally what left for the provider (`<PERSON_1>`, `<EMAIL_ADDRESS_1>`, ...).
 Diff it against your input: every placeholder is a catch, every real value still
 visible is a miss. Works for tool-call arguments and streaming too.
 
-## 2. Dry-run inspection endpoint
+## 3. Dry-run inspection endpoint
 
 Enable it explicitly (off by default), then submit text and get the detections
 back. Nothing is forwarded to any provider, nothing is logged, nothing is counted

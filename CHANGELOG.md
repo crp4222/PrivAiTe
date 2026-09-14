@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- `privaite verify`: sends an agent-shaped request through a real PrivAiTe app
+  to a throwaway provider on 127.0.0.1 and prints the request body that provider
+  actually received, next to the same request sent straight to it. Planted
+  values sit in message text, tool-call arguments and tool output. Exits
+  non-zero if any of them reached the wire, so it works as a gate, and `--json`
+  gives the machine-readable form. No credential is used and nothing leaves the
+  machine. `docs/verify.md` led with reading the restored reply instead, which
+  reports what came back rather than what went out: that hid a span defect that
+  left part of a name on the wire while the reply looked clean.
+
 ## [0.5.0] - 2026-09-14
 
 ### Added
