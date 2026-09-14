@@ -50,9 +50,11 @@ All notable changes to this project are documented here. The format follows
   attached a preceding space, and in that position it sometimes tagged only the
   first sub-token of the segment. `/Users/marie` was reported as `/m`, so the
   provider received `/Users<PERSON_1>arie`: a broken path for an agent to act
-  on, with `arie` still readable. Separators are now trimmed (a URL keeps its
-  own), and a span starting right after one is extended to the end of its word.
-  The extension is limited to that position, so a short span elsewhere is left
+  on, with `arie` still readable. Separators are now trimmed and a span
+  starting right after one is extended to the end of its word. Both are limited
+  to types whose value cannot itself begin with a separator, so a URL keeps its
+  path and a secret keeps every character it has, a span made only of
+  separators is never dropped, and a short span away from a separator is left
   as the model reported it.
 
 ## [0.4.3] - 2026-09-12

@@ -615,13 +615,36 @@ def test_path_separator_is_dropped_the_same_way_as_a_space():
 
 def test_a_url_keeps_its_leading_separator():
     # A path IS the value here, unlike a name, so trimming would leave the
-    # first character of it unmasked.
+    # first character of it unmasked. The label is the MODEL's name for the
+    # type, not the canonical one: decoding runs before label_mapping, and a
+    # canonical "URL" here matched nothing, which left this exemption dead.
     text = "see /home/sophie/projects"
-    labels = ["O", "S-URL"]
+    labels = ["O", "S-private_url"]
     scores = [0.1, 0.9]
     offsets = [(0, 4), (4, 25)]
     spans = decode_bioes_spans(labels, scores, offsets, text)
     assert [(s["start"], s["end"], s["text"]) for s in spans] == [(4, 25, "/home/sophie/projects")]
+
+
+def test_a_secret_keeps_a_leading_separator_that_belongs_to_it():
+    # Punctuation is part of a secret, so trimming it leaves the first
+    # character of the credential in clear: "/[SECRET]" under redact.
+    text = "/demo-only-token"
+    labels = ["S-secret"]
+    scores = [0.9]
+    offsets = [(0, 16)]
+    spans = decode_bioes_spans(labels, scores, offsets, text)
+    assert [(s["start"], s["end"], s["text"]) for s in spans] == [(0, 16, "/demo-only-token")]
+
+
+@pytest.mark.parametrize("label", ["secret", "private_person"])
+def test_a_span_made_only_of_separators_is_never_dropped(label):
+    # Trimming to nothing used to delete the detection outright, so the value
+    # reached the provider untouched. Whitespace may empty a span, a separator
+    # may not.
+    text = "////"
+    spans = decode_bioes_spans([f"S-{label}"], [0.9], [(0, 4)], text)
+    assert [(s["start"], s["end"], s["text"]) for s in spans] == [(0, 4, "////")]
 
 
 def test_a_span_stopping_inside_a_word_is_extended_to_the_whole_word():

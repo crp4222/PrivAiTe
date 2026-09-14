@@ -119,6 +119,13 @@ def _parse_tag(label: str) -> tuple[str, str]:
     return (prefix, entity)
 
 
+# Model label names, not canonical entity types: decoding runs before
+# `label_mapping` is applied. A path IS the value of a URL, and a secret may be
+# made of any characters at all, so neither may have a leading separator taken
+# off (`boundaries.py` keeps the same rule for the same reason).
+_SEPARATOR_BEARING_LABELS = frozenset({"private_url", "secret"})
+
+
 def _is_word_char(char: str) -> bool:
     """Letters, digits and underscore: what a word may not be cut inside of.
 
@@ -149,8 +156,7 @@ def _append_span(
 
     A path separator is attached the same way, and a name never starts with
     one: `/Users/marie-claire` was reported as `'/marie-claire'`, which masks
-    the separator and hands the provider a broken path. A URL is the one type
-    whose value may legitimately begin with a separator, so it keeps it.
+    the separator and hands the provider a broken path.
 
     In that same position the model can tag only the FIRST sub-token of the
     segment, which is worse than a cosmetic problem: `'/Users/marie'` came back
@@ -161,19 +167,28 @@ def _append_span(
     elsewhere in a text a short span is the model's answer, not a truncation,
     and an unbounded extension would swallow whatever run of characters it sits
     in. A hyphenated segment is therefore only covered up to the hyphen.
+
+    Both only apply to a type whose value cannot itself begin with a separator
+    (see `_SEPARATOR_BEARING_LABELS`), and neither may ever empty a span: a
+    secret that IS a run of slashes would otherwise be dropped here and reach
+    the provider in clear.
     """
     while start < end and text[start].isspace():
         start += 1
     while end > start and text[end - 1].isspace():
         end -= 1
-    if entity_type != "URL":
-        while start < end and text[start] in "/\\":
-            start += 1
     if start >= end:
+        # Whitespace only, which is never PII whatever the type.
         return
-    if start > 0 and text[start - 1] in "/\\":
-        while end < len(text) and _is_word_char(text[end]) and _is_word_char(text[end - 1]):
-            end += 1
+    if entity_type not in _SEPARATOR_BEARING_LABELS:
+        trimmed = start
+        while trimmed < end and text[trimmed] in "/\\":
+            trimmed += 1
+        if trimmed < end:
+            start = trimmed
+        if start > 0 and text[start - 1] in "/\\":
+            while end < len(text) and _is_word_char(text[end]) and _is_word_char(text[end - 1]):
+                end += 1
     spans.append(
         {
             "entity_type": entity_type,
