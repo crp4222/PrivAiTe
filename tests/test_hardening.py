@@ -297,3 +297,73 @@ async def test_stream_failures_are_safe_and_never_log_their_exception(caplog, st
     assert caught.value.__suppress_context__
     assert secret not in caplog.text
     assert all(record.exc_info is None for record in caplog.records)
+
+
+async def test_an_english_date_is_not_masked_by_the_french_german_recognizer():
+    """Issue #31: the date recognizer's French and German months were applied to
+    every configured language, so English text on an nl/en (or the default
+    fr/en) deployment came back with DATE_TIME for exactly the months spelled
+    like the German ones. The allowlist could not switch it off either, since
+    the recognizers PrivAiTe registers are exempt from it by design."""
+    from privaite.pii.detector_presidio import PresidioDetector
+
+    # The allowlist the issue reports with: DATE_TIME deliberately left out.
+    reporter_entities = [
+        "PERSON",
+        "EMAIL_ADDRESS",
+        "PHONE_NUMBER",
+        "CREDIT_CARD",
+        "IBAN_CODE",
+        "IP_ADDRESS",
+    ]
+    detector = PresidioDetector(
+        PresidioDetectorConfig(enabled=True, languages=["fr", "en"], entities=reporter_entities)
+    )
+    await detector.initialize()
+
+    for text in ("Live since 11 September", "Live since 11 April", "Live since 11 November"):
+        entities = await detector.detect(text, "fr")
+        assert [e for e in entities if e.entity_type == "DATE_TIME"] == [], text
+
+    # The French vocabulary still works, on the language it belongs to.
+    assert any(e.entity_type == "DATE_TIME" for e in await detector.detect("le 15 mars 1987", "fr"))
+
+
+async def test_a_builtin_recognizer_can_be_switched_off_from_config():
+    """The entities allowlist deliberately does not scope the recognizers
+    PrivAiTe registers (a preset must not silently kill them), so disabling one
+    needs its own knob; without it an operator had no way to stop a built-in."""
+    from privaite.pii.detector_presidio import PresidioDetector, builtin_recognizer_entity_types
+
+    assert "DATE_TIME" in builtin_recognizer_entity_types()
+    assert "DATE_TIME" not in builtin_recognizer_entity_types(disabled=["FrenchDateRecognizer"])
+
+    detector = PresidioDetector(
+        PresidioDetectorConfig(
+            enabled=True,
+            languages=["fr"],
+            entities=["PERSON"],
+            disabled_recognizers=["FrenchDateRecognizer"],
+        )
+    )
+    await detector.initialize()
+
+    assert "FrenchDateRecognizer" not in detector._own_recognizers
+    assert [
+        e for e in await detector.detect("le 15 mars 1987", "fr") if e.entity_type == "DATE_TIME"
+    ] == []
+
+
+async def test_unscoped_builtin_types_are_announced_at_startup(caplog):
+    """An operator who removes a type from `entities` and still receives it has
+    no way to tell why. Say it once, naming the types and the knob."""
+    from privaite.pii.detector_presidio import PresidioDetector
+
+    detector = PresidioDetector(
+        PresidioDetectorConfig(enabled=True, languages=["fr"], entities=["PERSON"])
+    )
+    with caplog.at_level(logging.WARNING, logger="privaite.pii.detector_presidio"):
+        await detector.initialize()
+
+    assert "DATE_TIME" in caplog.text
+    assert "disabled_recognizers" in caplog.text

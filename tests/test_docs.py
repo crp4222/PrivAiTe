@@ -73,20 +73,17 @@ def test_llms_txt_announces_the_shipped_versions() -> None:
     assert not stale, f"llms.txt still mentions superseded versions: {sorted(stale)}"
 
 
-@pytest.mark.parametrize("rel", ["README.md", "docs/detection.md", "docs/gateway.md"])
-def test_the_miss_mechanism_is_stated_the_same_way_everywhere(rel: str) -> None:
-    """The 2/24 miss is the project's only known live failure and its published
-    explanation was measurably wrong once. Keep the corrected mechanism, and the
-    claim that it is not gateway-specific, present wherever it is described."""
+@pytest.mark.parametrize("rel", ["docs/agent-leak-measurement.md", "docs/gateway.md"])
+def test_historical_miss_measurements_keep_the_original_mechanism(rel: str) -> None:
+    """Fixes must not rewrite the original live evidence. The current detection
+    docs describe the fix; these pages retain the measured historical behavior."""
     text = (REPO_ROOT / rel).read_text()
     assert "preceding line of log-shaped context" in text
-    # The superseded explanation must not come back.
-    assert "full-log scale" not in text
-    assert "only the full 69 KB log" not in text
+    assert "order dependent" in text
 
 
-def test_detection_docs_state_the_cross_surface_reach_and_the_measurements() -> None:
-    text = (REPO_ROOT / "docs" / "detection.md").read_text()
+def test_historical_gateway_docs_keep_cross_surface_reach_and_measurements() -> None:
+    text = (REPO_ROOT / "docs" / "gateway.md").read_text()
     assert "order dependent" in text
     assert "4 of 5 and 3 of 5" in text
     for surface in ("OpenAI-compatible proxy", "Open WebUI filter", "LiteLLM guardrail"):

@@ -29,6 +29,9 @@ class Anonymizer:
     # different values that mask to the same string cross-restore each other).
     _IRREVERSIBLE = frozenset({"mask", "redact"})
 
+    def is_irreversible(self, entity_type: str) -> bool:
+        return self._method_for(entity_type) in self._IRREVERSIBLE
+
     def anonymize(
         self,
         text: str,

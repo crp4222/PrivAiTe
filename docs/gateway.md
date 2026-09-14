@@ -170,6 +170,12 @@ forwarded.
 
 ## Measured, not promised
 
+The measurements in this section are historical (PrivAiTe 0.4.1).
+**Unreleased source update:** structured-secret rules now target the log fields
+below, and overlap resolution respects redaction and block policies. See
+[detection](detection.md). The original live-agent results remain unchanged;
+offline regression replays are a separate measurement.
+
 The [agent-workflow benchmark](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md)
 drives real Claude Code and Codex sessions over a repository with 24 planted
 PII values and secrets and records every byte the provider actually receives.
@@ -202,7 +208,7 @@ recall 71.4% on the comparison corpus). Read the 2 of 24 as a strong measured
 reduction, never as zero leaks, and read it as a floor rather than a ceiling:
 one of the four database-URL password occurrences is held back only by a
 Presidio `EMAIL_ADDRESS` false positive scoring 1.0 over the URI userinfo, so
-that password is currently typed and placeholdered as an email (and therefore
+that password was typed and placeholdered as an email (and therefore
 reversible) rather than redacted as a secret. The results page also carries the
 latency and cache measurements behind the recommendation above.
 

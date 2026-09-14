@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 
@@ -22,6 +23,7 @@ def merge_entities(
     strategy: str = "union",
     overlap_resolution: str = "highest_score",
     source_text: str | None = None,
+    type_priorities: Mapping[str, int] | None = None,
 ) -> list[PIIEntity]:
     if not entities:
         return []
@@ -29,15 +31,16 @@ def merge_entities(
     sorted_entities = sorted(entities, key=lambda e: (e.start, -e.length))
 
     if strategy == "intersection":
-        return _merge_intersection(sorted_entities, source_text)
+        return _merge_intersection(sorted_entities, source_text, type_priorities)
 
-    return _merge_union(sorted_entities, overlap_resolution, source_text)
+    return _merge_union(sorted_entities, overlap_resolution, source_text, type_priorities)
 
 
 def _merge_union(
     entities: list[PIIEntity],
     overlap_resolution: str,
     source_text: str | None = None,
+    type_priorities: Mapping[str, int] | None = None,
 ) -> list[PIIEntity]:
     merged: list[PIIEntity] = []
 
@@ -60,7 +63,7 @@ def _merge_union(
         if entity.entity_type == last.entity_type:
             winner = last if last.score >= entity.score else entity
         else:
-            winner = _resolve_overlap(last, entity, overlap_resolution)
+            winner = _resolve_overlap(last, entity, overlap_resolution, type_priorities)
 
         new_start = last.start
         new_end = max(last.end, entity.end)
@@ -85,7 +88,9 @@ def _merge_union(
 
 
 def _merge_intersection(
-    entities: list[PIIEntity], source_text: str | None = None
+    entities: list[PIIEntity],
+    source_text: str | None = None,
+    type_priorities: Mapping[str, int] | None = None,
 ) -> list[PIIEntity]:
     if len(entities) < 2:
         return []
@@ -112,10 +117,23 @@ def _merge_intersection(
     if not confirmed:
         return []
     confirmed.sort(key=lambda e: (e.start, -e.length))
-    return _merge_union(confirmed, "highest_score", source_text)
+    return _merge_union(confirmed, "highest_score", source_text, type_priorities)
 
 
-def _resolve_overlap(a: PIIEntity, b: PIIEntity, resolution: str) -> PIIEntity:
+def _resolve_overlap(
+    a: PIIEntity,
+    b: PIIEntity,
+    resolution: str,
+    type_priorities: Mapping[str, int] | None = None,
+) -> PIIEntity:
+    # The configured privacy policy outranks detector confidence. Otherwise a
+    # high-scored EMAIL can make an overlapping redacted SECRET reversible, or
+    # erase the type needed by the block_entities gate.
+    if type_priorities:
+        a_priority = type_priorities.get(a.entity_type, 0)
+        b_priority = type_priorities.get(b.entity_type, 0)
+        if a_priority != b_priority:
+            return a if a_priority > b_priority else b
     if resolution == "longest_span":
         return a if a.length >= b.length else b
     if resolution == "presidio_priority":

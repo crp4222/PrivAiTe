@@ -4,6 +4,59 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-09-14
+
+### Added
+- `pii.detectors.presidio.disabled_recognizers`: switch off a recognizer
+  PrivAiTe registers itself, by name. Empty by default, so secret and contextual
+  detection are unchanged. A startup warning now names the types those
+  recognizers can emit that the `entities` allowlist does not scope, which is
+  the behaviour that made an allowlist read as if it had disabled them. An
+  unknown name in the list is refused when the config loads: this knob widens
+  what reaches the provider, so a typo must not read as a working setting.
+- Local structured-secret recognition for common credential assignments in
+  plaintext tool outputs, connection URI passwords and Authorization bearer
+  values. These rules run with Presidio under both `light` and `onnx`, preserve
+  labels and quoted delimiters, and supplement all other detectors.
+- Documentation of the external Privy protocol-trace evaluation and experimental
+  Kiji ONNX comparison, including lower coverage, excessive redaction and
+  remaining SQL password misses. No new detection preset is enabled.
+
+### Fixed
+- The date recognizer applied its French AND German month names to every
+  configured language, so a deployment on other languages masked exactly the
+  months spelled like the German ones (`April`, `August`, `September`,
+  `November`, `juni`, `juli`, `oktober`) and left the rest of the calendar
+  alone: a third of the year, with no way to turn it off, since the recognizers
+  PrivAiTe registers are exempt from the `entities` allowlist. Each month list
+  now applies only to its own language, and the numeric birth-date pattern,
+  which carries no month vocabulary, stays active everywhere (issue #31).
+- The same union covered the contextual name and location recognizers, whose
+  cues also applied to every configured language: `via` is a street in Italian
+  but "by way of" in English, so "configured via Terraform" reported a location,
+  and Dutch "ik ben klaar" reported a person under an English deployment. Every
+  cue now belongs to the language its words come from. Stop words stay unioned
+  on purpose, since they only ever shorten a match.
+- A cue that merely means "I am" ("je suis", "I'm", "ik ben") now requires a
+  capitalised name, which is what separates "I'm Marie Dupont" from "I'm ready
+  to go". Cues that announce a name ("my name is") still accept a lowercase one.
+- Overlapping types now obey the configured privacy policy before detector
+  confidence: blocked types win, then irreversible types, then the existing
+  resolution strategy. A detected secret can no longer become reversible or
+  bypass a block rule just because an overlapping email has a higher score.
+- Detection-cache keys include the overlap-relevant policy to prevent stale
+  merged types after a policy change. Cached data remains hashes and spans only.
+- The ONNX detector attached a path separator to the value the same way it
+  attached a preceding space, and in that position it sometimes tagged only the
+  first sub-token of the segment. `/Users/marie` was reported as `/m`, so the
+  provider received `/Users<PERSON_1>arie`: a broken path for an agent to act
+  on, with `arie` still readable. Separators are now trimmed and a span
+  starting right after one is extended to the end of its word. Both are limited
+  to types whose value cannot itself begin with a separator, so a URL keeps its
+  path and a secret keeps every character it has, a span made only of
+  separators is never dropped, and a short span away from a separator is left
+  as the model reported it.
+
 ## [0.4.3] - 2026-09-12
 
 ### Added

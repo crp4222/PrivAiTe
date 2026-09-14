@@ -36,6 +36,21 @@ def test_filter_uses_engine_api_that_exists():
 
 
 @pytest.mark.asyncio
+async def test_inlet_scrubs_structured_secret_in_tool_output():
+    module = _load_filter()
+    flt = module.Filter()
+    flt.valves.preset = "light"
+    flt.valves.languages = "en"
+    meta: dict = {}
+    out = await flt.inlet(
+        {"messages": [{"role": "tool", "content": "INFO status=ok\npresented_key=fixture-only"}]},
+        meta,
+    )
+    assert "fixture-only" not in out["messages"][0]["content"]
+    assert "presented_key=" in out["messages"][0]["content"]
+
+
+@pytest.mark.asyncio
 async def test_inlet_outlet_roundtrip():
     """inlet anonymizes the request and stashes the mapping; outlet restores the
     real values in the assistant reply, exactly as Open WebUI drives it."""

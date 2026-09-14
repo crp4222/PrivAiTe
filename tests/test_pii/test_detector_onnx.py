@@ -599,3 +599,85 @@ def test_whitespace_only_span_is_dropped_entirely():
     scores = [0.1, 0.9, 0.1]
     offsets = [(0, 1), (1, 4), (4, 5)]
     assert decode_bioes_spans(labels, scores, offsets, text) == []
+
+
+def test_path_separator_is_dropped_the_same_way_as_a_space():
+    # The tokenizer attaches "/" to the word exactly as it attaches a space, so
+    # "/Users/marie-claire" arrived as '/marie-claire'. Masking the separator
+    # hands the provider a broken path, which an agent then acts on.
+    text = "cd /Users/marie-claire/dev"
+    labels = ["O", "O", "S-PERSON", "O"]
+    scores = [0.1, 0.1, 0.9, 0.1]
+    offsets = [(0, 2), (2, 9), (9, 22), (22, 26)]
+    spans = decode_bioes_spans(labels, scores, offsets, text)
+    assert [(s["start"], s["end"], s["text"]) for s in spans] == [(10, 22, "marie-claire")]
+
+
+def test_a_url_keeps_its_leading_separator():
+    # A path IS the value here, unlike a name, so trimming would leave the
+    # first character of it unmasked. The label is the MODEL's name for the
+    # type, not the canonical one: decoding runs before label_mapping, and a
+    # canonical "URL" here matched nothing, which left this exemption dead.
+    text = "see /home/sophie/projects"
+    labels = ["O", "S-private_url"]
+    scores = [0.1, 0.9]
+    offsets = [(0, 4), (4, 25)]
+    spans = decode_bioes_spans(labels, scores, offsets, text)
+    assert [(s["start"], s["end"], s["text"]) for s in spans] == [(4, 25, "/home/sophie/projects")]
+
+
+def test_a_secret_keeps_a_leading_separator_that_belongs_to_it():
+    # Punctuation is part of a secret, so trimming it leaves the first
+    # character of the credential in clear: "/[SECRET]" under redact.
+    text = "/demo-only-token"
+    labels = ["S-secret"]
+    scores = [0.9]
+    offsets = [(0, 16)]
+    spans = decode_bioes_spans(labels, scores, offsets, text)
+    assert [(s["start"], s["end"], s["text"]) for s in spans] == [(0, 16, "/demo-only-token")]
+
+
+@pytest.mark.parametrize("label", ["secret", "private_person"])
+def test_a_span_made_only_of_separators_is_never_dropped(label):
+    # Trimming to nothing used to delete the detection outright, so the value
+    # reached the provider untouched. Whitespace may empty a span, a separator
+    # may not.
+    text = "////"
+    spans = decode_bioes_spans([f"S-{label}"], [0.9], [(0, 4)], text)
+    assert [(s["start"], s["end"], s["text"]) for s in spans] == [(0, 4, "////")]
+
+
+def test_a_span_stopping_inside_a_word_is_extended_to_the_whole_word():
+    # The model tagged only the first sub-token of the name: '/Users/marie'
+    # came back as '/m', the output read '/Users<PERSON_1>arie', and 'arie'
+    # reached the provider in clear. Partial masking is a leak, not a cosmetic
+    # problem.
+    text = "user home is /Users/marie"
+    labels = ["O", "O", "O", "O", "S-PERSON"]
+    scores = [0.1, 0.1, 0.1, 0.1, 0.9]
+    offsets = [(0, 4), (4, 9), (9, 12), (12, 19), (19, 21)]
+    spans = decode_bioes_spans(labels, scores, offsets, text)
+    assert [(s["start"], s["end"], s["text"]) for s in spans] == [(20, 25, "marie")]
+
+
+def test_a_short_span_outside_a_path_is_left_alone():
+    # Elsewhere a short span is the model's answer, not a truncated segment.
+    # Extending it would swallow whatever run of characters it sits in, which
+    # is what the window-stitching fixtures above rely on not happening.
+    text = "token aaaSECRTbbb here"
+    labels = ["O", "S-SECRET", "O"]
+    scores = [0.1, 0.9, 0.1]
+    offsets = [(0, 6), (9, 14), (14, 22)]
+    spans = decode_bioes_spans(labels, scores, offsets, text)
+    assert [(s["start"], s["end"], s["text"]) for s in spans] == [(9, 14, "SECRT")]
+
+
+def test_extension_stops_at_a_hyphen_so_it_cannot_swallow_a_neighbour():
+    # Bounded on purpose: the rest of a hyphenated segment stays visible rather
+    # than the span running on to whatever follows.
+    text = "cd /Marie-Claire"
+    labels = ["O", "S-PERSON"]
+    scores = [0.1, 0.9]
+    offsets = [(0, 2), (2, 5)]
+    spans = decode_bioes_spans(labels, scores, offsets, text)
+    assert [(s["start"], s["end"], s["text"]) for s in spans] == [(4, 9, "Marie")]

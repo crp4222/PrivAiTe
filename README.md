@@ -11,6 +11,14 @@ Self-hosted PII redaction proxy for LLM APIs.
 
 Told in writing to report its config variables but **never their values**, Claude Code sent 3 of 4 secrets to its provider anyway: the same secrets also sat in a log file the task had it read. Over that session **23 of 24** planted values reached the provider; through PrivAiTe's agent gateway, **2 of 24**. Wire-level captures of real agent sessions, and the two that still get through are documented rather than rounded away: [the measurement](https://github.com/crp4222/PrivAiTe/blob/main/docs/agent-leak-measurement.md), [what it misses](https://github.com/crp4222/PrivAiTe#threat-model).
 
+**Unreleased source update:** local rules now target the credential fields behind
+those historical log misses, and overlapping detections respect irreversible
+and block policies. These changes are not in the published 0.4.3 package.
+See [formats and limits](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md#structured-credentials-and-overlapping-types-unreleased).
+In the [offline regression replay](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/STRUCTURED_SECRETS.md),
+9 of 10 credential occurrences survived in a 69 KB log before the change;
+none survived afterward. Processing still takes about 25 seconds with `onnx`.
+
 ```
 You type: "Je m'appelle Marie Dupont, email marie@acme.com"
 LLM sees: "Je m'appelle <PERSON_1>, email <EMAIL_ADDRESS_1>"
@@ -95,7 +103,7 @@ Enable the detection cache when you use the gateway: agent CLIs resend the whole
 
 Four things to know before relying on it:
 
-- **Measured, not promised.** In the [live agent-workflow benchmark](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md), Claude Code reading a repository with 24 planted PII values and secrets sent all 24 to the provider directly; through the gateway with the default preset, 0 reached it on that fixture, and on a larger realistic session 2 of 24 still got through. Both are secrets sitting in `key=value` log lines, and the mechanism is [secrets inside log output](https://github.com/crp4222/PrivAiTe#threat-model): they are detected on their own and in `.env` form, and missed once roughly one preceding line of log-shaped context sits in front of them. Never read this as zero leaks.
+- **Measured, not promised.** In the historical [live agent-workflow benchmark](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md), Claude Code reading a repository with 24 planted PII values and secrets sent all 24 to the provider directly; through the gateway, 0 reached it on the small fixture and 2 of 24 still got through on a larger session. The unreleased source targets those two log-field formats. This does not establish zero leaks on arbitrary agent traffic.
 - **It protects the egress, not the agent.** Claude Code and Codex still hold the real values in their own context and local transcripts; only what reaches the provider is scrubbed.
 - **The agent's own prompt is deliberately not scanned.** The Anthropic `system` field and the Responses `instructions` field pass through as-is, and Claude Code injects your `CLAUDE.md` and project context there.
 - **Auth is relayed, not managed, so the gateway routes are open.** PrivAiTe injects and validates nothing there: with gateway mode on, `/v1/messages` and `/v1/responses` accept a request that carries no `PRIVAITE_API_KEYS` value at all, by design, since the only credential in play is the one your CLI sends upstream. The server also binds `0.0.0.0` by default and applies no rate limit, so an exposed port plus gateway mode is an endpoint anyone who can reach it can drive (on your provider account). Bind it to localhost or keep the port off untrusted networks. Whether your provider's terms of service permit that traffic to transit a local proxy is between you and the provider; this is not a provider-supported integration, and API-key mode is the durable path.
@@ -109,7 +117,7 @@ Measured on 120 real documents from the open [AI4Privacy `pii-masking-200k`](htt
 | Solution | Recall (span) | Recall (strict) | False positives | Tool-call protection |
 |---|---|---|---|---|
 | `onnx` (default) | **84.9%** | **81.0%** | 2 / 14 | **100%** |
-| `light` (full Presidio) | 62.4% | 57.9% | 3 / 14 | **100%** |
+| `light` (full Presidio) | 62.7% | 58.1% | 3 / 14 | **100%** |
 | LiteLLM Presidio guardrail | 70.3% | 65.3% | 3 / 14 | 0.0% |
 | LLM Guard (Anonymize) | 76.9% | 74.9% | 5 / 14 | 0.0% |
 
@@ -117,23 +125,25 @@ Read the 100% precisely, it is structural, not absolute: of the PII PrivAiTe det
 
 Two honesty notes, both favoring caution. LLM Guard's detection model is fine-tuned on the exact dataset behind this corpus, so its recall here is optimistic; PrivAiTe's default model is not (OpenAI's model card states it did not train on it). An out-of-distribution cross-check on two independent corpora confirms the default generalizes: ~84% held on Gretel finance text while the AI4Privacy-tuned model drops to ~62% ([OOD_COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md)).
 
-Rechecked against the 0.4.3 source on 2026-09-12: recall, strict recall and clean-document false positives are unchanged. The `onnx` and `light` latencies below are means per corpus document from that local run, not large agent-request latency guarantees.
+Rechecked against the unreleased structured-secret source on 2026-09-13: `onnx` recall and clean-document false positives are unchanged; `light` span recall rises from 62.4% to 62.7%. The latencies below are means per corpus document from that local run, not large agent-request latency guarantees.
 
 Per-language and per-entity tables, competitor configs, methodology, reproduction: [privaite-bench](https://github.com/crp4222/privaite-bench). Feature comparison: [docs/comparison.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/comparison.md).
 
-There is also a live agent-workflow benchmark: a repository with 24 planted PII values and secrets, driven through real Claude Code and Codex sessions, with a recording proxy measuring what actually reaches the provider. Directly, Claude Code sent 24/24 planted values and Codex 20/24. Through the [gateway](https://github.com/crp4222/PrivAiTe/blob/main/docs/gateway.md) with the default `onnx` preset, 0/24 reached the provider on that fixture; on a larger realistic session, 2 of 24 still got through, both secrets in `key=value` log lines that the detector catches on their own but misses once a line of log-shaped context precedes them (the mechanism, and the fact that it affects every surface, is in the [threat model](https://github.com/crp4222/PrivAiTe#threat-model)), so treat it as a strong measured reduction, not zero leaks. The write-up of the finding, method and miss mechanism is [here](https://github.com/crp4222/PrivAiTe/blob/main/docs/agent-leak-measurement.md); the full matrix, latency and cache measurements are in [agent_workflow/RESULTS.md](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md).
+**Protocol traces are harder.** A separate [Privy and Kiji evaluation](https://github.com/crp4222/privaite-bench/blob/main/KIJI_PRIVY.md) tests the unreleased source on 300 synthetic JSON, HTML, XML and SQL traces. The current `onnx` stack fully covers 258/491 annotated spans (52.55%); this stricter character-coverage metric differs from the literal recall above. Replacing Privacy Filter with the tested Kiji ONNX artifact is faster but lowers coverage to 147/491 (29.94%), including only 2/15 password spans versus 12/15. Kiji remains a benchmark experiment, with no new production preset.
+
+The historical live agent-workflow benchmark uses 24 planted values in a repository, real Claude Code and Codex sessions, and a recording proxy. Directly, Claude Code sent 24/24 values and Codex 20/24; through PrivAiTe, none reached the provider on the small fixture and two secrets survived on the larger session. The [write-up](https://github.com/crp4222/PrivAiTe/blob/main/docs/agent-leak-measurement.md) retains those original results. The new structured-secret rules address the reproduced formats; offline regression replays do not replace the [live-session measurements](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md).
 
 ## Presets
 
 | Preset | What runs | Recall\* | False positives | Latency | Secrets |
 |--------|-----------|----------|-----------------|---------|---------|
-| `onnx` (default) | Presidio + Privacy Filter | **84.9%** | 2 / 14 | ~630ms | **yes** |
-| `light` | Presidio only | 62.4% | 3 / 14 | ~105ms | no |
+| `onnx` (default) | Presidio + Privacy Filter | **84.9%** | 2 / 14 | ~672ms | **yes** |
+| `light` | Presidio + built-in rules | 62.7% | 3 / 14 | ~109ms | structured formats |
 | `max` | onnx + GLiNER | higher OOD | more | ~0.7s | **yes** |
 
 \*Span recall on the AI4Privacy benchmark above. `max` adds GLiNER (trained on data independent of AI4Privacy): on out-of-distribution corpora it raises recall by several points at the cost of more false positives and a torch dependency (`pip install 'privaite[gliner]'`); with it selected but not installed, the proxy fails at startup with an install hint rather than silently degrading.
 
-**`onnx`** = maximum coverage: secrets, passwords, API keys, unusual names, addresses. **`light`** = fastest, near-zero false positives, classic PII only, no addresses/URLs/secrets. How the engines work and what stays off by default: [docs/detection.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md).
+**`onnx`** combines contextual recognition with structured rules. **`light`** uses Presidio and, in the unreleased source, the same structured-secret rules; it has no contextual Privacy Filter model. How the engines work and what stays off by default: [docs/detection.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md).
 
 > **Footgun:** do not pin `detectors.presidio.entities` to a short allowlist on the `light` path. It restricts detection to only those types and roughly halves recall (to ~36%). Leave `entities` unset; the proxy logs a warning at startup if it detects a low-recall configuration.
 
@@ -162,7 +172,7 @@ See [request-local window reuse](https://github.com/crp4222/PrivAiTe/blob/main/d
 **What it does NOT protect against:**
 
 - **PII the detector misses.** Detection is statistical and never 100% (see the [benchmark](https://github.com/crp4222/PrivAiTe#benchmark)). A name it doesn't recognize reaches the provider. Treat the output as best-effort, not a guarantee.
-- **Secrets inside log output.** One miss class is measured and reproducible rather than hypothetical. The two secrets behind the agent benchmark's 2/24 figure are detected on their own and in `.env` assignment form, and are missed once roughly one preceding line of log-shaped context sits in front of them: a 7-line, ~1 KB excerpt of that log already reproduces it (the API key survives 5 of its 5 occurrences there, the SMTP password 4 of 5), and 41-line windows leak 4 of 5 and 3 of 5. The effect is order dependent: text appended *after* the line never triggers it, only text before it does. This is a property of the detector, not of the gateway, so it applies to every surface that runs the engine, the OpenAI-compatible proxy and the Open WebUI filter and the LiteLLM guardrail alike. Pasting or piping raw application logs is the traffic shape most exposed to it.
+- **Unrecognized secret formats.** Context changed the model's predictions in the historical log benchmark. The unreleased source adds rules for common credential assignments, URI passwords and bearer headers, including that fixture's field names. Unknown names, encoded or split values, and bare values without their field context can still survive. This affects every surface that uses the engine. Supported formats and remaining boundary limits are in [detection](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md).
 - **Re-identification from context.** Even with names replaced, the surrounding text can stay identifying ("the CEO of `<ORG_1>` who resigned in March").
 - **A compromised local machine.** The mapping and raw text live in local memory; this is not a defense against a local attacker.
 - **The provider correlating** requests within a session.

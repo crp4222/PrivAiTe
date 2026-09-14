@@ -33,6 +33,29 @@ def _check_onnx_device(value: str) -> str:
 
 
 TorchDevice = Annotated[str, AfterValidator(_check_torch_device)]
+
+
+def _check_disabled_recognizers(value: list[str]) -> list[str]:
+    """A typo here would silently protect nothing.
+
+    Switching a recognizer off is the one knob that widens what reaches the
+    provider, and an unknown name is indistinguishable from a working config at
+    runtime: the operator reads their own YAML as proof the masking is off while
+    it is still on. Refuse it at load time, like every other unsafe config.
+    """
+    from privaite.pii.recognizer_names import BUILTIN_RECOGNIZER_NAMES
+
+    unknown = [name for name in value if name not in BUILTIN_RECOGNIZER_NAMES]
+    if unknown:
+        raise ValueError(
+            f"unknown recognizer(s) {', '.join(sorted(unknown))}. "
+            f"Valid names: {', '.join(sorted(BUILTIN_RECOGNIZER_NAMES))}"
+        )
+    return value
+
+
+DisabledRecognizers = Annotated[list[str], AfterValidator(_check_disabled_recognizers)]
+
 OnnxDevice = Annotated[str, AfterValidator(_check_onnx_device)]
 
 
@@ -83,6 +106,12 @@ class PresidioDetectorConfig(StrictModel):
     languages: list[str] = Field(default_factory=lambda: ["fr", "en"])
     score_threshold: float = 0.4
     entities: list[str] | None = None
+    # Names of the recognizers PrivAiTe registers itself, to switch off. They are
+    # exempt from `entities` on purpose (an allowlist set by a preset must not
+    # silently kill them), so removing a type from that list does NOT disable
+    # them: this is the knob that does. Empty by default, so the secret and
+    # contextual recognizers keep protecting by default.
+    disabled_recognizers: DisabledRecognizers = Field(default_factory=list)
 
 
 # The openai/privacy-filter model's label set, shared by its ONNX and torch backends.

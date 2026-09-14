@@ -20,6 +20,14 @@ Self-hosted PII redaction proxy for LLM APIs.
 
 Told in writing to report its config variables but **never their values**, Claude Code sent 3 of 4 secrets to its provider anyway: the same secrets also sat in a log file the task had it read. Over that session **23 of 24** planted values reached the provider; through PrivAiTe's agent gateway, **2 of 24**. Wire-level captures of real agent sessions, and the two that still get through are documented rather than rounded away: [the measurement](https://github.com/crp4222/PrivAiTe/blob/main/docs/agent-leak-measurement.md), [what it misses](https://github.com/crp4222/PrivAiTe#threat-model).
 
+**Unreleased source update:** local rules now target the credential fields behind
+those historical log misses, and overlapping detections respect irreversible
+and block policies. These changes are not in the published 0.4.3 package.
+See [formats and limits](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md#structured-credentials-and-overlapping-types-unreleased).
+In the [offline regression replay](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/STRUCTURED_SECRETS.md),
+9 of 10 credential occurrences survived in a 69 KB log before the change;
+none survived afterward. Processing still takes about 25 seconds with `onnx`.
+
 ```
 You type: "Je m'appelle Marie Dupont, email marie@acme.com"
 LLM sees: "Je m'appelle <PERSON_1>, email <EMAIL_ADDRESS_1>"
@@ -104,7 +112,7 @@ Enable the detection cache when you use the gateway: agent CLIs resend the whole
 
 Four things to know before relying on it:
 
-- **Measured, not promised.** In the [live agent-workflow benchmark](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md), Claude Code reading a repository with 24 planted PII values and secrets sent all 24 to the provider directly; through the gateway with the default preset, 0 reached it on that fixture, and on a larger realistic session 2 of 24 still got through. Both are secrets sitting in `key=value` log lines, and the mechanism is [secrets inside log output](https://github.com/crp4222/PrivAiTe#threat-model): they are detected on their own and in `.env` form, and missed once roughly one preceding line of log-shaped context sits in front of them. Never read this as zero leaks.
+- **Measured, not promised.** In the historical [live agent-workflow benchmark](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md), Claude Code reading a repository with 24 planted PII values and secrets sent all 24 to the provider directly; through the gateway, 0 reached it on the small fixture and 2 of 24 still got through on a larger session. The unreleased source targets those two log-field formats. This does not establish zero leaks on arbitrary agent traffic.
 - **It protects the egress, not the agent.** Claude Code and Codex still hold the real values in their own context and local transcripts; only what reaches the provider is scrubbed.
 - **The agent's own prompt is deliberately not scanned.** The Anthropic `system` field and the Responses `instructions` field pass through as-is, and Claude Code injects your `CLAUDE.md` and project context there.
 - **Auth is relayed, not managed, so the gateway routes are open.** PrivAiTe injects and validates nothing there: with gateway mode on, `/v1/messages` and `/v1/responses` accept a request that carries no `PRIVAITE_API_KEYS` value at all, by design, since the only credential in play is the one your CLI sends upstream. The server also binds `0.0.0.0` by default and applies no rate limit, so an exposed port plus gateway mode is an endpoint anyone who can reach it can drive (on your provider account). Bind it to localhost or keep the port off untrusted networks. Whether your provider's terms of service permit that traffic to transit a local proxy is between you and the provider; this is not a provider-supported integration, and API-key mode is the durable path.
@@ -118,7 +126,7 @@ Measured on 120 real documents from the open [AI4Privacy `pii-masking-200k`](htt
 | Solution | Recall (span) | Recall (strict) | False positives | Tool-call protection |
 |---|---|---|---|---|
 | `onnx` (default) | **84.9%** | **81.0%** | 2 / 14 | **100%** |
-| `light` (full Presidio) | 62.4% | 57.9% | 3 / 14 | **100%** |
+| `light` (full Presidio) | 62.7% | 58.1% | 3 / 14 | **100%** |
 | LiteLLM Presidio guardrail | 70.3% | 65.3% | 3 / 14 | 0.0% |
 | LLM Guard (Anonymize) | 76.9% | 74.9% | 5 / 14 | 0.0% |
 
@@ -126,23 +134,25 @@ Read the 100% precisely, it is structural, not absolute: of the PII PrivAiTe det
 
 Two honesty notes, both favoring caution. LLM Guard's detection model is fine-tuned on the exact dataset behind this corpus, so its recall here is optimistic; PrivAiTe's default model is not (OpenAI's model card states it did not train on it). An out-of-distribution cross-check on two independent corpora confirms the default generalizes: ~84% held on Gretel finance text while the AI4Privacy-tuned model drops to ~62% ([OOD_COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md)).
 
-Rechecked against the 0.4.3 source on 2026-09-12: recall, strict recall and clean-document false positives are unchanged. The `onnx` and `light` latencies below are means per corpus document from that local run, not large agent-request latency guarantees.
+Rechecked against the unreleased structured-secret source on 2026-09-13: `onnx` recall and clean-document false positives are unchanged; `light` span recall rises from 62.4% to 62.7%. The latencies below are means per corpus document from that local run, not large agent-request latency guarantees.
 
 Per-language and per-entity tables, competitor configs, methodology, reproduction: [privaite-bench](https://github.com/crp4222/privaite-bench). Feature comparison: [docs/comparison.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/comparison.md).
 
-There is also a live agent-workflow benchmark: a repository with 24 planted PII values and secrets, driven through real Claude Code and Codex sessions, with a recording proxy measuring what actually reaches the provider. Directly, Claude Code sent 24/24 planted values and Codex 20/24. Through the [gateway](https://github.com/crp4222/PrivAiTe/blob/main/docs/gateway.md) with the default `onnx` preset, 0/24 reached the provider on that fixture; on a larger realistic session, 2 of 24 still got through, both secrets in `key=value` log lines that the detector catches on their own but misses once a line of log-shaped context precedes them (the mechanism, and the fact that it affects every surface, is in the [threat model](https://github.com/crp4222/PrivAiTe#threat-model)), so treat it as a strong measured reduction, not zero leaks. The write-up of the finding, method and miss mechanism is [here](https://github.com/crp4222/PrivAiTe/blob/main/docs/agent-leak-measurement.md); the full matrix, latency and cache measurements are in [agent_workflow/RESULTS.md](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md).
+**Protocol traces are harder.** A separate [Privy and Kiji evaluation](https://github.com/crp4222/privaite-bench/blob/main/KIJI_PRIVY.md) tests the unreleased source on 300 synthetic JSON, HTML, XML and SQL traces. The current `onnx` stack fully covers 258/491 annotated spans (52.55%); this stricter character-coverage metric differs from the literal recall above. Replacing Privacy Filter with the tested Kiji ONNX artifact is faster but lowers coverage to 147/491 (29.94%), including only 2/15 password spans versus 12/15. Kiji remains a benchmark experiment, with no new production preset.
+
+The historical live agent-workflow benchmark uses 24 planted values in a repository, real Claude Code and Codex sessions, and a recording proxy. Directly, Claude Code sent 24/24 values and Codex 20/24; through PrivAiTe, none reached the provider on the small fixture and two secrets survived on the larger session. The [write-up](https://github.com/crp4222/PrivAiTe/blob/main/docs/agent-leak-measurement.md) retains those original results. The new structured-secret rules address the reproduced formats; offline regression replays do not replace the [live-session measurements](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md).
 
 ## Presets
 
 | Preset | What runs | Recall\* | False positives | Latency | Secrets |
 |--------|-----------|----------|-----------------|---------|---------|
-| `onnx` (default) | Presidio + Privacy Filter | **84.9%** | 2 / 14 | ~630ms | **yes** |
-| `light` | Presidio only | 62.4% | 3 / 14 | ~105ms | no |
+| `onnx` (default) | Presidio + Privacy Filter | **84.9%** | 2 / 14 | ~672ms | **yes** |
+| `light` | Presidio + built-in rules | 62.7% | 3 / 14 | ~109ms | structured formats |
 | `max` | onnx + GLiNER | higher OOD | more | ~0.7s | **yes** |
 
 \*Span recall on the AI4Privacy benchmark above. `max` adds GLiNER (trained on data independent of AI4Privacy): on out-of-distribution corpora it raises recall by several points at the cost of more false positives and a torch dependency (`pip install 'privaite[gliner]'`); with it selected but not installed, the proxy fails at startup with an install hint rather than silently degrading.
 
-**`onnx`** = maximum coverage: secrets, passwords, API keys, unusual names, addresses. **`light`** = fastest, near-zero false positives, classic PII only, no addresses/URLs/secrets. How the engines work and what stays off by default: [docs/detection.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md).
+**`onnx`** combines contextual recognition with structured rules. **`light`** uses Presidio and, in the unreleased source, the same structured-secret rules; it has no contextual Privacy Filter model. How the engines work and what stays off by default: [docs/detection.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md).
 
 > **Footgun:** do not pin `detectors.presidio.entities` to a short allowlist on the `light` path. It restricts detection to only those types and roughly halves recall (to ~36%). Leave `entities` unset; the proxy logs a warning at startup if it detects a low-recall configuration.
 
@@ -171,7 +181,7 @@ See [request-local window reuse](https://github.com/crp4222/PrivAiTe/blob/main/d
 **What it does NOT protect against:**
 
 - **PII the detector misses.** Detection is statistical and never 100% (see the [benchmark](https://github.com/crp4222/PrivAiTe#benchmark)). A name it doesn't recognize reaches the provider. Treat the output as best-effort, not a guarantee.
-- **Secrets inside log output.** One miss class is measured and reproducible rather than hypothetical. The two secrets behind the agent benchmark's 2/24 figure are detected on their own and in `.env` assignment form, and are missed once roughly one preceding line of log-shaped context sits in front of them: a 7-line, ~1 KB excerpt of that log already reproduces it (the API key survives 5 of its 5 occurrences there, the SMTP password 4 of 5), and 41-line windows leak 4 of 5 and 3 of 5. The effect is order dependent: text appended *after* the line never triggers it, only text before it does. This is a property of the detector, not of the gateway, so it applies to every surface that runs the engine, the OpenAI-compatible proxy and the Open WebUI filter and the LiteLLM guardrail alike. Pasting or piping raw application logs is the traffic shape most exposed to it.
+- **Unrecognized secret formats.** Context changed the model's predictions in the historical log benchmark. The unreleased source adds rules for common credential assignments, URI passwords and bearer headers, including that fixture's field names. Unknown names, encoded or split values, and bare values without their field context can still survive. This affects every surface that uses the engine. Supported formats and remaining boundary limits are in [detection](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md).
 - **Re-identification from context.** Even with names replaced, the surrounding text can stay identifying ("the CEO of `<ORG_1>` who resigned in March").
 - **A compromised local machine.** The mapping and raw text live in local memory; this is not a defense against a local attacker.
 - **The provider correlating** requests within a session.
@@ -251,10 +261,11 @@ The default engine. Handles structured PII through pattern matching and basic NE
 | IP addresses | Regex |
 | US SSN | Regex + format validation |
 | Person names (capitalized, 2+ words) | spaCy NER, only kept if all words are capitalized |
-| Person names (lowercase or single word) | Contextual regex, only after "je m'appelle X", "my name is X", "ich heiße X", "Nom: X", etc. |
-| Dates (FR/DE) | Custom regex, "15 mars 1987", "3. März 1990" |
+| Person names (lowercase or single word) | Contextual regex, only after "je m'appelle X", "my name is X", "ich heiße X", "Nom: X", etc. A cue that only means "I am" ("je suis", "I'm") additionally requires a capitalized name |
+| Dates (FR/DE) | Custom regex, "15 mars 1987", "3. März 1990", under a French or German configuration |
+| Structured secrets (unreleased source) | PrivAiTe patterns for credential assignments, URI passwords and Authorization bearer values |
 
-Presidio is fast (tens of ms/request) and produces very few false positives on code, news articles, and technical text. The tradeoff: it misses names that spaCy doesn't recognize (unusual names, single-word names without context) and doesn't detect secrets/passwords.
+Presidio is faster than the contextual model and produces few false positives on the clean benchmark documents. It misses names that spaCy doesn't recognize and arbitrary passwords without a recognized field name or URI/header structure.
 
 ## OpenAI Privacy Filter: contextual ML model
 
@@ -267,13 +278,13 @@ Presidio is fast (tens of ms/request) and produces very few false positives on c
 | Account numbers | Detects bank account numbers, policy numbers, etc. |
 | Dates (all languages) | ML-based, not limited to FR/DE regex |
 
-The Privacy Filter is slower (~400ms/request) and occasionally flags technical identifiers as account numbers (e.g., "CMD-2024-98765"). It runs as a second pass alongside Presidio, which handles the regex-based entities while the Privacy Filter handles contextual NER.
+The Privacy Filter adds model-inference cost and occasionally flags technical identifiers as account numbers (e.g., "CMD-2024-98765"). It runs concurrently with Presidio, which handles structured formats while the Privacy Filter handles contextual NER. Cost depends on input length; the benchmark reports the combined engine latency.
 
 ## Why two engines?
 
 Neither is perfect alone:
 
-- **Presidio alone** misses names that spaCy doesn't recognize, and can't detect secrets. But it has very few false positives.
+- **Presidio with PrivAiTe's recognizers** catches specific credential formats, but misses unfamiliar names and secrets without those structural cues.
 - **Privacy Filter alone** misses some names in credit/list formats, and doesn't have regex validators for IBAN/credit card checksums.
 - **Both together** cover each other's blind spots. Presidio handles structured formats with validation, the Privacy Filter handles context-dependent PII.
 
@@ -281,35 +292,73 @@ Neither is perfect alone:
 
 The default `onnx` preset does detect personal addresses (as `LOCATION`) and personal URLs (as `URL`) through the Privacy Filter model, and replaces them. What stays off by default are Presidio's broad recognizers for those types, because they cause heavy false positives:
 
-- **Generic place names (the Presidio LOCATION recognizer):** "Paris" or "London" on their own aren't PII, and spaCy flags ordinary words ("Kubernetes", "Saturday") as locations. The `onnx` preset keeps this recognizer off and relies on the model's context-aware address detection instead. PrivAiTe's own cue-based location patterns ("elle habite à X", "lives in X", "domicilié à X") do fire under every preset: they require a residence cue, so they do not carry spaCy's false-positive rate. Any recognizer PrivAiTe registers, and any `custom_patterns` type, is exempt from a preset's entity allowlist; the allowlist only scopes Presidio's own recognizers.
+- **Generic place names (the Presidio LOCATION recognizer):** "Paris" or "London" on their own aren't PII, and spaCy flags ordinary words ("Kubernetes", "Saturday") as locations. The `onnx` preset keeps this recognizer off and relies on the model's context-aware address detection instead. PrivAiTe's own cue-based location patterns ("elle habite à X", "lives in X", "domicilié à X") do fire under every preset: they require a residence cue, so they do not carry spaCy's false-positive rate. Any recognizer PrivAiTe registers, and any `custom_patterns` type, is exempt from a preset's entity allowlist; the allowlist only scopes Presidio's own recognizers. Use [`disabled_recognizers`](configuration.md#built-in-recognizers) to switch one off. Their cues are vocabulary, so each one only fires under the language it is written in: configure every language your traffic uses.
 - **The Presidio URL regex:** it matches code like `logging.getLogger` because `.ge` is a valid TLD. The `onnx` preset keeps it off, and the model still catches genuine personal URLs.
 
-On the `light` preset (Presidio only), addresses and URLs are not detected. Secrets and passwords are detected only by the `onnx` preset. Any recognizer can be turned on in the YAML config.
+The `light` preset has no contextual Privacy Filter model. The unreleased source adds the same structured-secret rules to every preset that enables Presidio. Broad password recognition still requires an ML detector; these rules do not make `light` equivalent to `onnx`.
+
+## Structured credentials and overlapping types (unreleased)
+
+The new rules supplement detection; they never short-circuit the NLP engines.
+They recognize common assignment names (`api_key`, `apiKey`, `access_token`,
+`refresh_token`, `auth_token`, `client_secret`, `password`, `passwd`,
+`smtp_secret`, `presented_key`) and underscore-prefixed environment variants
+such as `OPENAI_API_KEY` and `DB_PASSWORD`, case-insensitively. They also
+recognize passwords in `scheme://user:password@host` and plaintext
+`Authorization: Bearer ...` headers.
+
+For quoted assignments, only the value is replaced: `api_key="demo-only"`
+becomes `api_key="[SECRET]"` with the shipped redaction policy. Escaped quotes
+are included in the value. Bare values extend to whitespace; punctuation may
+be part of a password and is not stripped. Use quotes when a comma or brace
+must be unambiguously preserved as syntax.
+
+Overlapping detections now respect policy before confidence: a blocked type
+wins over other types; a type configured with `redact` or `mask` wins over a
+reversible type. Equal-policy matches use the configured overlap resolution.
+The union still covers every detected character, so an overlapping EMAIL
+detection can widen a URI password's redaction to include the host. The cache
+fingerprint includes this policy; it cannot replay an obsolete winner.
+
+These changes are in source, **not the published 0.4.3 package**. The earlier
+agent-session measurements remain historical results; an offline replay of
+the synthetic fixture is not a new live-agent measurement.
+The [regression replay report](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/STRUCTURED_SECRETS.md)
+contains the before/after counts, individual timings and reproduction commands.
+
+## Experimental model evaluation
+
+The [Privy and Kiji benchmark](https://github.com/crp4222/privaite-bench/blob/main/KIJI_PRIVY.md)
+checks the unreleased source on 300 synthetic protocol traces, the existing
+120-document multilingual corpus, clean inputs, and long-log regressions.
+Kiji is an adapter in the benchmark repository, not a supported PrivAiTe preset.
+
+On Privy's 491 annotated spans, the current `onnx` stack fully removes 258
+(52.55%). Replacing Privacy Filter with the tested Kiji ONNX artifact while
+keeping the same Presidio configuration removes 147 (29.94%), with lower
+character precision and lower latency. Password coverage drops from 12/15
+to 2/15. These results support retaining the current default; they also expose
+its remaining misses, including three passwords in SQL traces. A successful
+replay of the planted log credentials does not establish detection of arbitrary
+protocol data. The report gives per-type counts, artifact limitations, latency,
+and the results of adding Kiji alongside the existing engines.
 
 ## Known limitations
 
 - **Single-word names** from spaCy are dropped (too many false positives). Caught by contextual patterns ("Nom: X") or the `onnx` preset.
 - **Lowercase names** need intro patterns ("je m'appelle X"). The `onnx` preset catches them without patterns.
 - **Informal dates** ("last Tuesday", "il y a deux ans") are not detected.
-- **Secrets in log output, once a line of context precedes them.** This one is
-  measured and reproducible, not a hypothesis. The two secrets behind the agent
-  benchmark's 2/24 figure are detected on their own: in `.env` assignment form
-  and on an isolated log line, both are scrubbed. They are missed once roughly
-  **one preceding line of log-shaped context** sits in front of them. A 7-line,
-  ~1 KB excerpt of that log already reproduces it (the API key survives all 5 of
-  its occurrences there, the SMTP password 4 of 5), and 41-line windows leak
-  4 of 5 and 3 of 5. The effect is **order dependent**: text appended *after*
-  the line never triggers it, only text before it does. It is a property of the
-  detector, so it holds on every surface that runs the engine (the
-  OpenAI-compatible proxy, the Open WebUI filter, the LiteLLM guardrail), not
-  only on the [agent CLI gateway](gateway.md). If you pipe raw application logs
-  through an LLM, assume secrets in them can survive.
-- **A password inside a connection URL can be typed as an email.** Presidio's
-  `EMAIL_ADDRESS` recognizer scores 1.0 over the userinfo part of a URI, so
-  `postgres://user:pass@host/db` can be detected and replaced as an email rather
-  than as a `SECRET`. It still leaves the machine as a placeholder, but under the
-  shipped configs it is then reversible (placeholder) instead of irreversible
-  (redact), which is not what an operator blocking or redacting secrets expects.
+- **Secrets without recognized structure can still survive.** The contextual
+  model missed two secrets in the historical agent benchmark when preceding
+  log lines changed its predictions. The new patterns target that fixture's
+  `presented_key` and `smtp_secret` fields; arbitrary field names, encoded or
+  fragmented values and unfamiliar formats still need detection or custom rules.
+  Parsed tool-call JSON is scanned value by value: a `password` object key is
+  not automatically supplied as context to a bare string value.
+- **Boundaries remain conservative.** Policy-aware merging prevents a detected
+  SECRET from becoming reversible because EMAIL scored higher. It cannot
+  correct a missing SECRET detection, and overlapping spans can still remove
+  useful surrounding text.
 - **Unscanned request fields**: see [the scanned surface](api.md#what-gets-anonymized).
 
 
@@ -494,6 +543,13 @@ reply; keep it, or extend it to more types, if you would rather they never come
 back at all. Each override takes `method` (`placeholder`, `fake_replacement`,
 `redact`, `mask`) and, for `mask`, `masking_char`.
 
+**Unreleased source:** when entity types overlap, `block_entities` takes
+precedence, then irreversible methods (`redact`/`mask`), then the configured
+overlap resolution. This prevents a higher-confidence EMAIL span from making
+an overlapping redacted SECRET reversible. All detected characters remain
+covered by the merged span. Both redact and mask have equal priority; neither
+can be restored. The detection cache includes the policy in its fingerprint.
+
 An override is about *how* a type is replaced. If a type must not be sent at
 all, even as a stand-in, use [`block_entities`](#blocking-specific-pii-types-hard-policy-gate)
 instead: that rejects the whole request.
@@ -634,6 +690,52 @@ Each language needs its spaCy model: `python -m spacy download de_core_news_md`.
 The default list is `["fr", "en"]`, so a fresh install fetches `fr_core_news_md`
 on first boot if it is missing; set `languages: ["en"]` for an English-only,
 no-surprise-download setup.
+
+## Built-in recognizers
+
+On top of Presidio's own recognizers, PrivAiTe registers a few of its own:
+contextual names, contextual locations, structured secrets and dates. Two things
+about them are worth knowing, because neither is obvious from the config:
+
+**The `entities` allowlist does not scope them.** It scopes Presidio's own
+recognizers to the types the preset trusts them for; ours are exempt, otherwise
+a preset allowlist that happens to omit their type (the location recognizer
+emits `LOCATION`, the secret one emits `SECRET`) would register them on every
+analyzer and filter them out of every result, silently. So removing a type from
+`entities` does **not** stop a built-in recognizer emitting it. Their types are
+named in a warning at startup when they fall outside the allowlist.
+
+**Language-specific vocabulary follows the language.** The date recognizer
+carries French and German month names and applies each only to that language.
+Applying both to every configured language is how an English or Dutch
+deployment used to see `11 September` and `11 April` masked while `11 October`
+and `11 March` went through: the masked ones are exactly the months spelled like
+the German ones. Its numeric, birth-word pattern (`born 15/03/1987`) carries no
+month vocabulary and stays active for every language.
+
+To switch one off, name it:
+
+```yaml
+pii:
+  detectors:
+    presidio:
+      disabled_recognizers: ["FrenchDateRecognizer"]
+```
+
+Accepted names: `ContextualNameRecognizer`, `FrenchDateRecognizer`,
+`ContextualLocationRecognizer`, `StructuredSecretRecognizer`. The list is empty
+by default, so secret and contextual detection keep working unless you say
+otherwise. Disabling one also narrows what `block_entities` considers
+enforceable, so a rule that only that recognizer could satisfy is refused at
+boot rather than never firing. An unrecognized name is refused when the config
+loads, so a typo cannot leave you believing a recognizer is off while it is
+still masking.
+
+These recognizers carry vocabulary, and vocabulary follows the language they are
+built for: a French deployment gets the French cues, an Italian one the Italian
+cues. Configure every language your traffic actually uses (the default is
+`["fr", "en"]`), because a cue written in a language you did not configure will
+not fire.
 
 ## Detector model revisions
 
@@ -1179,6 +1281,12 @@ forwarded.
 
 ## Measured, not promised
 
+The measurements in this section are historical (PrivAiTe 0.4.1).
+**Unreleased source update:** structured-secret rules now target the log fields
+below, and overlap resolution respects redaction and block policies. See
+[detection](detection.md). The original live-agent results remain unchanged;
+offline regression replays are a separate measurement.
+
 The [agent-workflow benchmark](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/RESULTS.md)
 drives real Claude Code and Codex sessions over a repository with 24 planted
 PII values and secrets and records every byte the provider actually receives.
@@ -1211,7 +1319,7 @@ recall 71.4% on the comparison corpus). Read the 2 of 24 as a strong measured
 reduction, never as zero leaks, and read it as a floor rather than a ceiling:
 one of the four database-URL password occurrences is held back only by a
 Presidio `EMAIL_ADDRESS` false positive scoring 1.0 over the URI userinfo, so
-that password is currently typed and placeholdered as an email (and therefore
+that password was typed and placeholdered as an email (and therefore
 reversible) rather than redacted as a secret. The results page also carries the
 latency and cache measurements behind the recommendation above.
 
@@ -1272,6 +1380,11 @@ Everything below was measured on 2026-08-12 against PrivAiTe 0.4.1 with real
 Claude Code (`claude-opus-5`) and Codex (`gpt-5.6-terra`) CLIs talking to real
 providers. It is reproducible from a public repository, and the numbers include
 the ones that do not flatter the tool.
+
+**Source update (2026-09-13, unreleased):** structured-secret rules now target
+the two log field names behind the historical misses, and overlapping types
+respect irreversible and block policies. See [detection](detection.md).
+The live-session numbers below have not been replaced by offline replay results.
 
 ## How it is measured
 
