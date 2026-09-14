@@ -4,7 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.5.0] - 2026-09-14
+
+### Added
+- `pii.detectors.presidio.disabled_recognizers`: switch off a recognizer
+  PrivAiTe registers itself, by name. Empty by default, so secret and contextual
+  detection are unchanged. A startup warning now names the types those
+  recognizers can emit that the `entities` allowlist does not scope, which is
+  the behaviour that made an allowlist read as if it had disabled them. An
+  unknown name in the list is refused when the config loads: this knob widens
+  what reaches the provider, so a typo must not read as a working setting.
+- Local structured-secret recognition for common credential assignments in
+  plaintext tool outputs, connection URI passwords and Authorization bearer
+  values. These rules run with Presidio under both `light` and `onnx`, preserve
+  labels and quoted delimiters, and supplement all other detectors.
+- Documentation of the external Privy protocol-trace evaluation and experimental
+  Kiji ONNX comparison, including lower coverage, excessive redaction and
+  remaining SQL password misses. No new detection preset is enabled.
 
 ### Fixed
 - The date recognizer applied its French AND German month names to every
@@ -24,30 +40,20 @@ All notable changes to this project are documented here. The format follows
 - A cue that merely means "I am" ("je suis", "I'm", "ik ben") now requires a
   capitalised name, which is what separates "I'm Marie Dupont" from "I'm ready
   to go". Cues that announce a name ("my name is") still accept a lowercase one.
-
-### Added
-- `pii.detectors.presidio.disabled_recognizers`: switch off a recognizer
-  PrivAiTe registers itself, by name. Empty by default, so secret and contextual
-  detection are unchanged. A startup warning now names the types those
-  recognizers can emit that the `entities` allowlist does not scope, which is
-  the behaviour that made an allowlist read as if it had disabled them. An
-  unknown name in the list is refused when the config loads: this knob widens
-  what reaches the provider, so a typo must not read as a working setting.
-- Local structured-secret recognition for common credential assignments in
-  plaintext tool outputs, connection URI passwords and Authorization bearer
-  values. These rules run with Presidio under both `light` and `onnx`, preserve
-  labels and quoted delimiters, and supplement all other detectors.
-- Documentation of the external Privy protocol-trace evaluation and experimental
-  Kiji ONNX comparison, including lower coverage, excessive redaction and
-  remaining SQL password misses. No new detection preset is enabled.
-
-### Fixed
 - Overlapping types now obey the configured privacy policy before detector
   confidence: blocked types win, then irreversible types, then the existing
   resolution strategy. A detected secret can no longer become reversible or
   bypass a block rule just because an overlapping email has a higher score.
 - Detection-cache keys include the overlap-relevant policy to prevent stale
   merged types after a policy change. Cached data remains hashes and spans only.
+- The ONNX detector attached a path separator to the value the same way it
+  attached a preceding space, and in that position it sometimes tagged only the
+  first sub-token of the segment. `/Users/marie` was reported as `/m`, so the
+  provider received `/Users<PERSON_1>arie`: a broken path for an agent to act
+  on, with `arie` still readable. Separators are now trimmed (a URL keeps its
+  own), and a span starting right after one is extended to the end of its word.
+  The extension is limited to that position, so a short span elsewhere is left
+  as the model reported it.
 
 ## [0.4.3] - 2026-09-12
 
