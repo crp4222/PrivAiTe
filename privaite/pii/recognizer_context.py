@@ -5,35 +5,86 @@ import re
 from presidio_analyzer import EntityRecognizer, RecognizerResult
 from presidio_analyzer.nlp_engine import NlpArtifacts
 
+from privaite.pii.recognizer_vocab import LanguagePatterns
+
 _NAME_GROUP = r"(?P<name>[A-ZÀ-Ÿa-zà-ÿ][\w'-]*(?:\s+[A-ZÀ-Ÿa-zà-ÿ][\w'-]*){0,4})"
+# Same group, first letter capitalised. Used behind the weak cues below, which
+# are compiled case-sensitively for that reason.
+_NAME_GROUP_CAPITALISED = r"(?P<name>[A-ZÀ-Ÿ][\w'-]*(?:\s+[A-ZÀ-Ÿa-zà-ÿ][\w'-]*){0,4})"
 
-_INTRO = (
-    r"je\s+m['']appelle|my\s+name\s+is|i['']m|je\s+suis"
-    r"|mon\s+nom\s+est|je\s+me\s+nomme|je\s+me\s+pr[ée]nomme"
-    r"|ich\s+hei[ßs]e|ich\s+bin|mein\s+Name\s+ist"
-    r"|me\s+llamo|mi\s+nombre\s+es|soy"
-    r"|mi\s+chiamo|il\s+mio\s+nome\s+[èe]|sono"
-    r"|meu\s+nome\s+[ée]|eu\s+sou|me\s+chamo"
-    r"|ik\s+ben|mijn\s+naam\s+is|ik\s+heet"
-)
-_ALIAS = (
-    r"appelez[- ]moi|call\s+me|on\s+m['']appelle|nennt?\s+mich"
-    r"|ll[áa]mame|chiamami|me\s+chame|noem\s+mij"
-)
+# Cues that announce a name explicitly ("my name is", "je m'appelle"). What
+# follows one is a name whatever its casing, so these accept a lowercase name:
+# chat users type "je m'appelle jean dupont".
+_INTRO_STRONG = {
+    "fr": r"je\s+m[']appelle|mon\s+nom\s+est|je\s+me\s+nomme|je\s+me\s+pr[ée]nomme",
+    "en": r"my\s+name\s+is",
+    "de": r"ich\s+hei[ßs]e|mein\s+Name\s+ist",
+    "es": r"me\s+llamo|mi\s+nombre\s+es",
+    "it": r"mi\s+chiamo|il\s+mio\s+nome\s+[èe]",
+    "pt": r"meu\s+nome\s+[ée]|me\s+chamo",
+    "nl": r"mijn\s+naam\s+is|ik\s+heet",
+}
 
-_FORM_FIELD = (
-    r"(?:Nom|Name|Prénom|Vorname|Nombre|Nome|Naam"
-    r"|Patient|Bénéficiaire|Beneficiary|Contact|Manager"
-    r"|Destinataire|Emittente|Landlord|Tenant|Applicant"
-    r"|Vermieter|Mieter|Denunciante|Testigo|Trabajador)\s*:\s*"
-)
+# Cues that merely mean "I am". They introduce a name often enough to be worth
+# keeping, but they equally introduce an adjective: "I'm ready to go" reported
+# "ready to go" as a person, "ik ben klaar" reported "klaar". Requiring a
+# capitalised first token is what separates the two, and it costs nothing a
+# strong cue does not already cover.
+_INTRO_WEAK = {
+    "fr": r"je\s+suis",
+    "en": r"i[']m",
+    "de": r"ich\s+bin",
+    "es": r"soy",
+    "it": r"sono",
+    "pt": r"eu\s+sou",
+    "nl": r"ik\s+ben",
+}
 
-PATTERNS = [
-    rf"(?:{_INTRO})\s+{_NAME_GROUP}",
-    rf"(?:{_ALIAS})\s+{_NAME_GROUP}",
-    rf"{_FORM_FIELD}{_NAME_GROUP}",
-]
+_ALIAS = {
+    "fr": r"appelez[- ]moi|on\s+m[']appelle",
+    "en": r"call\s+me",
+    "de": r"nennt?\s+mich",
+    "es": r"ll[áa]mame",
+    "it": r"chiamami",
+    "pt": r"me\s+chame",
+    "nl": r"noem\s+mij",
+}
 
+# Form labels, each in the language it is written in. A label shared by several
+# languages ("Name", "Contact", "Nome") is listed under each of them.
+_FORM_FIELD = {
+    "fr": r"Nom|Prénom|Bénéficiaire|Destinataire|Contact|Patient",
+    "en": r"Name|Beneficiary|Contact|Manager|Landlord|Tenant|Applicant|Patient",
+    "de": r"Name|Vorname|Vermieter|Mieter|Patient",
+    "es": r"Nombre|Denunciante|Testigo|Trabajador",
+    "it": r"Nome|Emittente|Denunciante",
+    "pt": r"Nome|Denunciante",
+    "nl": r"Naam",
+}
+
+_LANGUAGES = frozenset(_INTRO_STRONG) | frozenset(_ALIAS) | frozenset(_FORM_FIELD)
+
+
+def _patterns_for(lang: str) -> list[str]:
+    """Cues are wrapped in a scoped case-insensitive group rather than compiled
+    with a global IGNORECASE, so the capitalisation required after a weak cue is
+    actually enforced."""
+    patterns = []
+    if lang in _INTRO_STRONG:
+        patterns.append(rf"(?i:{_INTRO_STRONG[lang]})\s+{_NAME_GROUP}")
+    if lang in _INTRO_WEAK:
+        patterns.append(rf"(?i:{_INTRO_WEAK[lang]})\s+{_NAME_GROUP_CAPITALISED}")
+    if lang in _ALIAS:
+        patterns.append(rf"(?i:{_ALIAS[lang]})\s+{_NAME_GROUP}")
+    if lang in _FORM_FIELD:
+        patterns.append(rf"(?i:(?:{_FORM_FIELD[lang]})\s*:\s*){_NAME_GROUP}")
+    return patterns
+
+
+NAME_PATTERNS = LanguagePatterns({lang: _patterns_for(lang) for lang in _LANGUAGES})
+
+# Stop words cut a match short, so they only ever reduce what is masked: unlike
+# the cues above, unioning them across languages stays on the safe side.
 STOP_WORDS = {
     "et",
     "ou",
@@ -135,7 +186,6 @@ STOP_WORDS = {
     "voor",
 }
 
-COMPILED = [re.compile(p, re.IGNORECASE | re.UNICODE) for p in PATTERNS]
 
 # macOS/iOS and most chat UIs emit a typographic apostrophe (U+2019) for "'".
 # Map the common variants to a straight quote so intro patterns like
@@ -164,6 +214,7 @@ class ContextualNameRecognizer(EntityRecognizer):
             supported_language=supported_language,
             name="ContextualNameRecognizer",
         )
+        self._compiled = NAME_PATTERNS.for_language(supported_language)
 
     def load(self) -> None:
         pass
@@ -174,7 +225,7 @@ class ContextualNameRecognizer(EntityRecognizer):
         results = []
         normalized = text.translate(_APOSTROPHES)
 
-        for pattern in COMPILED:
+        for pattern in self._compiled:
             for match in pattern.finditer(normalized):
                 raw_name = match.group("name")
                 name = _trim_name(raw_name)

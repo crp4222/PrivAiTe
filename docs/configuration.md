@@ -371,6 +371,12 @@ boot rather than never firing. An unrecognized name is refused when the config
 loads, so a typo cannot leave you believing a recognizer is off while it is
 still masking.
 
+These recognizers carry vocabulary, and vocabulary follows the language they are
+built for: a French deployment gets the French cues, an Italian one the Italian
+cues. Configure every language your traffic actually uses (the default is
+`["fr", "en"]`), because a cue written in a language you did not configure will
+not fire.
+
 ## Detector model revisions
 
 The built-in Hugging Face detector models are pinned to immutable commits, so a

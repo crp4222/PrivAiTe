@@ -15,6 +15,15 @@ All notable changes to this project are documented here. The format follows
   PrivAiTe registers are exempt from the `entities` allowlist. Each month list
   now applies only to its own language, and the numeric birth-date pattern,
   which carries no month vocabulary, stays active everywhere (issue #31).
+- The same union covered the contextual name and location recognizers, whose
+  cues also applied to every configured language: `via` is a street in Italian
+  but "by way of" in English, so "configured via Terraform" reported a location,
+  and Dutch "ik ben klaar" reported a person under an English deployment. Every
+  cue now belongs to the language its words come from. Stop words stay unioned
+  on purpose, since they only ever shorten a match.
+- A cue that merely means "I am" ("je suis", "I'm", "ik ben") now requires a
+  capitalised name, which is what separates "I'm Marie Dupont" from "I'm ready
+  to go". Cues that announce a name ("my name is") still accept a lowercase one.
 
 ### Added
 - `pii.detectors.presidio.disabled_recognizers`: switch off a recognizer

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from privaite.pii.recognizer_base import RegexSpanRecognizer
+from privaite.pii.recognizer_vocab import LanguagePatterns
 
 MONTHS_FR = (
     "janvier|février|fevrier|mars|avril|mai|juin|"
@@ -12,13 +13,6 @@ MONTHS_FR = (
 MONTHS_DE = (
     "Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember"
 )
-
-# Month names are language-specific vocabulary, so each language gets its own.
-# They used to be unioned and compiled once for every configured language, which
-# masked a third of the English and Dutch calendar wherever a month happens to
-# be spelled like the German one (April, August, September, November, juni,
-# juli, oktober) and left the rest alone (issue #31).
-MONTHS_BY_LANGUAGE = {"fr": MONTHS_FR, "de": MONTHS_DE}
 
 
 # Word boundaries on both edges: without the trailing \b, "3 maintenant" used to
@@ -38,11 +32,13 @@ NUMERIC_PATTERNS = [
     r"(?P<date>(?:née?|born|geboren)\s+(?:le\s+|am\s+)?\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4})(?!\d)",
 ]
 
-COMPILED_NUMERIC = [re.compile(p, re.IGNORECASE | re.UNICODE) for p in NUMERIC_PATTERNS]
-COMPILED_MONTHS = {
-    lang: [re.compile(p, re.IGNORECASE | re.UNICODE) for p in _month_patterns(months)]
-    for lang, months in MONTHS_BY_LANGUAGE.items()
-}
+# Month names are vocabulary, so they follow the language: unioned, they masked a
+# third of the English and Dutch calendar (issue #31).
+DATE_PATTERNS = LanguagePatterns(
+    {"fr": _month_patterns(MONTHS_FR), "de": _month_patterns(MONTHS_DE)},
+    neutral=NUMERIC_PATTERNS,
+    flags=re.IGNORECASE | re.UNICODE,
+)
 
 
 class FrenchDateRecognizer(RegexSpanRecognizer):
@@ -52,7 +48,6 @@ class FrenchDateRecognizer(RegexSpanRecognizer):
             supported_language=supported_language,
             name="FrenchDateRecognizer",
         )
-        # Month patterns only for a language whose months these are; every
-        # other language keeps the numeric birth-date pattern and nothing else.
-        compiled = COMPILED_MONTHS.get(supported_language, []) + COMPILED_NUMERIC
-        self._specs = [(c, "DATE_TIME", 0.85, "date") for c in compiled]
+        self._specs = [
+            (c, "DATE_TIME", 0.85, "date") for c in DATE_PATTERNS.for_language(supported_language)
+        ]

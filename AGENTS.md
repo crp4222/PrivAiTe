@@ -135,6 +135,30 @@ carries any payload other than fully-held-back content.
   publisher; its Environment field must stay empty). A PyPI version can never be
   reused, so verify green CI first.
 
+## Recognizer vocabulary follows the language
+
+The recognizers PrivAiTe registers itself (`privaite/pii/recognizer_*.py`) are
+registered on **every** configured language, so any human-language word inside
+their regexes reaches text written in another language. A cue made of words
+belongs to the language those words come from: declare it in a
+`LanguagePatterns` map (`privaite/pii/recognizer_vocab.py`), never as a union of
+every language's vocabulary. Only patterns with no vocabulary at all (digits,
+punctuation, code identifiers) go in the `neutral` bucket that applies
+everywhere. Unioning them is how issue #31 happened, and the same shape then
+reported "configured via Terraform" as a location, `via` being an Italian
+street. Stop-word lists are the deliberate exception: they only ever shorten a
+match, so a union of languages there stays on the safe side.
+
+A cue that merely means "I am" ("je suis", "I'm", "ik ben") introduces an
+adjective as often as a name, so it requires a capitalised name; a cue that
+announces a name ("my name is") accepts any casing.
+
+These recognizers are also **exempt from the `entities` allowlist** by design,
+so removing a type from that list does not disable them: the knob is
+`pii.detectors.presidio.disabled_recognizers`, whose names are validated at
+config load. Anything reasoning about what Presidio can emit must call
+`builtin_recognizer_entity_types()` rather than restate the list.
+
 ## Integrations must stay in sync with the core
 
 `integrations/litellm/privaite_guardrail.py` and

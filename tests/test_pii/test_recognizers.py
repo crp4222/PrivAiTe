@@ -15,10 +15,17 @@ class TestContextualNameRecognizer:
         assert text[results[0].start : results[0].end] == "dénis navarros"
 
     def test_my_name_is(self):
-        results = self.rec.analyze("my name is john smith and hello", ["PERSON"], None)
+        rec = ContextualNameRecognizer(supported_language="en")
+        results = rec.analyze("my name is john smith and hello", ["PERSON"], None)
         assert len(results) == 1
         text = "my name is john smith and hello"
         assert text[results[0].start : results[0].end] == "john smith"
+
+    def test_an_english_cue_does_not_fire_under_french(self):
+        """The cue is English vocabulary, so it belongs to the English
+        recognizer. A deployment that wants both configures both languages,
+        which the default config does."""
+        assert self.rec.analyze("my name is john smith and hello", ["PERSON"], None) == []
 
     def test_je_suis(self):
         results = self.rec.analyze("je suis Marie Curie", ["PERSON"], None)
@@ -190,3 +197,110 @@ class TestDisabledRecognizersIsTypoProof:
         from privaite.pii.recognizer_names import BUILTIN_RECOGNIZER_NAMES
 
         assert {r.name for r in build_recognizers("en")} == set(BUILTIN_RECOGNIZER_NAMES)
+
+
+class TestVocabularyFollowsTheLanguage:
+    """The general rule behind issue #31: a cue made of words belongs to the
+    language those words come from. One case per recognizer that carries
+    vocabulary, so a future recognizer unioning languages again fails here."""
+
+    def test_an_italian_street_preposition_is_not_a_location_in_english(self):
+        from privaite.pii.recognizer_location import ContextualLocationRecognizer
+
+        # "via" is a street in Italian and "by way of" in English, so the
+        # unioned version reported "configured via Terraform" as a location.
+        assert (
+            ContextualLocationRecognizer(supported_language="en").analyze(
+                "configured via Terraform", ["LOCATION"], None
+            )
+            == []
+        )
+        assert ContextualLocationRecognizer(supported_language="it").analyze(
+            "via Roma 12", ["LOCATION"], None
+        )
+
+    @pytest.mark.parametrize(
+        ("lang", "text"),
+        [
+            ("en", "I live in Lille"),
+            ("fr", "j'habite à Lille"),
+            ("de", "Ich wohne in Berlin"),
+            ("es", "vivo en Madrid"),
+            ("it", "abito a Milano"),
+            ("nl", "ik woon in Utrecht"),
+        ],
+    )
+    def test_each_language_keeps_its_own_residence_cue(self, lang, text):
+        from privaite.pii.recognizer_location import ContextualLocationRecognizer
+
+        assert ContextualLocationRecognizer(supported_language=lang).analyze(
+            text, ["LOCATION"], None
+        )
+
+    @pytest.mark.parametrize(
+        ("lang", "text"),
+        [
+            ("fr", "je m'appelle Jean Dupont"),
+            ("en", "my name is John Smith"),
+            ("de", "ich heiße Hans Müller"),
+            ("es", "me llamo Ana García"),
+            ("it", "mi chiamo Marco Rossi"),
+            ("pt", "meu nome é João Silva"),
+            ("nl", "mijn naam is Jeroen Bakker"),
+        ],
+    )
+    def test_each_language_keeps_its_own_name_cue(self, lang, text):
+        from privaite.pii.recognizer_context import ContextualNameRecognizer
+
+        assert ContextualNameRecognizer(supported_language=lang).analyze(text, ["PERSON"], None)
+
+    def test_a_vocabulary_language_must_be_one_privaite_can_configure(self):
+        """A typo in a language key would be silently dead vocabulary."""
+        from privaite.pii.recognizer_vocab import LanguagePatterns
+
+        with pytest.raises(ValueError, match="unconfigurable"):
+            LanguagePatterns({"gb": [r"x"]})
+
+
+class TestWeakCuesRequireAName:
+    """A cue that only means "I am" introduces an adjective as often as a name.
+    Capitalisation is what separates the two; a strong cue does not need it."""
+
+    @pytest.mark.parametrize(
+        ("lang", "text"),
+        [
+            ("en", "I'm ready to go"),
+            ("nl", "ik ben klaar"),
+            ("fr", "je suis content"),
+            ("it", "sono stanco"),
+        ],
+    )
+    def test_a_weak_cue_followed_by_a_lowercase_word_is_not_a_person(self, lang, text):
+        from privaite.pii.recognizer_context import ContextualNameRecognizer
+
+        assert (
+            ContextualNameRecognizer(supported_language=lang).analyze(text, ["PERSON"], None) == []
+        )
+
+    @pytest.mark.parametrize(
+        ("lang", "text", "expected"),
+        [
+            ("en", "I'm Marie Dupont", "Marie Dupont"),
+            ("nl", "ik ben Jeroen Bakker", "Jeroen Bakker"),
+            ("fr", "je suis Jean Dupont", "Jean Dupont"),
+        ],
+    )
+    def test_a_weak_cue_followed_by_a_name_still_detects_it(self, lang, text, expected):
+        from privaite.pii.recognizer_context import ContextualNameRecognizer
+
+        results = ContextualNameRecognizer(supported_language=lang).analyze(text, ["PERSON"], None)
+        assert [text[r.start : r.end] for r in results] == [expected]
+
+    def test_a_strong_cue_still_accepts_a_lowercase_name(self):
+        """Chat users type their name in lowercase, and after "my name is" there
+        is nothing else it could be."""
+        from privaite.pii.recognizer_context import ContextualNameRecognizer
+
+        assert ContextualNameRecognizer(supported_language="en").analyze(
+            "my name is john smith", ["PERSON"], None
+        )
