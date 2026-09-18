@@ -124,6 +124,9 @@ carries any payload other than fully-held-back content.
   skipping them locally once broke a release.
 - Version: bump **both** `pyproject.toml` and `privaite/__init__.py`; date the
   `CHANGELOG.md` section; bump the integration pins (`privaite>=X`).
+- Install instructions: every docker tag, pip floor and sentence describing a
+  behaviour as not yet shipped moves with the release, or the quick start
+  installs the previous version. `tests/test_docs.py` fails on both.
 - Docs: `python scripts/gen_llms_full.py` after ANY documentation change
   (`--check` fails when stale). `llms-full.txt` is a concatenation and went
   stale for three releases once; `llms.txt` and `docs/llms.txt` are the same

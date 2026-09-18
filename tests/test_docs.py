@@ -113,3 +113,38 @@ def test_openwebui_filter_floor_matches_the_shipped_version() -> None:
     readme = (REPO_ROOT / "integrations" / "openwebui" / "README.md").read_text()
     assert f"requirements: privaite>={__version__}" in filter_source
     assert f"privaite>={__version__}" in readme
+
+
+def test_no_install_instruction_points_at_a_superseded_version() -> None:
+    """A reader who follows the README literally must land on the shipped release.
+
+    The release checklist bumps the package and the integration pins; the quick
+    start's docker tag and pip floor are easy to leave a release behind.
+    """
+    import re
+
+    from privaite import __version__
+
+    pages = [REPO_ROOT / "README.md", REPO_ROOT / "llms.txt"]
+    pages += sorted((REPO_ROOT / "docs").glob("*.md"))
+    pages += sorted((REPO_ROOT / "integrations").glob("*/README.md"))
+
+    # Only install targets: a docker tag or a pip specifier. Prose naming an
+    # older version in a historical measurement is deliberate and stays.
+    target = re.compile(r"privaite[:>=]=?(\d+\.\d+\.\d+)")
+    stale: list[str] = []
+    for page in pages:
+        for version in set(target.findall(page.read_text())):
+            if version != __version__:
+                stale.append(f"{page.relative_to(REPO_ROOT)} -> {version}")
+    assert not stale, f"install instructions on a superseded version: {sorted(stale)}"
+
+
+def test_nothing_is_still_announced_as_unreleased() -> None:
+    """Prose calling shipped behaviour "unreleased" reads as "not available yet"."""
+    pages = [REPO_ROOT / "README.md", REPO_ROOT / "llms.txt"]
+    pages += sorted((REPO_ROOT / "docs").glob("*.md"))
+    offenders = [
+        str(p.relative_to(REPO_ROOT)) for p in pages if "unreleased" in p.read_text().lower()
+    ]
+    assert offenders == [], f"still announced as unreleased: {offenders}"

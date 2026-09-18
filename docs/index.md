@@ -117,7 +117,7 @@ The benchmark is public and reproducible. Run it yourself.
 - **onnx (default).** The full suite. Detects classic personal data plus secrets
   and passwords. Downloads a small model on first run (baked into the Docker
   image).
-- **light.** Presidio with PrivAiTe's recognizers; the unreleased source also
+- **light.** Presidio with PrivAiTe's recognizers; 0.5.0 also
   covers common structured-secret formats. No Privacy Filter model is loaded;
   spaCy language models are still required.
 

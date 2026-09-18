@@ -183,7 +183,7 @@ reply; keep it, or extend it to more types, if you would rather they never come
 back at all. Each override takes `method` (`placeholder`, `fake_replacement`,
 `redact`, `mask`) and, for `mask`, `masking_char`.
 
-**Unreleased source:** when entity types overlap, `block_entities` takes
+**Since 0.5.0:** when entity types overlap, `block_entities` takes
 precedence, then irreversible methods (`redact`/`mask`), then the configured
 overlap resolution. This prevents a higher-confidence EMAIL span from making
 an overlapping redacted SECRET reversible. All detected characters remain

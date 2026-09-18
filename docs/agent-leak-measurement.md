@@ -21,7 +21,7 @@ Claude Code (`claude-opus-5`) and Codex (`gpt-5.6-terra`) CLIs talking to real
 providers. It is reproducible from a public repository, and the numbers include
 the ones that do not flatter the tool.
 
-**Source update (2026-09-13, unreleased):** structured-secret rules now target
+**Shipped in 0.5.0:** structured-secret rules now target
 the two log field names behind the historical misses, and overlapping types
 respect irreversible and block policies. See [detection](detection.md).
 The live-session numbers below have not been replaced by offline replay results.

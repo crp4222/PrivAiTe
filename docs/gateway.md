@@ -171,7 +171,7 @@ forwarded.
 ## Measured, not promised
 
 The measurements in this section are historical (PrivAiTe 0.4.1).
-**Unreleased source update:** structured-secret rules now target the log fields
+**Shipped in 0.5.0:** structured-secret rules now target the log fields
 below, and overlap resolution respects redaction and block policies. See
 [detection](detection.md). The original live-agent results remain unchanged;
 offline regression replays are a separate measurement.

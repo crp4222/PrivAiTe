@@ -24,7 +24,7 @@ The default engine. Handles structured PII through pattern matching and basic NE
 | Person names (capitalized, 2+ words) | spaCy NER, only kept if all words are capitalized |
 | Person names (lowercase or single word) | Contextual regex, only after "je m'appelle X", "my name is X", "ich heiße X", "Nom: X", etc. A cue that only means "I am" ("je suis", "I'm") additionally requires a capitalized name |
 | Dates (FR/DE) | Custom regex, "15 mars 1987", "3. März 1990", under a French or German configuration |
-| Structured secrets (unreleased source) | PrivAiTe patterns for credential assignments, URI passwords and Authorization bearer values |
+| Structured secrets (0.5.0) | PrivAiTe patterns for credential assignments, URI passwords and Authorization bearer values |
 
 Presidio is faster than the contextual model and produces few false positives on the clean benchmark documents. It misses names that spaCy doesn't recognize and arbitrary passwords without a recognized field name or URI/header structure.
 
@@ -56,9 +56,9 @@ The default `onnx` preset does detect personal addresses (as `LOCATION`) and per
 - **Generic place names (the Presidio LOCATION recognizer):** "Paris" or "London" on their own aren't PII, and spaCy flags ordinary words ("Kubernetes", "Saturday") as locations. The `onnx` preset keeps this recognizer off and relies on the model's context-aware address detection instead. PrivAiTe's own cue-based location patterns ("elle habite à X", "lives in X", "domicilié à X") do fire under every preset: they require a residence cue, so they do not carry spaCy's false-positive rate. Any recognizer PrivAiTe registers, and any `custom_patterns` type, is exempt from a preset's entity allowlist; the allowlist only scopes Presidio's own recognizers. Use [`disabled_recognizers`](configuration.md#built-in-recognizers) to switch one off. Their cues are vocabulary, so each one only fires under the language it is written in: configure every language your traffic uses.
 - **The Presidio URL regex:** it matches code like `logging.getLogger` because `.ge` is a valid TLD. The `onnx` preset keeps it off, and the model still catches genuine personal URLs.
 
-The `light` preset has no contextual Privacy Filter model. The unreleased source adds the same structured-secret rules to every preset that enables Presidio. Broad password recognition still requires an ML detector; these rules do not make `light` equivalent to `onnx`.
+The `light` preset has no contextual Privacy Filter model. 0.5.0 adds the same structured-secret rules to every preset that enables Presidio. Broad password recognition still requires an ML detector; these rules do not make `light` equivalent to `onnx`.
 
-## Structured credentials and overlapping types (unreleased)
+## Structured credentials and overlapping types
 
 The new rules supplement detection; they never short-circuit the NLP engines.
 They recognize common assignment names (`api_key`, `apiKey`, `access_token`,
@@ -81,7 +81,7 @@ The union still covers every detected character, so an overlapping EMAIL
 detection can widen a URI password's redaction to include the host. The cache
 fingerprint includes this policy; it cannot replay an obsolete winner.
 
-These changes are in source, **not the published 0.4.3 package**. The earlier
+These changes shipped in **0.5.0**; 0.4.x does not have them. The earlier
 agent-session measurements remain historical results; an offline replay of
 the synthetic fixture is not a new live-agent measurement.
 The [regression replay report](https://github.com/crp4222/privaite-bench/blob/main/agent_workflow/STRUCTURED_SECRETS.md)
@@ -90,7 +90,7 @@ contains the before/after counts, individual timings and reproduction commands.
 ## Experimental model evaluation
 
 The [Privy and Kiji benchmark](https://github.com/crp4222/privaite-bench/blob/main/KIJI_PRIVY.md)
-checks the unreleased source on 300 synthetic protocol traces, the existing
+checks the 0.5.0 source on 300 synthetic protocol traces, the existing
 120-document multilingual corpus, clean inputs, and long-log regressions.
 Kiji is an adapter in the benchmark repository, not a supported PrivAiTe preset.
 
