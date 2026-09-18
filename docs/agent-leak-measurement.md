@@ -6,7 +6,7 @@ description: >-
   fixture and 2 of 24 on a realistic session, with the miss mechanism.
 ---
 
-# What a coding agent actually sends to its provider
+# What Claude Code sends to its provider: a wire-level PII leak measurement
 
 A coding agent reads your files. Then it sends them somewhere.
 

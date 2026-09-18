@@ -209,7 +209,8 @@ Also browsable as a site: [crp4222.github.io/PrivAiTe](https://crp4222.github.io
 - [Configuration reference](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md): providers, Docker with custom config, anonymization methods, `block_entities`, custom patterns, languages, pinned model revisions
 - [Your policy, your types](https://github.com/crp4222/PrivAiTe/blob/main/docs/policy.md): the declarative policy layer as one story: custom types, per-type fates, hard blocks, dry-run, and where its determinism ends
 - [API reference](https://github.com/crp4222/PrivAiTe/blob/main/docs/api.md): endpoints, the exact scanned/unscanned surface, strict mode, passthrough caveats
-- [Verify what gets redacted](https://github.com/crp4222/PrivAiTe/blob/main/docs/verify.md): audit the proxy on your own data, dry-run inspect endpoint
+- [How to redact PII before sending prompts to an LLM](https://github.com/crp4222/PrivAiTe/blob/main/docs/redact-pii-before-llm.md): where PII hides in a request, the three ways to remove it, and what each one costs
+- [See exactly what your provider receives](https://github.com/crp4222/PrivAiTe/blob/main/docs/verify.md): audit the proxy on your own data, dry-run inspect endpoint
 - [Feature comparison](https://github.com/crp4222/PrivAiTe/blob/main/docs/comparison.md) and the [reproducible benchmark](https://github.com/crp4222/privaite-bench)
 - [Agent CLI gateway](https://github.com/crp4222/PrivAiTe/blob/main/docs/gateway.md): Claude Code setup, Codex setup (beta), what gateway routes scan, honest limits
 - [Changelog](https://github.com/crp4222/PrivAiTe/blob/main/CHANGELOG.md)

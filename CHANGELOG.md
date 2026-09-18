@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `docs/redact-pii-before-llm.md`: the page someone lands on when they are still
+  deciding how to do this at all. Where PII hides in a request, the three ways
+  to remove it (in your own code with Presidio, in a gateway guardrail, or in a
+  proxy), what each one costs, the alternatives including where PrivAiTe loses,
+  and why the check belongs on the outbound request body rather than the
+  restored reply.
 - `privaite verify`: sends an agent-shaped request through a real PrivAiTe app
   to a throwaway provider on 127.0.0.1 and prints the request body that provider
   actually received, next to the same request sent straight to it. Planted

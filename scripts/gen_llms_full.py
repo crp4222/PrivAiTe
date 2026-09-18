@@ -27,6 +27,7 @@ HEADER = (
 # Order is the reading order of the docs site, README first.
 SOURCES = (
     "README.md",
+    "docs/redact-pii-before-llm.md",
     "docs/detection.md",
     "docs/configuration.md",
     "docs/policy.md",

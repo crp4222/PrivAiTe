@@ -6,7 +6,7 @@ description: >-
   your machine.
 ---
 
-# Verify what gets redacted
+# See exactly what your LLM provider receives
 
 Do not trust the proxy blindly: check it on your own data. Everything below runs
 on 127.0.0.1, uses no provider credential, and sends nothing anywhere.

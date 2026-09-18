@@ -5,7 +5,7 @@ description: >-
   limitations.
 ---
 
-# How detection works
+# How PrivAiTe detects PII locally, with Presidio and OpenAI's privacy-filter model
 
 PrivAiTe uses two detection engines that can run together or separately.
 
