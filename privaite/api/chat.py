@@ -96,7 +96,7 @@ async def chat_completions(
     kwargs = {k: v for k, v in body.items() if k not in ("model", "messages", "stream")}
 
     async def _anonymize() -> tuple[tuple[list, dict], Any]:
-        anon, mapping = await pii_engine.process_request(messages)
+        anon, mapping = await pii_engine.process_request(messages, kwargs)
         anon_kwargs = await _scrub_forwarded_fields(kwargs, pii_engine, mapping)
         record_pii_stats(request, mapping)
         return (anon, anon_kwargs), mapping

@@ -3,7 +3,7 @@ from __future__ import annotations
 from privaite.config.schema import AnonymizationConfig
 from privaite.pii.entity import PIIEntity
 from privaite.pii.faker_providers import FakerReplacementGenerator
-from privaite.pii.mapping import PIIMapping
+from privaite.pii.mapping import PLACEHOLDER_LITERAL, PIIMapping
 
 
 class FakeReplacementExhaustedError(RuntimeError):
@@ -38,12 +38,20 @@ class Anonymizer:
         entities: list[PIIEntity],
         mapping: PIIMapping,
     ) -> str:
-        if not entities:
+        shielded = self._shield_literals(text, entities, mapping)
+        if not entities and not shielded:
             return text
 
-        sorted_entities = sorted(entities, key=lambda e: e.start, reverse=True)
+        # One right-to-left pass over entities and shielded literals together:
+        # every offset still points into the untouched part of the text.
+        spans: list[tuple[int, int, PIIEntity | str]] = [(e.start, e.end, e) for e in entities]
+        spans.extend(shielded)
 
-        for entity in sorted_entities:
+        for start, end, item in sorted(spans, key=lambda span: span[0], reverse=True):
+            if isinstance(item, str):
+                text = text[:start] + item + text[end:]
+                continue
+            entity = item
             original = text[entity.start : entity.end]
             method = self._method_for(entity.entity_type)
 
@@ -61,6 +69,42 @@ class Anonymizer:
             text = text[: entity.start] + fake + text[entity.end :]
 
         return text
+
+    def _shield_literals(
+        self, text: str, entities: list[PIIEntity], mapping: PIIMapping
+    ) -> list[tuple[int, int, str]]:
+        """Keep the input's own placeholder-shaped strings apart from the issued
+        placeholders. The restore swaps EVERY occurrence of an issued placeholder
+        for its original, so a "<PERSON_1>" the client already had (a test
+        fixture, a template variable, a planted "?to=<EMAIL_ADDRESS_1>") would
+        get a real value written into it.
+
+        A literal nothing has taken yet is reserved: it goes out verbatim and no
+        placeholder is ever issued with that string. A literal an earlier text
+        of the request already got as a placeholder is too late to reserve, so
+        it is swapped for a fresh placeholder that restores to the literal
+        itself. Returns those swaps as (start, end, fake), never overlapping a
+        detected entity (the entity's own replacement already breaks the
+        literal apart and restores it)."""
+        matches = list(PLACEHOLDER_LITERAL.finditer(text))
+        if not matches:
+            return []
+        for match in matches:
+            if mapping.get_original(match.group(0)) is None:
+                mapping.reserve(match.group(0))
+        swaps: list[tuple[int, int, str]] = []
+        for match in matches:
+            literal = match.group(0)
+            if mapping.get_original(literal) is None:
+                continue
+            if any(e.start < match.end() and match.start() < e.end for e in entities):
+                continue
+            fake = mapping.get_fake(literal)
+            if fake is None:
+                fake = self._numbered_placeholder(match.group(1), mapping)
+                mapping.add_literal(literal, fake)
+            swaps.append((match.start(), match.end(), fake))
+        return swaps
 
     def _method_for(self, entity_type: str) -> str:
         # An entity override picks the method for its type; otherwise the global
@@ -95,5 +139,13 @@ class Anonymizer:
 
         # "placeholder" (the default) and any unknown method fall back to a
         # numbered placeholder, numbered through the per-request mapping.
+        return self._numbered_placeholder(entity_type, mapping)
+
+    @staticmethod
+    def _numbered_placeholder(entity_type: str, mapping: PIIMapping) -> str:
+        # Skip every number whose placeholder is already issued or already in
+        # the input (see _shield_literals).
         idx = mapping.next_index(entity_type)
+        while mapping.is_taken(f"<{entity_type}_{idx}>"):
+            idx += 1
         return f"<{entity_type}_{idx}>"

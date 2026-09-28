@@ -317,3 +317,20 @@ async def test_embeddings_list_input_anonymized():
 
     assert resp.status_code == 200
     assert "Marie Dupont" not in json.dumps(router.embedding_input)
+
+
+@pytest.mark.asyncio
+async def test_completions_placeholder_literal_in_suffix_is_never_issued():
+    # The prompt is scrubbed before the suffix, so the suffix's literal has to
+    # be reserved up front for Marie not to take its number.
+    app, router = _make_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/v1/completions",
+            json={"model": "m", "prompt": "Contact Marie Dupont", "suffix": "# <PERSON_1>"},
+        )
+
+    assert resp.status_code == 200
+    assert router.prompt == "Contact <PERSON_2>"
+    assert router.kwargs["suffix"] == "# <PERSON_1>"
+    assert resp.json()["choices"][0]["text"] == "Echo: Contact Marie Dupont"

@@ -625,3 +625,26 @@ async def test_streaming_tool_arguments_come_back_as_valid_json():
         for call in choice.get("delta", {}).get("tool_calls") or []
     )
     assert json.loads(args) == {"to": address}
+
+
+@pytest.mark.asyncio
+async def test_placeholder_literal_in_tools_is_never_issued():
+    # `tools` is relayed verbatim; a "<PERSON_1>" in it must not also become
+    # Marie's placeholder, or the restore writes her name into the reply.
+    app, router = _make_app()
+    tools = [{"type": "function", "function": {"name": "t", "description": "Uses <PERSON_1>"}}]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "m",
+                "messages": [{"role": "user", "content": "Contact Marie Dupont, not <PERSON_1>"}],
+                "tools": tools,
+            },
+        )
+
+    assert resp.status_code == 200
+    assert router.received_messages[-1]["content"] == "Contact <PERSON_2>, not <PERSON_1>"
+    assert router.received_kwargs["tools"] == tools
+    content = resp.json()["choices"][0]["message"]["content"]
+    assert content == "Echo: Contact Marie Dupont, not <PERSON_1>"

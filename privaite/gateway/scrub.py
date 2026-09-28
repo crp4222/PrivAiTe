@@ -120,6 +120,10 @@ async def scrub_anthropic_request(
     blocked type found there rejects the request.
     """
     mapping = PIIMapping()
+    # The whole body, relayed parts included: a literal "<PERSON_1>" in
+    # `system` (CLAUDE.md), a tool definition or a later tool_result must keep
+    # that number to itself (see Anonymizer._shield_literals).
+    mapping.reserve(body)
     new_body = dict(body)
     messages = body.get("messages")
     if isinstance(messages, list):
@@ -303,6 +307,8 @@ async def scrub_responses_request(
     gated (see gate_document); opaque and binary items are relayed
     byte-for-byte (see _RESPONSES_OPAQUE_TYPES)."""
     mapping = PIIMapping()
+    # Same reservation as the Anthropic path, `instructions` included.
+    mapping.reserve(body)
     new_body = dict(body)
     input_value = body.get("input")
     if isinstance(input_value, str):

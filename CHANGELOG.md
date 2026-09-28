@@ -23,6 +23,17 @@ All notable changes to this project are documented here. The format follows
   reports what came back rather than what went out: that hid a span defect that
   left part of a name on the wire while the reply looked clean.
 
+### Fixed
+- A placeholder-shaped string already in the request (`<PERSON_1>` in a test
+  fixture, a template, a tool definition or the agent's system prompt) could
+  also be issued to a detected value. The provider saw one placeholder with two
+  meanings, and the restore wrote the real value into the client's own string,
+  a planted `?to=<EMAIL_ADDRESS_1>` included. Numbering now skips every such
+  string in the request, and one that arrives after its number was taken is
+  sent as a fresh placeholder and restored to itself. The non-streaming restore
+  is now single-pass like the streaming one, so a restored value is never
+  rewritten a second time.
+
 ## [0.5.0] - 2026-09-14
 
 ### Added

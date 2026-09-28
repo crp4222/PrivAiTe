@@ -65,3 +65,31 @@ def test_multiple_persons():
     assert m.get_original("<PERSON_1>") == "alice"
     assert m.get_original("<PERSON_2>") == "bob"
     assert m.count == 2
+
+
+def test_reserve_walks_strings_keys_and_nested_containers():
+    m = PIIMapping()
+    m.reserve(
+        {
+            "<LOCATION_4>": ["see <PERSON_1> and <EMAIL_ADDRESS_12>", ("<SECRET_2>",)],
+            "n": 3,
+            "plain": "a < b and c_1 > d",
+        }
+    )
+
+    for literal in ("<LOCATION_4>", "<PERSON_1>", "<EMAIL_ADDRESS_12>", "<SECRET_2>"):
+        assert m.is_taken(literal)
+    assert not m.is_taken("<PERSON_2>")
+    # Reserving is not a detection and nothing becomes restorable.
+    assert m.is_empty
+    assert not m.has_detections
+
+
+def test_add_literal_is_restorable_but_not_counted():
+    m = PIIMapping()
+    m.add_literal("<PERSON_1>", "<PERSON_2>")
+
+    assert m.get_original("<PERSON_2>") == "<PERSON_1>"
+    assert m.is_taken("<PERSON_2>")
+    assert m.entity_type_counts() == {}
+    assert not m.has_detections

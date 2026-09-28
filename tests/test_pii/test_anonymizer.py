@@ -1,7 +1,8 @@
 import pytest
 
-from privaite.config.schema import AnonymizationConfig, EntityOverride
+from privaite.config.schema import AnonymizationConfig, DeanonymizationConfig, EntityOverride
 from privaite.pii.anonymizer import Anonymizer, FakeReplacementExhaustedError
+from privaite.pii.deanonymizer import DeAnonymizer
 from privaite.pii.entity import PIIEntity
 from privaite.pii.mapping import PIIMapping
 
@@ -310,3 +311,56 @@ def test_fake_replacement_retries_never_reuse_the_initial_seed():
     with pytest.raises(FakeReplacementExhaustedError):
         anon.anonymize("Hi John Smith", [_entity("PERSON", "John Smith", 3, 13)], PIIMapping())
     assert asked == list(range(1, 11))
+
+
+def test_input_placeholder_literal_is_never_issued():
+    # A "<PERSON_1>" the client already had (a template variable, a test
+    # fixture) used to be issued to a real name as well: the provider saw two
+    # identical placeholders and the restore wrote the name into the literal.
+    anon = Anonymizer(AnonymizationConfig(method="placeholder"))
+    mapping = PIIMapping()
+    text = "The template uses <PERSON_1> as a variable. Contact Marie Dupont."
+    start = text.index("Marie Dupont")
+
+    result = anon.anonymize(text, [_entity("PERSON", "Marie Dupont", start, start + 12)], mapping)
+
+    assert result == "The template uses <PERSON_1> as a variable. Contact <PERSON_2>."
+    assert DeAnonymizer(DeanonymizationConfig()).deanonymize(result, mapping) == text
+
+
+def test_late_placeholder_literal_is_swapped_and_restored_to_itself():
+    # The literal arrives in a later text, after "<PERSON_1>" was issued: too
+    # late to reserve, so it travels as a fresh placeholder and comes back as
+    # itself. The entity after it in the same text keeps correct offsets.
+    anon = Anonymizer(AnonymizationConfig(method="placeholder"))
+    mapping = PIIMapping()
+    first = anon.anonymize(
+        "Contact Marie Dupont.", [_entity("PERSON", "Marie Dupont", 8, 20)], mapping
+    )
+    text = "assert '<PERSON_1>' == fixture, owner Jean Martin"
+    start = text.index("Jean Martin")
+
+    second = anon.anonymize(text, [_entity("PERSON", "Jean Martin", start, start + 11)], mapping)
+    again = anon.anonymize("still <PERSON_1>", [], mapping)
+
+    assert first == "Contact <PERSON_1>."
+    assert second == "assert '<PERSON_2>' == fixture, owner <PERSON_3>"
+    assert again == "still <PERSON_2>"
+    restored = DeAnonymizer(DeanonymizationConfig()).deanonymize(f"{first}\n{second}", mapping)
+    assert restored == f"Contact Marie Dupont.\n{text}"
+    # The swap is not a detection: /stats counts the two names only.
+    assert mapping.entity_type_counts() == {"PERSON": 2}
+
+
+def test_late_literal_inside_a_detected_entity_is_left_to_the_entity():
+    # The entity's own replacement already takes the literal out of the text
+    # and restores it, so no second swap may overlap it.
+    anon = Anonymizer(AnonymizationConfig(method="placeholder"))
+    mapping = PIIMapping()
+    first = anon.anonymize("Marie Dupont", [_entity("PERSON", "Marie Dupont", 0, 12)], mapping)
+
+    second = anon.anonymize("name=<PERSON_1>", [_entity("PERSON", "<PERSON_1>", 5, 15)], mapping)
+
+    assert second == "name=<PERSON_2>"
+    restored = DeAnonymizer(DeanonymizationConfig()).deanonymize(f"{first} {second}", mapping)
+    assert restored == "Marie Dupont name=<PERSON_1>"

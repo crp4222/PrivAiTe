@@ -114,3 +114,14 @@ def test_multiple_placeholders():
     assert "06123" in out
     assert "<PERSON_1>" not in out
     assert "<PHONE_NUMBER_1>" not in out
+
+
+def test_swapped_literal_restores_to_itself_without_chaining():
+    mapping = PIIMapping()
+    mapping.add("Marie Dupont", "<PERSON_9>", "PERSON")
+    mapping.add_literal("<PERSON_9>", "<PERSON_10>")
+    d = StreamingDeAnonymizer(mapping)
+
+    out = d.feed("<PERSON_1") + d.feed("0> and <PERSON_9>") + d.flush()
+
+    assert out == "<PERSON_9> and Marie Dupont"

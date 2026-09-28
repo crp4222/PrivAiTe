@@ -47,11 +47,11 @@ async def completions(
     async def _anonymize() -> tuple[tuple[Any, dict], Any]:
         if isinstance(prompt, list) and all(isinstance(p, str) for p in prompt):
             msgs = [{"role": "user", "content": p} for p in prompt]
-            msgs, mapping = await pii_engine.process_request(msgs)
+            msgs, mapping = await pii_engine.process_request(msgs, kwargs)
             anon_prompt: Any = [m["content"] for m in msgs]
         else:
             msgs = [{"role": "user", "content": prompt}]
-            msgs, mapping = await pii_engine.process_request(msgs)
+            msgs, mapping = await pii_engine.process_request(msgs, kwargs)
             anon_prompt = msgs[0]["content"]
         anon_kwargs = dict(kwargs)
         # Fill-in-the-middle: `suffix` is user text and would otherwise ride the

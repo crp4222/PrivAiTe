@@ -845,3 +845,55 @@ async def test_unexpected_restore_failure_withholds_the_body(gateway_app, monkey
         resp = await client.post("/v1/responses", json=_RESPONSES_REQUEST)
     assert resp.status_code == 500
     assert resp.json()["error"]["code"] == "pii_error"
+
+
+@pytest.mark.asyncio
+async def test_anthropic_placeholder_literal_in_system_is_never_issued(gateway_app):
+    # `system` (CLAUDE.md) is relayed verbatim: a "<PERSON_1>" in it must not
+    # also become Marie's placeholder, or the reply's literal gets her name.
+    app, upstream = gateway_app
+    upstream.set_json(
+        {
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "text", "text": "Filled <PERSON_1> with <PERSON_2>."}],
+            "usage": {"input_tokens": 1, "output_tokens": 2},
+        }
+    )
+    request = dict(_ANTHROPIC_REQUEST, system="Templates use <PERSON_1>.")
+    async with _client(app) as client:
+        resp = await client.post("/v1/messages", json=request)
+
+    assert resp.status_code == 200
+    sent = upstream.sent_json()
+    assert sent["system"] == "Templates use <PERSON_1>."
+    assert sent["messages"][0]["content"] == "Contact <PERSON_2>"
+    assert resp.json()["content"][0]["text"] == "Filled <PERSON_1> with Marie Dupont."
+
+
+@pytest.mark.asyncio
+async def test_responses_placeholder_literal_in_instructions_is_never_issued(gateway_app):
+    app, upstream = gateway_app
+    upstream.set_json(
+        {
+            "id": "resp_1",
+            "object": "response",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "<PERSON_1> is <PERSON_2>."}],
+                }
+            ],
+        }
+    )
+    request = dict(_RESPONSES_REQUEST, instructions="Templates use <PERSON_1>.")
+    async with _client(app) as client:
+        resp = await client.post("/v1/responses", json=request)
+
+    assert resp.status_code == 200
+    sent = upstream.sent_json()
+    assert sent["instructions"] == "Templates use <PERSON_1>."
+    assert sent["input"] == "Contact <PERSON_2>"
+    assert resp.json()["output"][0]["content"][0]["text"] == "<PERSON_1> is Marie Dupont."

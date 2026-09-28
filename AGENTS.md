@@ -39,6 +39,14 @@ them as invariants, not suggestions.
 7. **Config defaults are the safety posture, do not flip them casually.**
    `preset: onnx` (~84.9% recall), `on_error: block`, `deanonymization.fuzzy_matching: false`
    (fuzzy can mis-substitute), detector `trust_remote_code: false`, `block_entities: []`.
+8. **An issued placeholder never equals a string already in the request.** The
+   restore replaces every occurrence, so a pre-existing `<PERSON_1>` (a fixture,
+   a template, a planted `?to=<EMAIL_ADDRESS_1>`) would receive a real value.
+   `PIIMapping.reserve` runs over the whole request before the first placeholder
+   is issued (`_process_request` with `other_fields`, both gateway scrubs), the
+   anonymizer swaps a literal that shows up too late (`_shield_literals`), and
+   the restore is single-pass. A new path that shares one mapping across several
+   calls must reserve the whole body first.
 
 ## What is and isn't scanned (know the surface)
 

@@ -34,14 +34,15 @@ class DeAnonymizer:
         return self._deanonymize_exact(text, mapping)
 
     def _deanonymize_exact(self, text: str, mapping: PIIMapping) -> str:
-        fakes = mapping.get_all_fakes()
-        sorted_fakes = sorted(fakes.keys(), key=len, reverse=True)
-
-        for fake in sorted_fakes:
-            original = fakes[fake]
-            text = text.replace(fake, original)
-
-        return text
+        # One pass, longest fake first at each position, like the streaming
+        # restorer. Replacing fake by fake chained substitutions: an input
+        # literal "<PERSON_2>" sent as "<PERSON_10>" came back as "<PERSON_2>"
+        # and was then rewritten again into the real value behind "<PERSON_2>".
+        fakes = {fake: original for fake, original in mapping.get_all_fakes().items() if fake}
+        if not fakes:
+            return text
+        pattern = re.compile("|".join(re.escape(f) for f in sorted(fakes, key=len, reverse=True)))
+        return pattern.sub(lambda m: fakes[m.group(0)], text)
 
     def _deanonymize_fuzzy(self, text: str, mapping: PIIMapping) -> str:
         text = self._deanonymize_exact(text, mapping)

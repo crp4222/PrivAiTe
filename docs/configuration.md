@@ -121,6 +121,13 @@ pii:
 map, so nothing is restored in responses for those types (and two values that mask
 to the same string can never cross-restore).
 
+Placeholder-shaped text already in the request (a `<PERSON_1>` in a test fixture,
+a template, a tool definition or the agent's system prompt) is never issued as a
+placeholder: numbering skips it, so the provider never sees one placeholder with
+two meanings and the restore never writes a real value into it. When such a
+string only appears after its number went to a detected value (in a later
+message), it is sent as a fresh placeholder of its own and restored to itself.
+
 ### Helping an agent preserve placeholders
 
 Restoration matches the actual placeholder, not the model's interpretation of it.

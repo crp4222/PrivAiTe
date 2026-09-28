@@ -228,16 +228,20 @@ class PIIEngine:
 
     @inference_request
     async def process_request(
-        self, messages: list[dict[str, Any]]
+        self, messages: list[dict[str, Any]], other_fields: Any = None
     ) -> tuple[list[dict[str, Any]], PIIMapping]:
         """Anonymize a request, exposing only safe failures to callers.
 
         Both in-process integrations let this exception propagate to their host,
         which may log it. Keep expected policy errors intact, but deliberately
         discard all other exception details because they may contain raw input.
+
+        ``other_fields`` is the rest of the request body (tools, prediction...).
+        It is only read, for the placeholder-shaped strings it already holds: no
+        placeholder issued for this request may equal one of them.
         """
         try:
-            return await self._process_request(messages)
+            return await self._process_request(messages, other_fields)
         except (PIIBlockedError, UnsupportedContentError, PIIProcessingError):
             raise
         except Exception:
@@ -245,9 +249,14 @@ class PIIEngine:
             raise PIIProcessingError() from None
 
     async def _process_request(
-        self, messages: list[dict[str, Any]]
+        self, messages: list[dict[str, Any]], other_fields: Any = None
     ) -> tuple[list[dict[str, Any]], PIIMapping]:
         mapping = PIIMapping()
+        # Before any placeholder is issued: a literal "<PERSON_1>" in a later
+        # message, a passthrough system message or a tool definition must keep
+        # that number to itself (see Anonymizer._shield_literals).
+        mapping.reserve(messages)
+        mapping.reserve(other_fields)
         language = self._language()
         anonymized_messages = []
 
