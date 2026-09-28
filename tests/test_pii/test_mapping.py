@@ -93,3 +93,17 @@ def test_add_literal_is_restorable_but_not_counted():
     assert m.is_taken("<PERSON_2>")
     assert m.entity_type_counts() == {}
     assert not m.has_detections
+
+
+def test_reserve_walks_a_self_referencing_request_once():
+    # The LiteLLM guardrail passes its whole request dict, which can alias a
+    # container or point back at itself.
+    shared = ["see <PERSON_1>"]
+    data: dict = {"a": shared, "b": shared, "c": ("<SECRET_2>",)}
+    data["self"] = data
+
+    m = PIIMapping()
+    m.reserve(data)
+
+    assert m.is_taken("<PERSON_1>")
+    assert m.is_taken("<SECRET_2>")

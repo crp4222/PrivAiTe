@@ -370,7 +370,7 @@ async def test_inlet_failure_clears_map_and_aborts_before_returning_body(monkeyp
     flt = module.Filter()
 
     class FailingEngine:
-        async def process_request(self, messages):
+        async def process_request(self, messages, other_fields=None):
             raise RuntimeError("detector unavailable")
 
     async def _failing_engine_for(_languages):
@@ -418,3 +418,25 @@ async def test_outlet_output_arguments_stay_valid_json_with_special_chars():
     assert restored[1]["arguments"] == raw
     assert json.loads(restored[2]["arguments"]) == {"stops": [original, 7]}
     assert restored[3]["arguments"] == f"to={original}"
+
+
+@pytest.mark.asyncio
+async def test_inlet_never_issues_a_placeholder_literal_from_the_body():
+    # Open WebUI's body carries more than messages (tools with native function
+    # calling): a "<EMAIL_ADDRESS_1>" there must keep that number to itself.
+    module = _load_filter()
+    flt = module.Filter()
+    flt.valves.preset = "light"
+    flt.valves.languages = "en"
+    meta: dict = {}
+    body = {
+        "messages": [{"role": "user", "content": "reach me at carol.smith@example.net"}],
+        "tools": [
+            {"type": "function", "function": {"name": "t", "description": "<EMAIL_ADDRESS_1>"}}
+        ],
+    }
+
+    out = await flt.inlet(body, meta)
+
+    assert out["messages"][0]["content"] == "reach me at <EMAIL_ADDRESS_2>"
+    assert meta["privaite_map"] == {"<EMAIL_ADDRESS_2>": "carol.smith@example.net"}

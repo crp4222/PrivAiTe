@@ -176,7 +176,9 @@ class Filter:
 
         engine = await self._engine_for(self._languages())
         try:
-            anonymized, mapping = await engine.process_request(messages)
+            # The rest of the body is only read, for placeholder-shaped strings
+            # already in the request (tools...): none of them may be issued.
+            anonymized, mapping = await engine.process_request(messages, body)
         except PIIBlockedError as exc:
             # A blocked PII type was found: refuse the request. Open WebUI surfaces
             # the message to the user; it names TYPES only, never the values.

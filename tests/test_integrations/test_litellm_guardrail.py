@@ -743,7 +743,7 @@ async def test_pre_call_failure_clears_map_and_aborts_before_returning_data(monk
     gr = _guardrail()
 
     class FailingEngine:
-        async def process_request(self, messages):
+        async def process_request(self, messages, other_fields=None):
             raise RuntimeError("detector unavailable")
 
     async def _failing_engine_for(_languages):
@@ -1685,3 +1685,35 @@ async def test_streaming_tails_on_real_litellm_chunks_stay_serializable():
     assert traces == ["then ", "Jean"]
     assert "finish_reason" not in payloads[-1]["choices"][0]
     assert payloads[-1]["id"] == "chunk"
+
+
+@pytest.mark.asyncio
+async def test_responses_placeholder_literal_in_instructions_is_never_issued():
+    # `instructions` is relayed verbatim: an "<EMAIL_ADDRESS_1>" in it must not
+    # also become the real address's placeholder, or the restore writes the
+    # address into the model's copy of the literal.
+    gr = _guardrail()
+    data = {
+        "instructions": "Mail templates use <EMAIL_ADDRESS_1>.",
+        "input": "reach me at carol.smith@example.net",
+    }
+    data = await gr.async_pre_call_hook(None, None, data, "aresponses")
+
+    assert data["instructions"] == "Mail templates use <EMAIL_ADDRESS_1>."
+    assert data["input"] == "reach me at <EMAIL_ADDRESS_2>"
+    assert data["metadata"]["privaite_map"] == {"<EMAIL_ADDRESS_2>": "carol.smith@example.net"}
+
+
+@pytest.mark.asyncio
+async def test_chat_placeholder_literal_in_tools_is_never_issued():
+    gr = _guardrail()
+    data = {
+        "messages": [{"role": "user", "content": "reach me at carol.smith@example.net"}],
+        "tools": [
+            {"type": "function", "function": {"name": "t", "description": "<EMAIL_ADDRESS_1>"}}
+        ],
+    }
+    data = await gr.async_pre_call_hook(None, None, data, "completion")
+
+    assert data["messages"][0]["content"] == "reach me at <EMAIL_ADDRESS_2>"
+    assert data["tools"][0]["function"]["description"] == "<EMAIL_ADDRESS_1>"

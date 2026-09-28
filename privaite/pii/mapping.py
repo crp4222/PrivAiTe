@@ -48,19 +48,28 @@ class PIIMapping:
         self._original_to_fake[literal] = fake
         self._fake_to_original[fake] = literal
 
-    def reserve(self, value: Any) -> None:
+    def reserve(self, value: Any, _seen: set[int] | None = None) -> None:
         """Reserve every placeholder-shaped string in value (a string or a
         JSON-like tree, dict keys included) so no placeholder issued for this
-        request can equal it. Read only: value is not modified."""
+        request can equal it. Read only: value is not modified. An in-process
+        host (the LiteLLM guardrail) passes its whole request dict, which may
+        hold a container twice or reference itself: each is walked once."""
         if isinstance(value, str):
             self._reserved.update(m.group(0) for m in PLACEHOLDER_LITERAL.finditer(value))
-        elif isinstance(value, dict):
+            return
+        if not isinstance(value, (dict, list, tuple)):
+            return
+        seen = set() if _seen is None else _seen
+        if id(value) in seen:
+            return
+        seen.add(id(value))
+        if isinstance(value, dict):
             for key, item in value.items():
-                self.reserve(key)
-                self.reserve(item)
-        elif isinstance(value, (list, tuple)):
+                self.reserve(key, seen)
+                self.reserve(item, seen)
+        else:
             for item in value:
-                self.reserve(item)
+                self.reserve(item, seen)
 
     def is_taken(self, fake: str) -> bool:
         return fake in self._reserved or fake in self._fake_to_original

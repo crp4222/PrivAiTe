@@ -513,12 +513,15 @@ class PrivaiteGuardrail(CustomGuardrail):
         msg_list = messages if isinstance(messages, list) else []
         scanned = bool(msg_list)
         if msg_list:
-            anonymized, mapping = await engine.process_request(msg_list)
+            # `data` is only read, for the placeholder-shaped strings already in
+            # the request (instructions, tools...): none of them may be issued.
+            anonymized, mapping = await engine.process_request(msg_list, data)
             # msg_list is data["messages"] (same object) -> mutate it in place so
             # the proxy's shallow body snapshot holds the anonymized copy too.
             msg_list[:] = anonymized
         else:
             mapping = PIIMapping()
+            mapping.reserve(data)
 
         input_value = data.get("input")
         if isinstance(input_value, str) and input_value:
