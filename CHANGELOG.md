@@ -33,6 +33,14 @@ All notable changes to this project are documented here. The format follows
   sent as a fresh placeholder and restored to itself. The non-streaming restore
   is now single-pass like the streaming one, so a restored value is never
   rewritten a second time.
+- The default `onnx` preset no longer started from a fresh Hugging Face cache
+  once huggingface_hub 1.33 was installed, which a new pip install or Docker
+  build resolves today: that release stores cached files in a shared blob store
+  sharded by hash prefix, so the model and its `.onnx_data` weights resolved to
+  different folders and ONNX Runtime refused the weights ("External data path
+  escapes model directory"). The two files are now hard-linked side by side in
+  the cache (copied only where links are refused), with no second download.
+  Caches written by earlier hub versions are used as before.
 
 ## [0.5.0] - 2026-09-14
 

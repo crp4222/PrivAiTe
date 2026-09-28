@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import shutil
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -275,20 +277,82 @@ def download_onnx_model(
             revision=revision,
         )
     )
+    data_path: Path | None = None
     try:
         # Only variants with externalized weights ship this side file; a variant
         # packed into a single .onnx must not fail here.
-        hf_hub_download(
-            repo_id=repo_id,
-            filename=f"onnx/model_{variant}.onnx_data",
-            cache_dir=cache_dir,
-            revision=revision,
+        data_path = Path(
+            hf_hub_download(
+                repo_id=repo_id,
+                filename=f"onnx/model_{variant}.onnx_data",
+                cache_dir=cache_dir,
+                revision=revision,
+            )
         )
     except EntryNotFoundError:
         logger.info("Variant %s has no .onnx_data side file (single-file model)", variant)
 
-    logger.info("ONNX model ready at %s", local_path)
-    return local_path
+    model_path = colocate_external_data(local_path, data_path)
+    logger.info("ONNX model ready at %s", model_path)
+    return model_path
+
+
+# Folder, inside the model repo's cache folder, where the model and its external
+# weights are placed side by side when the cache keeps them apart.
+_COLOCATED_DIR = "privaite-onnx"
+
+
+def colocate_external_data(model_path: Path, data_path: Path | None) -> Path:
+    """Return a path to the model that onnxruntime will load with its weights.
+
+    onnxruntime refuses an external data file that resolves outside the model
+    file's real folder. The hub cache hands out symlinks, and since
+    huggingface_hub 1.33 their targets sit in different shard folders of a
+    cache-wide blob store (hub/blobs/60/..., hub/blobs/88/...): the default
+    model no longer loaded from a fresh cache. When the two real files do not
+    share a folder, they are placed side by side in a folder of our own, as
+    hard links (no copy and no download, so a pre-seeded offline cache keeps
+    working), or as a copy when the filesystem refuses a link.
+    """
+    if data_path is None:
+        return model_path
+    real_model, real_data = model_path.resolve(), data_path.resolve()
+    if real_model.parent == real_data.parent:
+        return model_path
+    # Inside the repo's cache folder, so deleting the repo from the cache
+    # deletes this too. Named after both blobs: a folder that exists always
+    # holds the right pair, and a new revision gets its own.
+    repo_dir = next(
+        (parent.parent for parent in model_path.parents if parent.name == "snapshots"),
+        model_path.parent,
+    )
+    target = repo_dir / _COLOCATED_DIR / f"{real_model.name[:16]}-{real_data.name[:16]}"
+    placed: list[str] = []
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        for source, name in ((real_model, model_path.name), (real_data, data_path.name)):
+            dest = target / name
+            if dest.exists():
+                continue
+            # Written under a private name, then renamed: a concurrent start
+            # never sees a half-copied file.
+            partial = target / f".{name}.{os.getpid()}.partial"
+            partial.unlink(missing_ok=True)
+            try:
+                os.link(source, partial)
+            except OSError:
+                shutil.copyfile(source, partial)
+            os.replace(partial, dest)
+            placed.append(name)
+    except OSError as exc:
+        raise RuntimeError(
+            f"cannot place the ONNX model and its external weights side by side in "
+            f"{target} ({exc.strerror or type(exc).__name__}): make the Hugging Face "
+            "cache writable, or download the model again with HF_HUB_DISABLE_SHARED_BLOBS=1"
+        ) from exc
+    if placed:
+        logger.info("Placed %s side by side in %s", ", ".join(placed), target)
+    return target / model_path.name
 
 
 class OnnxPrivacyFilterDetector(PIIDetector):

@@ -403,6 +403,14 @@ Presidio is faster than the contextual model and produces few false positives on
 
 The Privacy Filter adds model-inference cost and occasionally flags technical identifiers as account numbers (e.g., "CMD-2024-98765"). It runs concurrently with Presidio, which handles structured formats while the Privacy Filter handles contextual NER. Cost depends on input length; the benchmark reports the combined engine latency.
 
+The model is fetched into the Hugging Face cache. Since huggingface_hub 1.33, that
+cache keeps the model and its weights file in two different folders, which ONNX
+Runtime refuses to load. PrivAiTe then hard-links the two files side by side under
+`models--openai--privacy-filter/privaite-onnx/` in the same cache: no second
+download and no extra disk space, so a cache filled in advance for offline use keeps
+working. A copy is made only on a filesystem that refuses hard links, and deleting
+the model from the cache deletes that folder with it.
+
 ## Why two engines?
 
 Neither is perfect alone:
