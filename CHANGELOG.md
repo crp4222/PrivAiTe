@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.6.0] - 2026-09-28
 
 ### Added
 - `docs/redact-pii-before-llm.md`: the page someone lands on when they are still
@@ -23,6 +23,11 @@ All notable changes to this project are documented here. The format follows
   reports what came back rather than what went out: that hid a span defect that
   left part of a name on the wire while the reply looked clean.
 
+### Changed
+- Open WebUI filter 0.1.13 and the LiteLLM guardrail require `privaite>=0.6.0`:
+  both now pass the rest of the request body to the engine for the placeholder
+  reservation below.
+
 ### Fixed
 - A placeholder-shaped string already in the request (`<PERSON_1>` in a test
   fixture, a template, a tool definition or the agent's system prompt) could
@@ -32,7 +37,8 @@ All notable changes to this project are documented here. The format follows
   string in the request, and one that arrives after its number was taken is
   sent as a fresh placeholder and restored to itself. The non-streaming restore
   is now single-pass like the streaming one, so a restored value is never
-  rewritten a second time.
+  rewritten a second time. The Open WebUI filter and the LiteLLM guardrail
+  reserve the whole request body too (`tools`, Responses `instructions`).
 - The default `onnx` preset no longer started from a fresh Hugging Face cache
   once huggingface_hub 1.33 was installed, which a new pip install or Docker
   build resolves today: that release stores cached files in a shared blob store
