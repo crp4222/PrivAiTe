@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Gateway: Codex refreshes its model catalog with `GET /v1/models` on the
+  provider it is pointed at, and PrivAiTe answered with its own alias list
+  behind PrivAiTe auth, so a live Codex session logged a 401 on every turn. In
+  gateway mode the route now serves PrivAiTe's list only to a caller holding a
+  valid PrivAiTe key and relays anyone else to the `openai_responses` upstream
+  with their own credentials, so a PrivAiTe key is never sent to the provider.
+  With `auth.enabled: false` the route always relays in gateway mode.
+
 ## [0.6.0] - 2026-09-28
 
 ### Added

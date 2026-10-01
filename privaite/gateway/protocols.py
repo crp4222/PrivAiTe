@@ -195,3 +195,11 @@ GATEWAY_SPECS = (ANTHROPIC_MESSAGES, OPENAI_RESPONSES)
 
 # Resolved from the specs so the auth middleware never hardcodes a route.
 GATEWAY_ROUTE_PATHS = frozenset(path for spec in GATEWAY_SPECS for path, _ in spec.routes)
+
+# Codex refreshes its model catalog with GET /v1/models on the provider it is
+# pointed at, and it cannot use PrivAiTe's own list (the core proxy's aliases,
+# none at all in a gateway-only deployment, in a format it does not parse). The
+# path is shared with the core proxy, so it is not in GATEWAY_ROUTE_PATHS: in
+# gateway mode it answers PrivAiTe's list only to a caller holding a PrivAiTe
+# key, and relays to the Responses upstream for anyone else.
+GATEWAY_MODELS_PATH = "/v1/models"

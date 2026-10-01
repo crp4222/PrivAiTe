@@ -14,7 +14,7 @@ OpenAI-compatible:
 | `POST /v1/completions` | Text completions |
 | `POST /v1/embeddings` | Embeddings (anonymized, no de-anonymization) |
 | `POST /v1/pii/inspect` | Dry-run detection preview (off by default, see [verify.md](verify.md)) |
-| `GET /v1/models` | List configured models |
+| `GET /v1/models` | List configured models (in gateway mode, only for a caller holding a PrivAiTe key; anyone else is relayed to the Responses upstream, see [gateway](gateway.md)) |
 | `GET /health` | Liveness: the process answers (static, reads no state) |
 | `GET /ready` | Readiness: `200` when the proxy can serve, `503` when it cannot |
 | `GET /stats` | PII detection stats per session |

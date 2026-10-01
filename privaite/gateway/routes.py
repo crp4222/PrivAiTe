@@ -176,3 +176,31 @@ async def _gateway_call(
         status_code=upstream_resp.status_code,
         headers=resp_headers,
     )
+
+
+async def relay_models(request: Request) -> Response:
+    """Answer GET /v1/models from the Responses upstream, with the caller's own
+    credentials, exactly as the POST routes relay them.
+
+    Codex refreshes its model catalog here before and during a session. PrivAiTe's
+    own list is the core proxy's provider aliases, empty in a gateway-only
+    deployment and in a shape Codex does not parse, so answering it made the CLI
+    log a 401 on every turn (an older Codex exited on the equivalent 404). The
+    route carries no user text: nothing to scrub on the way out, nothing to
+    restore on the way back, so it is a pure passthrough.
+    """
+    config = get_config(request)
+    upstream = config.gateway.openai_responses
+    url = upstream.base_url.rstrip("/") + "/models"
+    headers = forward_request_headers(request.headers, upstream.forward_headers)
+    upstream_resp = await send_upstream(
+        request.app.state.gateway_client, url, request.url.query, headers, None, method="GET"
+    )
+    if isinstance(upstream_resp, JSONResponse):
+        return upstream_resp
+    logger.info("gateway %s -> %d (passthrough)", request.url.path, upstream_resp.status_code)
+    return StreamingResponse(
+        passthrough_stream(upstream_resp),
+        status_code=upstream_resp.status_code,
+        headers=relay_response_headers(upstream_resp.headers),
+    )

@@ -98,21 +98,22 @@ async def send_upstream(
     url: str,
     query: str,
     headers: list[tuple[str, str]],
-    content: bytes,
+    content: bytes | None,
+    method: str = "POST",
 ) -> httpx.Response | JSONResponse:
-    """POST the body upstream, always in streaming mode: the caller decides from
-    the response content type whether to buffer+restore or stream through.
+    """Send the request upstream, always in streaming mode: the caller decides
+    from the response content type whether to buffer+restore or stream through.
     Transport failures map to the OpenAI error shape."""
     request = client.build_request(
-        "POST", url, params=query or None, headers=headers, content=content
+        method, url, params=query or None, headers=headers, content=content
     )
     try:
         return await client.send(request, stream=True)
     except httpx.TimeoutException:
-        logger.error("gateway upstream timed out: POST %s", url)
+        logger.error("gateway upstream timed out: %s %s", method, url)
         return openai_error("Provider request timed out.", "timeout_error", 504, "timeout")
     except httpx.HTTPError:
-        logger.error("gateway upstream request failed: POST %s", url)
+        logger.error("gateway upstream request failed: %s %s", method, url)
         return openai_error(
             "An error occurred with the provider.", "server_error", 502, "provider_error"
         )

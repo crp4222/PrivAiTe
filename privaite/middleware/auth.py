@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 
-from privaite.gateway.protocols import GATEWAY_ROUTE_PATHS
+from privaite.gateway.protocols import GATEWAY_MODELS_PATH, GATEWAY_ROUTE_PATHS
 from privaite.utils.security import get_api_keys, verify_api_key
 
 _PUBLIC_PATHS = {"/health", "/ready", "/docs", "/openapi.json", "/redoc"}
@@ -28,6 +28,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # bypassed when gateway mode is actually enabled (otherwise they do not
         # exist and stay under the normal auth check).
         if config.gateway.enabled and request.url.path in GATEWAY_ROUTE_PATHS:
+            return await call_next(request)
+
+        # GET /v1/models is shared: the core proxy lists its own aliases there,
+        # and Codex fetches its upstream catalog from the same path with its own
+        # provider token. In gateway mode the route decides, from this flag:
+        # a caller holding a valid PrivAiTe key gets PrivAiTe's list, and
+        # anyone else is relayed to the Responses upstream, which authenticates
+        # them. A valid PrivAiTe key is therefore never sent upstream.
+        if config.gateway.enabled and request.url.path == GATEWAY_MODELS_PATH:
+            request.state.privaite_client = _holds_privaite_key(request)
             return await call_next(request)
 
         allowed_keys = get_api_keys()
@@ -67,3 +77,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
 
         return await call_next(request)
+
+
+def _holds_privaite_key(request: Request) -> bool:
+    allowed_keys = get_api_keys()
+    auth_header = request.headers.get("authorization", "")
+    if not allowed_keys or not auth_header.startswith("Bearer "):
+        return False
+    return verify_api_key(auth_header[7:], allowed_keys)

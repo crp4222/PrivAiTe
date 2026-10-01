@@ -51,6 +51,15 @@ billed to whatever account the relayed token belongs to. Set
 `server.host: "127.0.0.1"`, or keep the port off untrusted networks, before
 enabling gateway mode anywhere but localhost.
 
+`GET /v1/models` is the one shared path. The core proxy lists its own model
+aliases there, and Codex refreshes its catalog from the same path with its own
+provider token. In gateway mode a caller holding a valid PrivAiTe key gets
+PrivAiTe's list; any other caller is relayed to the `openai_responses` upstream
+with its own credentials, which the upstream then accepts or rejects, so a valid
+PrivAiTe key is never sent to the provider. With `auth.enabled: false` no caller
+can prove it holds a key, so in gateway mode the route always relays: keep auth
+on, the default, if a client of the core proxy relies on that list.
+
 ## Enable it
 
 ```yaml
@@ -226,11 +235,11 @@ on the machine.
   input may be replaced by a URL placeholder, so the provider sees a mangled
   path in the echoed tool history. The local tool loop keeps working on the
   real path; only the model's view of the path degrades.
-- **Codex (beta) rough edges.** Codex's model refresh calls `/v1/models` on
-  the gateway and a red ERROR line is logged on every run; it is noise, not a
-  failure. A detection span can also swallow an adjacent label or newline, so
-  a faithful restore reproduces a small cosmetic formatting artifact in the
-  displayed output.
+- **Codex (beta) rough edges.** A detection span can swallow an adjacent label
+  or newline, so a faithful restore reproduces a small cosmetic formatting
+  artifact in the displayed output. (Codex's model refresh used to log a 401
+  on every turn because `/v1/models` answered PrivAiTe's own list; it is now
+  relayed upstream, see the auth note above.)
 
 ## Honest limits
 

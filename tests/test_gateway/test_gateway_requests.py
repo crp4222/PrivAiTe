@@ -923,9 +923,14 @@ async def test_client_token_relayed_verbatim_and_privaite_key_not_required():
             assert upstream.request.headers["authorization"] == "Bearer sk-ant-oat-client-token"
             assert upstream.request.headers["anthropic-version"] == "2023-06-01"
 
-            # Other routes still require PrivAiTe's own key.
-            other = await client.get(
-                "/v1/models", headers={"Authorization": "Bearer sk-ant-oat-client-token"}
+            # The core routes still require PrivAiTe's own key: gateway mode only
+            # opens the gateway paths. (GET /v1/models used to be the example here;
+            # it is now the one shared path and relays a non-PrivAiTe caller to
+            # the Responses upstream, pinned in test_gateway_relay.py.)
+            other = await client.post(
+                "/v1/chat/completions",
+                json={"model": "m", "messages": [{"role": "user", "content": "hi"}]},
+                headers={"Authorization": "Bearer sk-ant-oat-client-token"},
             )
             assert other.status_code == 401
     finally:

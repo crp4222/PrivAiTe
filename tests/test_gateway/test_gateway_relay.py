@@ -267,3 +267,132 @@ def test_allowlist_cannot_re_enable_a_never_forwarded_header():
     )
 
     assert relayed == [("accept", "*/*")]
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/models in gateway mode
+#
+# Codex refreshes its model catalog from the provider it is pointed at. Served
+# PrivAiTe's own list (the core proxy's aliases, empty in a gateway-only
+# deployment), it logged a 401 on every turn of a live session, and an older
+# Codex exited on the equivalent 404. The path is shared with the core proxy, so
+# the caller's credential decides who answers.
+# ---------------------------------------------------------------------------
+
+_CODEX_CATALOG = {"models": [{"slug": "gpt-5.6-terra"}]}
+_RESPONSES_BASE = "https://api.openai.com/v1"
+
+
+def _models_app(monkeypatch, *, keys: str | None, auth: bool = True, gateway: bool = True):
+    from types import SimpleNamespace
+
+    if keys is None:
+        monkeypatch.delenv("PRIVAITE_API_KEYS", raising=False)
+    else:
+        monkeypatch.setenv("PRIVAITE_API_KEYS", keys)
+    app, upstream = make_gateway_app(auth_enabled=auth, gateway_enabled=gateway)
+    app.state.provider_router = SimpleNamespace(models=["privaite-alias"])
+    upstream.set_json(_CODEX_CATALOG)
+    return app, upstream
+
+
+async def _get_models(app, token: str, query: str = "?client_version=0.158.0"):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://gw") as client:
+        return await client.get(
+            "/v1/models" + query,
+            headers={"authorization": f"Bearer {token}", "accept-encoding": "br;q=1.0, x-made-up"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_models_is_relayed_upstream_for_a_codex_caller(monkeypatch):
+    app, upstream = _models_app(monkeypatch, keys="privaite-key")
+    resp = await _get_models(app, "codex-oauth-token")
+
+    assert resp.status_code == 200
+    assert resp.json() == _CODEX_CATALOG
+    sent = upstream.request
+    assert sent is not None
+    assert sent.method == "GET"
+    assert str(sent.url) == f"{_RESPONSES_BASE}/models?client_version=0.158.0"
+    # The caller's own token reaches the upstream verbatim, as on the POST routes.
+    assert sent.headers["authorization"] == "Bearer codex-oauth-token"
+    # The client's accept-encoding is never relayed: the gateway must be able to
+    # decode what comes back (httpx sets its own and decodes it).
+    assert "x-made-up" not in sent.headers.get("accept-encoding", "")
+    assert sent.content == b""
+
+
+@pytest.mark.asyncio
+async def test_models_with_a_privaite_key_lists_privaite_models_and_never_goes_upstream(
+    monkeypatch,
+):
+    """A valid PrivAiTe key is a core client: it gets the proxy's own list, and
+    the key itself is never sent to the provider."""
+    app, upstream = _models_app(monkeypatch, keys="privaite-key")
+    resp = await _get_models(app, "privaite-key")
+
+    assert resp.status_code == 200
+    assert [m["id"] for m in resp.json()["data"]] == ["privaite-alias"]
+    assert upstream.request is None
+
+
+@pytest.mark.asyncio
+async def test_models_relays_when_no_privaite_key_is_configured(monkeypatch):
+    """A gateway-only deployment often sets no PRIVAITE_API_KEYS at all. The core
+    routes then fail closed, but Codex's catalog refresh must still work, as its
+    POST /v1/responses already does."""
+    app, upstream = _models_app(monkeypatch, keys=None)
+    resp = await _get_models(app, "codex-oauth-token")
+
+    assert resp.status_code == 200
+    assert resp.json() == _CODEX_CATALOG
+
+
+@pytest.mark.asyncio
+async def test_models_always_relays_when_auth_is_disabled(monkeypatch):
+    """With auth off no caller can prove it holds a PrivAiTe key, so in gateway
+    mode the route relays (documented in docs/gateway.md)."""
+    app, upstream = _models_app(monkeypatch, keys="privaite-key", auth=False)
+    resp = await _get_models(app, "privaite-key")
+
+    assert resp.json() == _CODEX_CATALOG
+    assert upstream.request is not None
+
+
+@pytest.mark.asyncio
+async def test_models_keeps_core_auth_when_gateway_is_off(monkeypatch):
+    app, upstream = _models_app(monkeypatch, keys="privaite-key", gateway=False)
+    resp = await _get_models(app, "codex-oauth-token")
+
+    assert resp.status_code == 401
+    assert upstream.request is None
+
+
+@pytest.mark.asyncio
+async def test_models_relays_the_upstream_status_unchanged(monkeypatch):
+    """A bad provider token gets the provider's own rejection, not PrivAiTe's."""
+    app, upstream = _models_app(monkeypatch, keys="privaite-key")
+    upstream.status = 401
+    upstream.set_json({"error": {"message": "invalid token"}})
+    resp = await _get_models(app, "expired-token")
+
+    assert resp.status_code == 401
+    assert resp.json() == {"error": {"message": "invalid token"}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exc", "status"),
+    [(httpx.ReadTimeout("slow"), 504), (httpx.ConnectError("down"), 502)],
+)
+async def test_models_upstream_failures_map_like_the_other_relays(monkeypatch, exc, status):
+    app, _ = _models_app(monkeypatch, keys="privaite-key")
+
+    def boom(request: httpx.Request) -> httpx.Response:
+        raise exc
+
+    app.state.gateway_client = httpx.AsyncClient(transport=httpx.MockTransport(boom))
+    resp = await _get_models(app, "codex-oauth-token")
+
+    assert resp.status_code == status

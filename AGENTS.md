@@ -115,6 +115,11 @@ gate) is NOT automatically true here. Check both.
   upstream token). With the default `server.host: 0.0.0.0` and no rate limit,
   an exposed port plus gateway mode is an open endpoint. Documented in
   `docs/gateway.md`; do not "fix" it silently in either direction.
+  `GET /v1/models` is shared with the core proxy: in gateway mode the middleware
+  only flags whether the caller holds a valid PrivAiTe key, and the route serves
+  PrivAiTe's list to that caller and relays everyone else to the Responses
+  upstream (Codex needs its upstream catalog). A valid PrivAiTe key never
+  leaves; with auth disabled the route always relays.
 
 ## Streaming handler (`privaite/streaming/handler.py`)
 
