@@ -399,6 +399,33 @@ from that model's repository. A default SHA from a different repository fails to
 load instead of silently using different weights. `revision: null` intentionally
 follows the mutable default branch and is not reproducible.
 
+## ONNX variant
+
+The `onnx` preset runs the Privacy Filter through ONNX Runtime, and
+`onnx_variant` defaults to `q4`. The other supported choice is `q4f16`. Both
+hold the same 4-bit weights: `q4` computes in fp32 and `q4f16` in fp16, which
+CPUs do not run natively, so `q4` is the faster one on CPU and `q4f16` is the
+one to try on a GPU session. The measured difference is in
+[detection](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md#onnx-variants).
+
+```yaml
+pii:
+  preset: onnx
+  detectors:
+    onnx:
+      onnx_variant: q4f16   # default: q4
+```
+
+Only the configured variant is downloaded: about 917 MB for `q4`, 809 MB for
+`q4f16`. An install upgraded from a release that defaulted to `q4f16` downloads
+`q4` once on its first start; set `onnx_variant: q4f16` to keep using the model
+already in the cache. A host with no network access has to do one or the other
+before upgrading: fetch `q4` into its Hugging Face cache, or pin `q4f16`.
+Without either, the proxy refuses to start rather than run without its
+detector. The Docker image bakes the default. To bake the other one,
+build with `--build-arg ONNX_VARIANT=q4f16` and set the same `onnx_variant` in
+the mounted config, otherwise the first start downloads the default.
+
 ## Detector device
 
 `device` selects the accelerator per detector. An unknown value is refused at

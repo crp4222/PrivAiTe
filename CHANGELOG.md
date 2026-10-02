@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- The `onnx` preset loads the `q4` export of the Privacy Filter instead of
+  `q4f16`. Same 4-bit weights, computed in fp32 rather than fp16, which CPUs do
+  not run natively: a window runs 1.4x to 1.6x faster on CPU with the same
+  detections (246 of 256 outputs identical, no labelled value lost, recall 84.9%
+  to 85.2%). `onnx_variant: q4f16` keeps the previous model, and
+  `docs/detection.md` has the measured comparison. An upgraded install
+  downloads `q4` (about 917 MB) once on its first start; a host with no
+  network access must fetch it beforehand or pin `onnx_variant: q4f16`, or
+  the proxy refuses to start.
+- The model download follows `onnx_variant` when no variant is passed, so the
+  Docker image prefetch and the detector always agree. `--build-arg
+  ONNX_VARIANT=q4f16` bakes the other variant into the image.
+
 ## [0.6.1] - 2026-10-02
 
 ### Changed

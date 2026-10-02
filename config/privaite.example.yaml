@@ -55,7 +55,7 @@ providers:
 
 pii:
   enabled: true
-  # Full ONNX suite (default): ~84.9% recall on the benchmark, at ~543 ms average
+  # Full ONNX suite (default): ~85.2% recall on the benchmark, at ~459 ms average
   # in-process detection time per benchmark document (privaite-bench
   # COMPARISON.md; that is detection time on one document, not end-to-end request
   # latency, and it is hardware-dependent). Detects everything including secrets
@@ -80,7 +80,7 @@ pii:
     #   enabled: true
     #   model_name: "openai/privacy-filter"
     #   revision: "7ffa9a043d54d1be65afb281eddf0ffbe629385b" # immutable HF commit
-    #   onnx_variant: "q4f16"     # quantized variant downloaded from Hugging Face
+    #   onnx_variant: "q4"        # or "q4f16" (fp16 compute, for GPU sessions)
     #   device: "auto"            # auto, cpu, cuda, coreml/mps
     #   score_threshold: 0.5
 

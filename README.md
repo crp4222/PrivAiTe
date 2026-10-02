@@ -117,16 +117,16 @@ Measured on 120 real documents from the open [AI4Privacy `pii-masking-200k`](htt
 
 | Solution | Recall (span) | Recall (strict) | False positives | Tool-call protection |
 |---|---|---|---|---|
-| `onnx` (default) | **84.9%** | **81.0%** | 2 / 14 | **100%** |
+| `onnx` (default) | **85.2%** | **81.7%** | 2 / 14 | **100%** |
 | `light` (full Presidio) | 62.7% | 58.1% | 3 / 14 | **100%** |
 | LiteLLM Presidio guardrail | 70.3% | 65.3% | 3 / 14 | 0.0% |
 | LLM Guard (Anonymize) | 76.9% | 74.9% | 5 / 14 | 0.0% |
 
-Read the 100% precisely, it is structural, not absolute: of the PII PrivAiTe detects in plain text, 100% is also removed from tool-call JSON. End to end, its tool-call leak equals its detection misses (15.1% on this corpus with the `onnx` preset), the same misses flat text has.
+Read the 100% precisely, it is structural, not absolute: of the PII PrivAiTe detects in plain text, 100% is also removed from tool-call JSON. End to end, its tool-call leak equals its detection misses (14.8% on this corpus with the `onnx` preset), the same misses flat text has.
 
 Two honesty notes, both favoring caution. LLM Guard's detection model is fine-tuned on the exact dataset behind this corpus, so its recall here is optimistic; PrivAiTe's default model is not (OpenAI's model card states it did not train on it). An out-of-distribution cross-check on two independent corpora confirms the default generalizes: ~84% held on Gretel finance text while the AI4Privacy-tuned model drops to ~62% ([OOD_COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md)).
 
-Rechecked against the 0.5.0 structured-secret rules: `onnx` recall and clean-document false positives are unchanged; `light` span recall rises from 62.4% to 62.7%. The latencies below are means per corpus document from that local run, not large agent-request latency guarantees.
+Remeasured after the ONNX export moved to `q4`: `onnx` span recall goes from 84.9% to 85.2% with the same false positives, and each model window runs 1.4x to 1.6x faster on CPU ([ONNX variants](https://github.com/crp4222/privaite-bench/blob/main/ONNX_VARIANTS.md)). The latencies below are means per corpus document from that local run, not large agent-request latency guarantees.
 
 Per-language and per-entity tables, competitor configs, methodology, reproduction: [privaite-bench](https://github.com/crp4222/privaite-bench). Feature comparison: [docs/comparison.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/comparison.md).
 
@@ -138,8 +138,8 @@ The historical live agent-workflow benchmark uses 24 planted values in a reposit
 
 | Preset | What runs | Recall\* | False positives | Latency | Secrets |
 |--------|-----------|----------|-----------------|---------|---------|
-| `onnx` (default) | Presidio + Privacy Filter | **84.9%** | 2 / 14 | ~672ms | **yes** |
-| `light` | Presidio + built-in rules | 62.7% | 3 / 14 | ~109ms | structured formats |
+| `onnx` (default) | Presidio + Privacy Filter | **85.2%** | 2 / 14 | ~459ms | **yes** |
+| `light` | Presidio + built-in rules | 62.7% | 3 / 14 | ~81ms | structured formats |
 | `max` | onnx + GLiNER | higher OOD | more | ~0.7s | **yes** |
 
 \*Span recall on the AI4Privacy benchmark above. `max` adds GLiNER (trained on data independent of AI4Privacy): on out-of-distribution corpora it raises recall by several points at the cost of more false positives and a torch dependency (`pip install 'privaite[gliner]'`); with it selected but not installed, the proxy fails at startup with an install hint rather than silently degrading.

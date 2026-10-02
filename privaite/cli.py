@@ -76,7 +76,7 @@ def verify_command(preset: str, as_json: bool) -> None:
     from privaite.verify import format_report, verify
 
     if preset == "onnx":
-        click.echo("Using preset onnx; the detection model downloads once (~800 MB).", err=True)
+        click.echo("Using preset onnx; the detection model downloads once (~900 MB).", err=True)
 
     result = verify(preset=preset)
 

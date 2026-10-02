@@ -162,3 +162,16 @@ def test_filter_docs_say_task_calls_need_the_proxy(rel: str) -> None:
     note = re.search(r"title, tag and follow-up[^.]*\.[^.]*\.", text)
     assert note, f"{rel} does not say the filter misses title, tag and follow-up calls"
     assert "proxy" in note.group(0), f"{rel} does not point those calls at the proxy"
+
+
+def test_docs_announce_the_shipped_onnx_variant() -> None:
+    """Both variants are documented with their measured difference; the page has
+    to name the default the code actually ships."""
+    from privaite.config.schema import OnnxDetectorConfig
+
+    default = OnnxDetectorConfig().onnx_variant
+    configuration = (REPO_ROOT / "docs" / "configuration.md").read_text()
+    detection = (REPO_ROOT / "docs" / "detection.md").read_text()
+    assert f"`onnx_variant` defaults to `{default}`" in configuration
+    assert "`q4f16`" in configuration
+    assert f"`{default}` (default)" in detection

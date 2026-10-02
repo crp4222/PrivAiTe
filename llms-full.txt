@@ -126,16 +126,16 @@ Measured on 120 real documents from the open [AI4Privacy `pii-masking-200k`](htt
 
 | Solution | Recall (span) | Recall (strict) | False positives | Tool-call protection |
 |---|---|---|---|---|
-| `onnx` (default) | **84.9%** | **81.0%** | 2 / 14 | **100%** |
+| `onnx` (default) | **85.2%** | **81.7%** | 2 / 14 | **100%** |
 | `light` (full Presidio) | 62.7% | 58.1% | 3 / 14 | **100%** |
 | LiteLLM Presidio guardrail | 70.3% | 65.3% | 3 / 14 | 0.0% |
 | LLM Guard (Anonymize) | 76.9% | 74.9% | 5 / 14 | 0.0% |
 
-Read the 100% precisely, it is structural, not absolute: of the PII PrivAiTe detects in plain text, 100% is also removed from tool-call JSON. End to end, its tool-call leak equals its detection misses (15.1% on this corpus with the `onnx` preset), the same misses flat text has.
+Read the 100% precisely, it is structural, not absolute: of the PII PrivAiTe detects in plain text, 100% is also removed from tool-call JSON. End to end, its tool-call leak equals its detection misses (14.8% on this corpus with the `onnx` preset), the same misses flat text has.
 
 Two honesty notes, both favoring caution. LLM Guard's detection model is fine-tuned on the exact dataset behind this corpus, so its recall here is optimistic; PrivAiTe's default model is not (OpenAI's model card states it did not train on it). An out-of-distribution cross-check on two independent corpora confirms the default generalizes: ~84% held on Gretel finance text while the AI4Privacy-tuned model drops to ~62% ([OOD_COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md)).
 
-Rechecked against the 0.5.0 structured-secret rules: `onnx` recall and clean-document false positives are unchanged; `light` span recall rises from 62.4% to 62.7%. The latencies below are means per corpus document from that local run, not large agent-request latency guarantees.
+Remeasured after the ONNX export moved to `q4`: `onnx` span recall goes from 84.9% to 85.2% with the same false positives, and each model window runs 1.4x to 1.6x faster on CPU ([ONNX variants](https://github.com/crp4222/privaite-bench/blob/main/ONNX_VARIANTS.md)). The latencies below are means per corpus document from that local run, not large agent-request latency guarantees.
 
 Per-language and per-entity tables, competitor configs, methodology, reproduction: [privaite-bench](https://github.com/crp4222/privaite-bench). Feature comparison: [docs/comparison.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/comparison.md).
 
@@ -147,8 +147,8 @@ The historical live agent-workflow benchmark uses 24 planted values in a reposit
 
 | Preset | What runs | Recall\* | False positives | Latency | Secrets |
 |--------|-----------|----------|-----------------|---------|---------|
-| `onnx` (default) | Presidio + Privacy Filter | **84.9%** | 2 / 14 | ~672ms | **yes** |
-| `light` | Presidio + built-in rules | 62.7% | 3 / 14 | ~109ms | structured formats |
+| `onnx` (default) | Presidio + Privacy Filter | **85.2%** | 2 / 14 | ~459ms | **yes** |
+| `light` | Presidio + built-in rules | 62.7% | 3 / 14 | ~81ms | structured formats |
 | `max` | onnx + GLiNER | higher OOD | more | ~0.7s | **yes** |
 
 \*Span recall on the AI4Privacy benchmark above. `max` adds GLiNER (trained on data independent of AI4Privacy): on out-of-distribution corpora it raises recall by several points at the cost of more false positives and a torch dependency (`pip install 'privaite[gliner]'`); with it selected but not installed, the proxy fails at startup with an install hint rather than silently degrading.
@@ -333,7 +333,7 @@ Pick this if several clients talk to the model, or if any of them is an agent.
 ## None of this is a guarantee
 
 Detection is statistical. Published recall for PrivAiTe's default preset is
-84.9% span-level on a public corpus, with the
+85.2% span-level on a public corpus, with the
 [harness and labels open so the number can be rerun](https://github.com/crp4222/privaite-bench).
 Per type it ranges from 100% on emails, cards, IBANs, phones and IPs down to
 42% on URLs and 61% on organisation names. Any tool that tells you nothing gets
@@ -392,7 +392,7 @@ Presidio is faster than the contextual model and produces few false positives on
 
 ## OpenAI Privacy Filter: contextual ML model
 
-[OpenAI's open-source PII model](https://openai.com/index/introducing-openai-privacy-filter/) (1.5B params, 50M active, Apache 2.0). Runs locally via ONNX Runtime (~800MB, no PyTorch needed).
+[OpenAI's open-source PII model](https://openai.com/index/introducing-openai-privacy-filter/) (1.5B params, 50M active, Apache 2.0). Runs locally via ONNX Runtime (about 900MB, no PyTorch needed).
 
 | What it adds over Presidio | How |
 |---|---|
@@ -410,6 +410,36 @@ Runtime refuses to load. PrivAiTe then hard-links the two files side by side und
 download and no extra disk space, so a cache filled in advance for offline use keeps
 working. A copy is made only on a filesystem that refuses hard links, and deleting
 the model from the cache deletes that folder with it.
+
+### ONNX variants
+
+Two exports of the model are supported, selected with `onnx_variant`
+([configuration](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#onnx-variant)).
+They hold the same 4-bit weights; `q4` computes in fp32 and `q4f16` in fp16. On
+the comparative benchmark, CPU execution provider:
+
+| Variant | Recall | Recall (strict) | False positives | Gretel recall | One 1,024-token window | Peak memory |
+|---|---|---|---|---|---|---|
+| `q4` (default) | 85.2% | 81.7% | 2 / 14 | 62.9% | 776 ms | 6.3 GB |
+| `q4f16` | 84.9% | 81.0% | 2 / 14 | 62.9% | 1,118 ms | 5.3 GB |
+
+`q4` runs a window 1.4x to 1.6x faster than `q4f16` (1,024 and 512 tokens), and
+the whole benchmark finished faster with it in every run. The window figures
+come from one process that alternates the variants, so machine load cannot favour
+one of them; the full benchmark time also includes Presidio and moves with the
+load, so the seconds are in the
+[full report](https://github.com/crp4222/privaite-bench/blob/main/ONNX_VARIANTS.md)
+and the ratio is what to read.
+
+246 of the 256 anonymized outputs (benchmark, clean documents, Gretel finance
+corpus, long code and log inputs) are identical between the two. The 10 that
+differ are span boundaries moving in both directions; no labelled value is lost,
+and `q4` catches one more. Measured on an Apple Silicon CPU; x86 and GPU sessions
+were not measured, and fp16 is where a GPU is expected to favour `q4f16`.
+
+The int8 `quantized` export is faster still but lost 13 labelled values for 8
+gained, doubled the false positives and peaked at 8.8 GB, so it is not
+recommended.
 
 ## Why two engines?
 
@@ -890,6 +920,33 @@ from that model's repository. A default SHA from a different repository fails to
 load instead of silently using different weights. `revision: null` intentionally
 follows the mutable default branch and is not reproducible.
 
+## ONNX variant
+
+The `onnx` preset runs the Privacy Filter through ONNX Runtime, and
+`onnx_variant` defaults to `q4`. The other supported choice is `q4f16`. Both
+hold the same 4-bit weights: `q4` computes in fp32 and `q4f16` in fp16, which
+CPUs do not run natively, so `q4` is the faster one on CPU and `q4f16` is the
+one to try on a GPU session. The measured difference is in
+[detection](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md#onnx-variants).
+
+```yaml
+pii:
+  preset: onnx
+  detectors:
+    onnx:
+      onnx_variant: q4f16   # default: q4
+```
+
+Only the configured variant is downloaded: about 917 MB for `q4`, 809 MB for
+`q4f16`. An install upgraded from a release that defaulted to `q4f16` downloads
+`q4` once on its first start; set `onnx_variant: q4f16` to keep using the model
+already in the cache. A host with no network access has to do one or the other
+before upgrading: fetch `q4` into its Hugging Face cache, or pin `q4f16`.
+Without either, the proxy refuses to start rather than run without its
+detector. The Docker image bakes the default. To bake the other one,
+build with `--build-arg ONNX_VARIANT=q4f16` and set the same `onnx_variant` in
+the mounted config, otherwise the first start downloads the default.
+
 ## Detector device
 
 `device` selects the accelerator per detector. An unknown value is refused at
@@ -1212,7 +1269,7 @@ The [reproducible benchmark](https://github.com/crp4222/privaite-bench) runs the
 
 | | Recall (flat text) | Tool-call leak | Multimodal leak |
 |---|---|---|---|
-| PrivAiTe `onnx` (default) | **84.9%** | **15.1%** | **15.1%** |
+| PrivAiTe `onnx` (default) | **85.2%** | **14.8%** | **14.8%** |
 | LLM Guard (Anonymize) | 76.9% | 100% | 100% |
 | LiteLLM Presidio guardrail | 70.3% | 100% | 29.7% |
 

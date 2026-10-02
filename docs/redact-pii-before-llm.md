@@ -93,7 +93,7 @@ Pick this if several clients talk to the model, or if any of them is an agent.
 ## None of this is a guarantee
 
 Detection is statistical. Published recall for PrivAiTe's default preset is
-84.9% span-level on a public corpus, with the
+85.2% span-level on a public corpus, with the
 [harness and labels open so the number can be rerun](https://github.com/crp4222/privaite-bench).
 Per type it ranges from 100% on emails, cards, IBANs, phones and IPs down to
 42% on URLs and 61% on organisation names. Any tool that tells you nothing gets

@@ -30,7 +30,7 @@ Presidio is faster than the contextual model and produces few false positives on
 
 ## OpenAI Privacy Filter: contextual ML model
 
-[OpenAI's open-source PII model](https://openai.com/index/introducing-openai-privacy-filter/) (1.5B params, 50M active, Apache 2.0). Runs locally via ONNX Runtime (~800MB, no PyTorch needed).
+[OpenAI's open-source PII model](https://openai.com/index/introducing-openai-privacy-filter/) (1.5B params, 50M active, Apache 2.0). Runs locally via ONNX Runtime (about 900MB, no PyTorch needed).
 
 | What it adds over Presidio | How |
 |---|---|
@@ -48,6 +48,36 @@ Runtime refuses to load. PrivAiTe then hard-links the two files side by side und
 download and no extra disk space, so a cache filled in advance for offline use keeps
 working. A copy is made only on a filesystem that refuses hard links, and deleting
 the model from the cache deletes that folder with it.
+
+### ONNX variants
+
+Two exports of the model are supported, selected with `onnx_variant`
+([configuration](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#onnx-variant)).
+They hold the same 4-bit weights; `q4` computes in fp32 and `q4f16` in fp16. On
+the comparative benchmark, CPU execution provider:
+
+| Variant | Recall | Recall (strict) | False positives | Gretel recall | One 1,024-token window | Peak memory |
+|---|---|---|---|---|---|---|
+| `q4` (default) | 85.2% | 81.7% | 2 / 14 | 62.9% | 776 ms | 6.3 GB |
+| `q4f16` | 84.9% | 81.0% | 2 / 14 | 62.9% | 1,118 ms | 5.3 GB |
+
+`q4` runs a window 1.4x to 1.6x faster than `q4f16` (1,024 and 512 tokens), and
+the whole benchmark finished faster with it in every run. The window figures
+come from one process that alternates the variants, so machine load cannot favour
+one of them; the full benchmark time also includes Presidio and moves with the
+load, so the seconds are in the
+[full report](https://github.com/crp4222/privaite-bench/blob/main/ONNX_VARIANTS.md)
+and the ratio is what to read.
+
+246 of the 256 anonymized outputs (benchmark, clean documents, Gretel finance
+corpus, long code and log inputs) are identical between the two. The 10 that
+differ are span boundaries moving in both directions; no labelled value is lost,
+and `q4` catches one more. Measured on an Apple Silicon CPU; x86 and GPU sessions
+were not measured, and fp16 is where a GPU is expected to favour `q4f16`.
+
+The int8 `quantized` export is faster still but lost 13 labelled values for 8
+gained, doubled the false positives and peaked at 8.8 GB, so it is not
+recommended.
 
 ## Why two engines?
 

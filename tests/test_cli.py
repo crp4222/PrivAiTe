@@ -181,3 +181,24 @@ def test_verify_exits_non_zero_when_something_leaked(monkeypatch):
     result = CliRunner().invoke(main, ["verify", "--preset", "light"])
     assert result.exit_code == 1
     assert "FAILED" in result.output
+
+
+def test_verify_announces_the_size_of_the_default_model_download(monkeypatch):
+    """The default q4 variant is ~917 MB on disk; the notice must not undersell
+    the first-run download."""
+    from privaite import verify as verify_module
+    from privaite.verify import PLANTED, Finding, VerificationResult
+
+    def fake_verify(preset: str = "onnx") -> VerificationResult:
+        return VerificationResult(
+            preset=preset,
+            direct=[Finding(v, t, w, on_the_wire=True) for v, t, w in PLANTED],
+            through_proxy=[Finding(v, t, w, on_the_wire=False) for v, t, w in PLANTED],
+            placeholders=[],
+            restored=True,
+            elapsed_ms=1.0,
+        )
+
+    monkeypatch.setattr(verify_module, "verify", fake_verify)
+    result = CliRunner().invoke(main, ["verify"])
+    assert "Using preset onnx; the detection model downloads once (~900 MB)." in result.output

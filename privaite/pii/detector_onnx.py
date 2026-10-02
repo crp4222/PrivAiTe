@@ -255,11 +255,16 @@ def decode_bioes_spans(
 
 def download_onnx_model(
     repo_id: str = "openai/privacy-filter",
-    variant: str = "q4f16",
+    variant: str | None = None,
     cache_dir: str | None = None,
     revision: str | None = None,
 ) -> Path:
     from huggingface_hub import hf_hub_download
+
+    # No default of its own: a caller that omits the variant (the Docker image
+    # prefetch) must fetch the file the detector will load at startup.
+    if variant is None:
+        variant = OnnxDetectorConfig().onnx_variant
 
     # EntryNotFoundError moved to the top-level .errors module in hub 0.25; older
     # versions (pyproject floors at 0.23) expose it only under .utils. Import

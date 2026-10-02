@@ -161,7 +161,10 @@ class OnnxDetectorConfig(_PrivacyFilterDetectorConfig):
     # ONNX picks an execution provider, not a torch device: "coreml" is valid
     # here (an explicit opt-in, never chosen by "auto") and an index is not.
     device: OnnxDevice = "auto"
-    onnx_variant: str = "q4f16"
+    # Same 4-bit weights as "q4f16", but computed in fp32: CPUs do not run fp16
+    # natively, and a q4 window measured 1.4x to 1.6x faster with the same
+    # detections. "q4f16" stays the better pick for a GPU session.
+    onnx_variant: str = "q4"
     max_length: int = 128000
     cache_dir: str | None = None
     # Reuse identical ONNX input windows during one scrub call only. Unlike the
@@ -325,7 +328,7 @@ _ONNX_PRESIDIO_ENTITIES = [
 
 class PIIConfig(StrictModel):
     enabled: bool = True
-    # Default to the full ONNX suite (~84.9% recall on the benchmark, ~749ms):
+    # Default to the full ONNX suite (~85.2% recall on the benchmark, ~459ms):
     # it detects everything the light preset does plus secrets and passwords.
     # preset: "light" is the fast Presidio-only path (~62% recall, near-zero
     # latency); preset: null drives detectors by hand. Do NOT also pin

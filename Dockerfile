@@ -23,7 +23,11 @@ USER privaite
 
 # Pre-download the default ONNX Privacy Filter model and tokenizer so the
 # container starts fast and works offline from the first request.
-RUN python -c "from privaite.config.schema import OnnxDetectorConfig; from privaite.pii.detector_onnx import download_onnx_model; config = OnnxDetectorConfig(); download_onnx_model(repo_id=config.model_name, revision=config.revision)" && \
+# --build-arg ONNX_VARIANT=q4f16 bakes the other variant instead; the mounted
+# config then needs the same pii.detectors.onnx.onnx_variant, or the first
+# start downloads the default one.
+ARG ONNX_VARIANT=""
+RUN python -c "import os; from privaite.config.schema import OnnxDetectorConfig; from privaite.pii.detector_onnx import download_onnx_model; config = OnnxDetectorConfig(); download_onnx_model(repo_id=config.model_name, variant=os.environ.get('ONNX_VARIANT') or config.onnx_variant, revision=config.revision)" && \
     python -c "from privaite.config.schema import OnnxDetectorConfig; from transformers import AutoTokenizer; config = OnnxDetectorConfig(); AutoTokenizer.from_pretrained(config.model_name, revision=config.revision, trust_remote_code=config.trust_remote_code)"
 
 COPY config/ config/
