@@ -12,7 +12,7 @@ per-input contract: which of them the model spans across a newline is a model
 detail that may shift, that ANY of them does is the point.
 
 Skipped unless the stock ONNX model is already in the local Hugging Face cache:
-CI does not download it (~800MB), and a test must never pull it in.
+CI does not download it (~900MB), and a test must never pull it in.
 """
 
 from __future__ import annotations

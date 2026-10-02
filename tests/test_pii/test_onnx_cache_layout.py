@@ -75,7 +75,7 @@ def test_shared_blob_store_layout_loads_after_colocation(tmp_path):
     assert loadable.parent.parent == hub / "models--org--tiny" / "privaite-onnx"
     assert loadable.name == "tiny.onnx"
     assert _run(loadable) == [[2.0, 4.0]]
-    # Hard links, not copies: no second 800 MB on disk for the real model.
+    # Hard links, not copies: no second 900 MB on disk for the real model.
     assert os.path.samefile(loadable, model)
     assert os.path.samefile(loadable.with_name("tiny.onnx_data"), data)
 

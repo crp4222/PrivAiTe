@@ -57,12 +57,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     "PII preset 'light' with a pinned presidio.entities allowlist "
                     "detects only those types (~35% recall on the benchmark). "
                     "Remove the entities pin for full light recall (~62%), or use "
-                    "preset 'onnx' for ~84%."
+                    "preset 'onnx' for ~85%."
                 )
             else:
                 logger.warning(
                     "PII preset 'light' is the fast Presidio-only path (~62% recall "
-                    "on the benchmark). Use preset 'onnx' for ~84% if recall matters."
+                    "on the benchmark). Use preset 'onnx' for ~85% if recall matters."
                 )
     else:
         app.state.pii_engine = None
