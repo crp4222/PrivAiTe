@@ -4,7 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.6.1] - 2026-10-02
+
+### Changed
+- Open WebUI filter 0.1.14 and the LiteLLM guardrail require `privaite>=0.6.1`.
+- The Open WebUI filter docs say what to do about title, tag and follow-up
+  generation: Open WebUI sends them without running any filter, so with a
+  cloud model the standalone proxy is what covers them, since they go
+  through the same connection.
 
 ### Fixed
 - Gateway: Codex refreshes its model catalog with `GET /v1/models` on the
