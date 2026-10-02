@@ -4,9 +4,10 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.7.0] - 2026-10-02
 
 ### Changed
+- Open WebUI filter 0.1.15 and the LiteLLM guardrail require `privaite>=0.7.0`.
 - The `onnx` preset loads the `q4` export of the Privacy Filter instead of
   `q4f16`. Same 4-bit weights, computed in fp32 rather than fp16, which CPUs do
   not run natively: a window runs 1.4x to 1.6x faster on CPU with the same
