@@ -32,14 +32,18 @@ older one the filter refuses the request rather than silently forwarding the PII
 
 ## Notes
 
-- **Open WebUI's own task calls bypass every filter, including this one.** Title
-  generation, tag generation and follow-up suggestions are issued by Open WebUI's
-  Task Model, which calls the provider directly without running any Filter
-  function's `inlet`. Verified live: the chat message itself is scrubbed, the
-  task call carrying the same text is not. That is Open WebUI's architecture, not
-  something this filter can intercept, and it applies to any redaction filter.
-  If those calls must not leave your network, point the Task Model at a local
-  model (Admin, Settings, Interface, Task Model) or disable the features.
+- **Open WebUI's own task calls skip every filter, this one included.** Open
+  WebUI sends title, tag and follow-up generation through its Task Model without
+  running any Filter `inlet`, so only the chat message is scrubbed and those
+  calls carry the chat text as is. With a cloud model, run PrivAiTe as a
+  standalone proxy and point the connection at it: the task calls go through the
+  same connection, so the proxy scrubs them too. Checked on Open WebUI 0.10.0
+  with a cloud model through Ollama: with the filter, the title, tag and
+  follow-up requests went out with the real name, email and IBAN; with the
+  proxy, all four requests carried placeholders. This is how Open WebUI works,
+  so it applies to any redaction filter. Pointing the Task Model at a local model
+  (Admin, Settings, Interface, Task Model) or turning those features off also
+  works, if a local model fits in memory.
 
 - **First use can get the container OOM-killed. Pre-install instead.** The
   filter runs Presidio and spaCy inside Open WebUI and downloads the spaCy models

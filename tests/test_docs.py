@@ -148,3 +148,17 @@ def test_nothing_is_still_announced_as_unreleased() -> None:
         str(p.relative_to(REPO_ROOT)) for p in pages if "unreleased" in p.read_text().lower()
     ]
     assert offenders == [], f"still announced as unreleased: {offenders}"
+
+
+@pytest.mark.parametrize("rel", ["README.md", "docs/index.md", "integrations/openwebui/README.md"])
+def test_filter_docs_say_task_calls_need_the_proxy(rel: str) -> None:
+    """Open WebUI generates titles, tags and follow-ups without running any
+    filter, so with a cloud model the filter alone sends the chat text out on
+    those calls. Every page offering the filter says so and names the proxy,
+    which sees them because they go through the same connection."""
+    import re
+
+    text = " ".join((REPO_ROOT / rel).read_text().split())
+    note = re.search(r"title, tag and follow-up[^.]*\.[^.]*\.", text)
+    assert note, f"{rel} does not say the filter misses title, tag and follow-up calls"
+    assert "proxy" in note.group(0), f"{rel} does not point those calls at the proxy"

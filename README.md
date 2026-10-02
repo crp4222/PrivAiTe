@@ -198,7 +198,7 @@ Where PrivAiTe differs: it anonymizes PII **inside tool-call arguments and multi
 
 ## Integrations
 
-- **Open WebUI filter** ([setup](https://github.com/crp4222/PrivAiTe/blob/main/integrations/openwebui/README.md), [hub listing](https://openwebui.com/posts/privaite_pii_anonymizer_351aa088)): an Open WebUI Filter Function running the engine in-process, no separate proxy. Admin Panel → Functions → paste `integrations/openwebui/privaite_filter.py`, enable, pick preset and languages in its valves. Covers message text, tool calls and multimodal.
+- **Open WebUI filter** ([setup](https://github.com/crp4222/PrivAiTe/blob/main/integrations/openwebui/README.md), [hub listing](https://openwebui.com/posts/privaite_pii_anonymizer_351aa088)): an Open WebUI Filter Function running the engine in-process, no separate proxy. Admin Panel → Functions → paste `integrations/openwebui/privaite_filter.py`, enable, pick preset and languages in its valves. Covers message text, tool calls and multimodal. Open WebUI sends its title, tag and follow-up calls without running filters, so with a cloud model use the standalone proxy instead: it sees those calls too.
 - **LiteLLM guardrail** ([setup](https://github.com/crp4222/PrivAiTe/blob/main/integrations/litellm/README.md)): a custom guardrail for teams already on the LiteLLM proxy. Mount `integrations/litellm/privaite_guardrail.py` next to your `config.yaml` to anonymize requests and restore responses inline, including tool-call arguments, which LiteLLM's built-in Presidio guardrail does not scan.
 
 ## Docs

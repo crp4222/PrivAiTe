@@ -102,7 +102,9 @@ The benchmark is public and reproducible. Run it yourself.
 - **Standalone proxy.** Run it next to your app, point your client at it. Best
   when you want one place to protect every model and client.
 - **Open WebUI filter.** Drop the filter into Open WebUI and it runs in process,
-  no separate service.
+  no separate service. It covers the chat message, but Open WebUI sends its
+  title, tag and follow-up calls without running filters: with a cloud model,
+  use the standalone proxy, which sees those calls too.
 - **LiteLLM guardrail.** A custom guardrail for teams already running the
   LiteLLM proxy: it runs the engine in process, no separate service.
 - **Agent CLI gateway.** Point Claude Code at PrivAiTe: the traffic to the
