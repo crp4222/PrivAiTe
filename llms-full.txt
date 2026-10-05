@@ -48,17 +48,17 @@ This is local pseudonymization, not anonymization, and detection is best-effort 
 docker run -d -p 8400:8400 \
   -e PRIVAITE_API_KEYS=change-me \
   -e OPENAI_API_KEY=sk-... \
-  ghcr.io/crp4222/privaite:0.7.0
+  ghcr.io/crp4222/privaite:0.7.1
 ```
 
-The same image is on Docker Hub too: swap the last line for `crp4222/privaite:0.7.0` if you prefer pulling from there. Release details: [PrivAiTe 0.7.0](https://github.com/crp4222/PrivAiTe/releases/tag/v0.7.0).
+The same image is on Docker Hub too: swap the last line for `crp4222/privaite:0.7.1` if you prefer pulling from there. Release details: [PrivAiTe 0.7.1](https://github.com/crp4222/PrivAiTe/releases/tag/v0.7.1).
 
 Two keys, two roles: `PRIVAITE_API_KEYS` is the key your client sends to PrivAiTe (pick any value); `OPENAI_API_KEY` is your real provider key, which stays in the container and never reaches your client. This exposes `gpt-4o-mini` and `gpt-4o`; for any other provider (Ollama, Azure, anything LiteLLM supports), mount a config: [configuration](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#docker-with-a-custom-config).
 
 **pip:**
 
 ```bash
-python -m pip install --upgrade "privaite>=0.7.0"
+python -m pip install --upgrade "privaite>=0.7.1"
 # One spaCy model per scanned language; the default preset scans EN + FR.
 python -m spacy download en_core_web_lg && python -m spacy download fr_core_news_md
 
@@ -163,7 +163,7 @@ The presets are the statistical half of the answer: a benchmarked detector with 
 
 ## What it scans
 
-Before anything is forwarded: `messages[].content` (plain string or multimodal text parts), `tool_calls[].function.arguments` and the legacy `function_call.arguments` (parsed as JSON, scrubbed value by value including bare numeric leaves, keys and function names intact), `/v1/completions` `prompt` and `suffix`, `/v1/embeddings` `input`, chat `prediction.content` (predicted outputs) and `web_search_options.user_location`. On the way back, values are restored in content, tool calls, reasoning traces, refusals and audio transcripts, streaming included.
+Before anything is forwarded: `messages[].content` (plain string or multimodal text parts), plaintext `messages[].reasoning_content`, `reasoning`, `refusal` and `audio.transcript` echoed by clients, `tool_calls[].function.arguments` and the legacy `function_call.arguments` (parsed as JSON, scrubbed value by value including bare numeric leaves, keys and function names intact), `/v1/completions` `prompt` and `suffix`, `/v1/embeddings` `input`, chat `prediction.content` (predicted outputs) and `web_search_options.user_location`. On the way back, values are restored in content, tool calls, reasoning traces, refusals and audio transcripts, streaming included.
 
 NOT scanned (know your surface): `messages[].name`, top-level `user`/`metadata`, `tools` definitions, JSON object keys, and tokenized (integer-array) inputs, which carry no text to inspect. Keep PII out of those fields. Endpoints, strict mode and passthrough caveats: [docs/api.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/api.md).
 
@@ -182,7 +182,7 @@ See [request-local window reuse](https://github.com/crp4222/PrivAiTe/blob/main/d
 **What it does NOT protect against:**
 
 - **PII the detector misses.** Detection is statistical and never 100% (see the [benchmark](https://github.com/crp4222/PrivAiTe#benchmark)). A name it doesn't recognize reaches the provider. Treat the output as best-effort, not a guarantee.
-- **Unrecognized secret formats.** Context changed the model's predictions in the historical log benchmark. 0.5.0 adds rules for common credential assignments, URI passwords and bearer headers, including that fixture's field names. Unknown names, encoded or split values, and bare values without their field context can still survive. This affects every surface that uses the engine. Supported formats and remaining boundary limits are in [detection](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md).
+- **Unrecognized secret formats.** Context changed the model's predictions in the historical log benchmark. 0.5.0 adds rules for common credential assignments, URI passwords and bearer headers, including that fixture's field names. Unknown names, encoded or split values, and bare values without their field context can still survive; since 0.7.1 a bare copy is covered when the same request showed the value in a recognized field first. This affects every surface that uses the engine. Supported formats and remaining boundary limits are in [detection](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md).
 - **Re-identification from context.** Even with names replaced, the surrounding text can stay identifying ("the CEO of `<ORG_1>` who resigned in March").
 - **A compromised local machine.** The mapping and raw text live in local memory; this is not a defense against a local attacker.
 - **The provider correlating** requests within a session.
@@ -403,6 +403,12 @@ Presidio is faster than the contextual model and produces few false positives on
 
 The Privacy Filter adds model-inference cost and occasionally flags technical identifiers as account numbers (e.g., "CMD-2024-98765"). It runs concurrently with Presidio, which handles structured formats while the Privacy Filter handles contextual NER. Cost depends on input length; the benchmark reports the combined engine latency.
 
+Since 0.7.1, PrivAiTe slices the full tokenization into overlapping ONNX windows
+itself. Newer Transformers and tokenizers releases could silently return only the
+first window when asked for overflow, leaving the rest of a long request unscanned.
+Coverage checks now reject omitted tokens or source text before returning any
+detections. Tokenizers that add special tokens are refused at startup.
+
 The model is fetched into the Hugging Face cache. Since huggingface_hub 1.33, that
 cache keeps the model and its weights file in two different folders, which ONNX
 Runtime refuses to load. PrivAiTe then hard-links the two files side by side under
@@ -467,6 +473,39 @@ They recognize common assignment names (`api_key`, `apiKey`, `access_token`,
 such as `OPENAI_API_KEY` and `DB_PASSWORD`, case-insensitively. They also
 recognize passwords in `scheme://user:password@host` and plaintext
 `Authorization: Bearer ...` headers.
+
+Since 0.7.1, these rules also cover credentials passed as command-line options:
+`--password`, `--passwd`, `--api-key`, `--client-secret`, the token options and
+`--mot-de-passe`, with an optional prefix (`--db-password`), and quoted or
+unquoted values separated by whitespace or `=`. What follows the option in help
+text or prose is not a value and is left alone: a metavariable (`<value>`,
+`PASSWORD`), a variable reference (`$DB_PASSWORD`, which stands for the secret
+and must survive for the command to work) or a plain word ("use `--password` to
+set it").
+Commands inside JavaScript or JSON strings are scanned with their quotes and
+backslashes decoded, up to two string layers. Detected values are replaced at
+their original source positions, so restoration preserves the command's exact
+syntax, including escaped quotes. Other encoded payloads remain outside these
+rules.
+
+Since 0.7.1, a credential these rules identified is also treated as a secret
+wherever the same request repeats it afterwards, whatever surrounds it. An agent
+that was handed a restored password repeats it bare, in its reasoning, in the
+next command or in a tool output, and re-detecting it there is not reliable.
+This is deliberately narrow:
+
+- only values matched by a structured rule (a credential field, a command-line
+  option, URI userinfo, a bearer header), never a secret that only a model
+  labelled, because one mislabelled identifier would then be rewritten across
+  the whole request;
+- only values of 8 characters or more that contain a digit and are not a bare
+  number: after a credential field, a plain word or an identifier is as often
+  code (`api_key=api_key`) as a value, so `changeme` is protected where the
+  rule sees it and not propagated;
+- exact copies, in the texts that follow the first detection: the same value
+  written with different escaping is a different string.
+
+Disabling `StructuredSecretRecognizer` disables the propagation with it.
 
 For quoted assignments, only the value is replaced: `api_key="demo-only"`
 becomes `api_key="[SECRET]"` with the shipped redaction policy. Escaped quotes
@@ -897,7 +936,9 @@ otherwise. Disabling one also narrows what `block_entities` considers
 enforceable, so a rule that only that recognizer could satisfy is refused at
 boot rather than never firing. An unrecognized name is refused when the config
 loads, so a typo cannot leave you believing a recognizer is off while it is
-still masking.
+still masking. Disabling `StructuredSecretRecognizer` also turns off the
+propagation of the credentials it identifies (see
+[detection](detection.md#structured-credentials-and-overlapping-types)).
 
 These recognizers carry vocabulary, and vocabulary follows the language they are
 built for: a French deployment gets the French cues, an Italian one the Italian
@@ -1115,6 +1156,7 @@ on the [gateway page](gateway.md).
 Scanned before anything is forwarded to the provider:
 
 - `messages[].content`, whether a plain string or a multimodal list of parts (text parts are scrubbed, images and audio are left alone).
+- Plaintext `messages[].reasoning_content`, `messages[].reasoning`, `messages[].refusal` and `messages[].audio.transcript`, since 0.7.1. Clients can echo restored response fields on the next turn; these strings are scrubbed again. Other audio fields remain unchanged. The gateway's signed or encrypted reasoning blocks follow its separate [relay rules](gateway.md#what-is-scanned-and-what-is-not).
 - `tool_calls[].function.arguments` and the legacy `function_call.arguments`: parsed as JSON and scrubbed value by value, including numeric values (a card number sent as a bare JSON number is detected too; on a hit the leaf becomes the masked string). Object keys and the function name stay intact. Arguments that are not valid JSON are scrubbed as free text.
 - `/v1/completions` `prompt` and `/v1/embeddings` `input`, as a string or a list of strings.
 - Auxiliary request fields that carry user text: chat `prediction.content` (predicted outputs, string or text-part list) and `web_search_options.user_location`, plus the `/v1/completions` `suffix`. These are request inputs, scrubbed on the way in only.

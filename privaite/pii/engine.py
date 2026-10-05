@@ -17,6 +17,34 @@ from privaite.pii.window_cache import inference_request
 
 logger = logging.getLogger("privaite.pii.engine")
 
+# A credential the structured rules identified is a credential wherever the
+# request repeats it afterwards. An agent given a restored password repeats it
+# bare, in its reasoning or in the next command, where no detector has any
+# context to recognise it. The rules are the gate on purpose: a model labels
+# identifiers as secrets often enough that spreading its guesses rewrites the
+# text the agent works on (24 copies of a plugin name in one Codex session).
+# Shorter values, plain words and bare numbers stay out for the same reason:
+# after a credential field they are as often code (api_key=api_key) as a value.
+_PROPAGATED_MIN_LENGTH = 8
+
+
+def _token_shaped(value: str) -> bool:
+    return (
+        len(value) >= _PROPAGATED_MIN_LENGTH
+        and any(c.isdigit() for c in value)
+        and not value.isdigit()
+    )
+
+
+def _stands_alone(text: str, start: int, end: int) -> bool:
+    """False when the match is the middle of a longer identifier: a different string."""
+    before = text[start - 1] if start else ""
+    after = text[end] if end < len(text) else ""
+    return not (text[start].isalnum() and before.isalnum()) and not (
+        text[end - 1].isalnum() and after.isalnum()
+    )
+
+
 _KNOWN_MEDIA_PART_TYPES = frozenset(
     {"image_url", "image", "input_audio", "audio", "video", "file", "document", "refusal"}
 )
@@ -69,6 +97,14 @@ class PIIEngine:
             if config.detection_cache.enabled
             else None
         )
+        # The rules that qualify a value for propagation (_with_known_values).
+        # They follow the Presidio detector: switched off with it, or by name.
+        self._secret_rules: Any = None
+        presidio = config.detectors.presidio
+        if presidio.enabled and "StructuredSecretRecognizer" not in presidio.disabled_recognizers:
+            from privaite.pii.recognizer_secret import StructuredSecretRecognizer
+
+            self._secret_rules = StructuredSecretRecognizer()
         self._ready = False
 
     @property
@@ -274,6 +310,20 @@ class PIIEngine:
                     message["content"], mapping, language
                 )
 
+            # These plaintext response fields are restored for the client and
+            # can return in assistant history on the next request.
+            for field in ("reasoning_content", "reasoning", "refusal"):
+                value = message.get(field)
+                if isinstance(value, str):
+                    new_msg[field] = await self._anonymize_text(value, mapping, language)
+            audio = message.get("audio")
+            if isinstance(audio, dict) and isinstance(audio.get("transcript"), str):
+                new_audio = dict(audio)
+                new_audio["transcript"] = await self._anonymize_text(
+                    audio["transcript"], mapping, language
+                )
+                new_msg["audio"] = new_audio
+
             if not self.config.passthrough.tool_calls and message.get("tool_calls"):
                 new_msg["tool_calls"] = await self._anonymize_tool_calls(
                     message["tool_calls"], mapping, language
@@ -321,6 +371,7 @@ class PIIEngine:
             return text
         try:
             entities = await self._detect_all(text, language)
+            entities = self._with_known_values(text, entities, mapping)
             # Hard policy gate: if any detected type is blocked, reject the whole
             # request before anonymizing (nothing is forwarded). This single choke
             # point covers message content, multimodal text, and tool-call arguments.
@@ -336,6 +387,58 @@ class PIIEngine:
             # implementation error (or its traceback) to a host logger.
             logger.error("PII anonymization failed; request will be blocked")
             raise PIIProcessingError() from None
+
+    def _type_priorities(self, entities: list[PIIEntity]) -> dict[str, int]:
+        return {
+            entity.entity_type: (
+                2
+                if entity.entity_type in self._blocked
+                else int(self.anonymizer.is_irreversible(entity.entity_type))
+            )
+            for entity in entities
+        }
+
+    def _with_known_values(
+        self, text: str, entities: list[PIIEntity], mapping: PIIMapping
+    ) -> list[PIIEntity]:
+        """Add the copies of already identified credentials that no detector reported.
+
+        A value qualifies when a structured secret rule matches it and a detection
+        covers that match, in this text or in one scrubbed earlier in the request.
+        A copy enters the usual overlap resolution: the span is the union of every
+        detection it touches, so no part of the value is left out, and the
+        configured policy still decides the type (a blocked type keeps blocking,
+        an irreversible one stays irreversible).
+        """
+        if self._secret_rules is None:
+            return entities
+        for match in self._secret_rules.analyze(text, ["SECRET"]):
+            value = text[match.start : match.end]
+            if _token_shaped(value) and any(
+                e.start <= match.start and match.end <= e.end for e in entities
+            ):
+                mapping.remember(value, match.entity_type)
+        copies: list[PIIEntity] = []
+        for value, entity_type in mapping.known_values().items():
+            start = text.find(value)
+            while start != -1:
+                end = start + len(value)
+                covered = any(
+                    e.entity_type == entity_type and e.start <= start and end <= e.end
+                    for e in entities
+                )
+                if not covered and _stands_alone(text, start, end):
+                    copies.append(PIIEntity(entity_type, value, start, end, 1.0, "known"))
+                start = text.find(value, end)
+        if not copies:
+            return entities
+        merged = entities + copies
+        return merge_entities(
+            merged,
+            overlap_resolution=self.config.overlap_resolution,
+            source_text=text,
+            type_priorities=self._type_priorities(merged),
+        )
 
     async def _anonymize_content(self, content: Any, mapping: PIIMapping, language: str) -> Any:
         if isinstance(content, str):
@@ -662,14 +765,7 @@ class PIIEngine:
                 strategy=self.config.merge_strategy,
                 overlap_resolution=self.config.overlap_resolution,
                 source_text=text,
-                type_priorities={
-                    entity.entity_type: (
-                        2
-                        if entity.entity_type in self._blocked
-                        else int(self.anonymizer.is_irreversible(entity.entity_type))
-                    )
-                    for entity in all_entities
-                },
+                type_priorities=self._type_priorities(all_entities),
             )
         except Exception:
             # merge_entities receives source_text for overlap resolution; keep

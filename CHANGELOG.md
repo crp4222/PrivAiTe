@@ -4,6 +4,35 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.7.1] - 2026-10-05
+
+### Fixed
+- ONNX: newer Transformers and tokenizers releases could drop every window
+  after the first, leaving long requests partly unscanned. PrivAiTe now slices
+  a full tokenization itself, preserving overlap and absolute offsets. Coverage
+  checks block requests when tokens or source text are omitted; tokenizers that
+  add special tokens are refused at startup.
+- Structured secrets: protect credentials passed as command-line options
+  (`--password`, `--passwd`, `--api-key`, `--client-secret`, the token options,
+  `--mot-de-passe`, and prefixed forms such as `--db-password`), including
+  escaped quotes in commands echoed back by agent CLI clients. The original
+  command syntax is preserved on restoration. Help text and prose are left
+  alone: a metavariable (`<value>`, `PASSWORD`), a variable reference
+  (`$DB_PASSWORD`) or a plain word after the option is not a value.
+- A credential the structured secret rules identified is treated as a secret
+  wherever the same request repeats it afterwards. An agent handed a restored
+  password repeats it bare, in its reasoning or in the next command, where no
+  detector has the context to recognise it: in a real OpenCode session the
+  vault password came back inside the assistant's reasoning and reached the
+  provider on the next turn. Limited to values of 8 characters or more that
+  contain a digit, in the texts that follow the first detection.
+- Chat: scrub plaintext reasoning, refusals and audio transcripts echoed in
+  subsequent requests. OpenCode could resend restored values in
+  `reasoning_content`, exposing them to the provider on the next turn.
+
+### Changed
+- Open WebUI filter 0.1.16 and the LiteLLM guardrail require `privaite>=0.7.1`.
+
 ## [0.7.0] - 2026-10-02
 
 ### Changed

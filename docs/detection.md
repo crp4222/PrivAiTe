@@ -41,6 +41,12 @@ Presidio is faster than the contextual model and produces few false positives on
 
 The Privacy Filter adds model-inference cost and occasionally flags technical identifiers as account numbers (e.g., "CMD-2024-98765"). It runs concurrently with Presidio, which handles structured formats while the Privacy Filter handles contextual NER. Cost depends on input length; the benchmark reports the combined engine latency.
 
+Since 0.7.1, PrivAiTe slices the full tokenization into overlapping ONNX windows
+itself. Newer Transformers and tokenizers releases could silently return only the
+first window when asked for overflow, leaving the rest of a long request unscanned.
+Coverage checks now reject omitted tokens or source text before returning any
+detections. Tokenizers that add special tokens are refused at startup.
+
 The model is fetched into the Hugging Face cache. Since huggingface_hub 1.33, that
 cache keeps the model and its weights file in two different folders, which ONNX
 Runtime refuses to load. PrivAiTe then hard-links the two files side by side under
@@ -105,6 +111,39 @@ They recognize common assignment names (`api_key`, `apiKey`, `access_token`,
 such as `OPENAI_API_KEY` and `DB_PASSWORD`, case-insensitively. They also
 recognize passwords in `scheme://user:password@host` and plaintext
 `Authorization: Bearer ...` headers.
+
+Since 0.7.1, these rules also cover credentials passed as command-line options:
+`--password`, `--passwd`, `--api-key`, `--client-secret`, the token options and
+`--mot-de-passe`, with an optional prefix (`--db-password`), and quoted or
+unquoted values separated by whitespace or `=`. What follows the option in help
+text or prose is not a value and is left alone: a metavariable (`<value>`,
+`PASSWORD`), a variable reference (`$DB_PASSWORD`, which stands for the secret
+and must survive for the command to work) or a plain word ("use `--password` to
+set it").
+Commands inside JavaScript or JSON strings are scanned with their quotes and
+backslashes decoded, up to two string layers. Detected values are replaced at
+their original source positions, so restoration preserves the command's exact
+syntax, including escaped quotes. Other encoded payloads remain outside these
+rules.
+
+Since 0.7.1, a credential these rules identified is also treated as a secret
+wherever the same request repeats it afterwards, whatever surrounds it. An agent
+that was handed a restored password repeats it bare, in its reasoning, in the
+next command or in a tool output, and re-detecting it there is not reliable.
+This is deliberately narrow:
+
+- only values matched by a structured rule (a credential field, a command-line
+  option, URI userinfo, a bearer header), never a secret that only a model
+  labelled, because one mislabelled identifier would then be rewritten across
+  the whole request;
+- only values of 8 characters or more that contain a digit and are not a bare
+  number: after a credential field, a plain word or an identifier is as often
+  code (`api_key=api_key`) as a value, so `changeme` is protected where the
+  rule sees it and not propagated;
+- exact copies, in the texts that follow the first detection: the same value
+  written with different escaping is a different string.
+
+Disabling `StructuredSecretRecognizer` disables the propagation with it.
 
 For quoted assignments, only the value is replaced: `api_key="demo-only"`
 becomes `api_key="[SECRET]"` with the shipped redaction policy. Escaped quotes

@@ -13,6 +13,25 @@ from privaite.pii.entity import PIIEntity, merge_entities
 from privaite.pii.recognizer_secret import StructuredSecretRecognizer
 
 
+def encoded_cli_call(command: str, value: str, encoding: str) -> tuple[str, str]:
+    def quoted_content(text: str, quote: str) -> str:
+        return text.replace("\\", "\\\\").replace(quote, "\\" + quote)
+
+    if encoding == "js-single":
+        literal = "'" + quoted_content(command, "'") + "'"
+        encoded_value = quoted_content(value, "'")
+    else:
+        literal = json.dumps(command)
+        encoded_value = quoted_content(value, '"')
+    call = f"text(await tools.exec_command({{cmd:{literal},max_output_tokens:1000}}));"
+    if encoding == "json-command":
+        call = json.dumps({"cmd": command, "max_output_tokens": 1000})
+    elif encoding == "json-js":
+        call = json.dumps(call)
+        encoded_value = quoted_content(encoded_value, '"')
+    return call, encoded_value
+
+
 @pytest.mark.parametrize(
     ("text", "value"),
     [
@@ -36,6 +55,173 @@ def test_reports_only_the_value(text: str, value: str):
     for span in spans:
         assert span.entity_type == "SECRET"
         assert span.end > span.start
+
+
+@pytest.mark.parametrize("language", ["en", "fr"])
+@pytest.mark.parametrize(
+    ("text", "value"),
+    [
+        ("connect --password demo-only", "demo-only"),
+        ("connect --mot-de-passe demo-only", "demo-only"),
+        ("connect --password=demo-only", "demo-only"),
+        ("connect --mot-de-passe=demo-only", "demo-only"),
+        ("connect --password 'demo only; with spaces!'", "demo only; with spaces!"),
+        ('connect --mot-de-passe "demo only; with spaces!"', "demo only; with spaces!"),
+        ("connect --password='demo-only'", "demo-only"),
+        ('connect --mot-de-passe="demo-only"', "demo-only"),
+        ('connect --password\t"demo-only" --user ordinary-name', "demo-only"),
+    ],
+)
+def test_cli_password_options_report_only_the_value(language: str, text: str, value: str):
+    spans = StructuredSecretRecognizer(supported_language=language).analyze(text, ["SECRET"])
+    assert len(spans) == 1
+    assert text[spans[0].start : spans[0].end] == value
+    assert spans[0].entity_type == "SECRET"
+
+
+@pytest.mark.parametrize("flag", ["--password", "--mot-de-passe"])
+@pytest.mark.parametrize("encoding", ["js-double", "js-single", "json-command", "json-js"])
+@pytest.mark.parametrize(
+    ("quote", "value"),
+    [
+        ('"', "demo-only-cli-password"),
+        ("'", "demo only with spaces"),
+        ('"', r"demo \"with quotes\" C:\\fixture\\path"),
+        ('"', r"demo trailing\\"),
+        ("'", 'demo "with quotes" C:\\fixture\\path'),
+        ("'", "demo trailing\\"),
+    ],
+)
+def test_encoded_cli_password_reports_the_complete_original_value(
+    flag: str, encoding: str, quote: str, value: str
+):
+    command = f"python3 coffre.py {flag}={quote}{value}{quote} --user ordinary-name"
+    text, encoded_value = encoded_cli_call(command, value, encoding)
+    spans = StructuredSecretRecognizer().analyze(text, ["SECRET"])
+    assert len(spans) == 1
+    assert text[spans[0].start : spans[0].end] == encoded_value
+    assert spans[0].entity_type == "SECRET"
+
+
+@pytest.mark.parametrize("encoding", ["js-double", "js-single", "json-command", "json-js"])
+@pytest.mark.parametrize("separator", [" = ", " =", "  = "])
+@pytest.mark.parametrize("flag", ["--password", "--mot-de-passe"])
+def test_encoded_cli_password_preserves_equals_after_whitespace(
+    encoding: str, separator: str, flag: str
+):
+    value = "demo-only-cli-password"
+    command = f'connect {flag}{separator}"{value}" --user ordinary-name'
+    text, encoded_value = encoded_cli_call(command, value, encoding)
+    spans = StructuredSecretRecognizer().analyze(text, ["SECRET"])
+    assert len(spans) == 1
+    assert text[spans[0].start : spans[0].end] == encoded_value
+
+
+@pytest.mark.parametrize("encoding", ["js-double", "js-single", "json-command", "json-js"])
+def test_encoded_cli_password_keeps_multiple_disjoint_secret_spans(encoding: str):
+    first = r"demo \"first quote\" C:\\fixture\\one"
+    second = 'demo "second quote" C:\\fixture\\two'
+    command = f"one --password \"{first}\" --user ordinary; two --mot-de-passe '{second}'"
+    text, encoded_first = encoded_cli_call(command, first, encoding)
+    _, encoded_second = encoded_cli_call(command, second, encoding)
+    spans = StructuredSecretRecognizer().analyze(text, ["SECRET"])
+    assert len(spans) == 2
+    assert [text[s.start : s.end] for s in spans] == [encoded_first, encoded_second]
+    assert spans[0].end <= spans[1].start
+
+
+@pytest.mark.parametrize("encoding", ["js-double", "js-single", "json-command", "json-js"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        'connect --user "ordinary-name"',
+        'connect --password-length "ordinary-name"',
+        'connect --mot-de-passe-file "ordinary-name"',
+        'ordinary-name--password="demo-only"',
+        'ordinary-name--mot-de-passe="demo-only"',
+        "connect --password \"\" --mot-de-passe ''",
+        'connect --password "unterminated',
+        "connect --mot-de-passe 'unterminated",
+    ],
+)
+def test_encoded_cli_password_does_not_report_partial_escapes_or_ordinary_names(
+    encoding: str, command: str
+):
+    text, _ = encoded_cli_call(command, "demo-only", encoding)
+    assert StructuredSecretRecognizer().analyze(text, ["SECRET"]) == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "connect --user ordinary-name",
+        "password reset for ordinary-name",
+        "mot-de-passe reset for ordinary-name",
+        "connect --password-length 16 --passwordless enabled",
+        "connect --mot-de-passe-file ordinary-name",
+        "ordinary-name--password=demo-only",
+        "ordinary-name--mot-de-passe=demo-only",
+        "connect --password",
+        "connect --password=\"\" --mot-de-passe=''",
+        'connect --password "unterminated',
+    ],
+)
+def test_cli_password_options_leave_flags_and_ordinary_names_alone(text: str):
+    assert StructuredSecretRecognizer().analyze(text, ["SECRET"]) == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Help output and prose: the word after the flag is not a value.
+        "Use --password to set the password for the account.",
+        "The --password option is required when --user is given.",
+        "  -W, --password           force password prompt",
+        "  -p, --password string   Password or Personal Access Token",
+        "  --password TEXT  The password (prompted if omitted).",
+        "Pass --password PASSWORD on the command line.",
+        "--password <value>   Password for the database",
+        "connect --password=<password> --user ordinary-name",
+        "connect --password=[PASSWORD]",
+        "L'option --mot-de-passe est requise pour ouvrir le coffre.",
+        # A variable reference is not the secret, and rewriting it breaks the command.
+        "connect --password $DB_PASSWORD",
+        'connect --password "$DB_PASSWORD"',
+        "connect --password=${DB_PASSWORD}",
+        'connect --password "${DB_PASSWORD}" --user ordinary-name',
+        'connect --password "$(cat /run/secrets/db)"',
+        "connect --password $(cat /run/secrets/db)",
+    ],
+)
+def test_cli_secret_options_ignore_help_text_and_variable_references(text: str):
+    assert StructuredSecretRecognizer().analyze(text, ["SECRET"]) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "value"),
+    [
+        # Weak passwords are still values: only help words and metavariables are skipped.
+        ("connect --password changeme", "changeme"),
+        ("connect --password admin --user ordinary-name", "admin"),
+        ("connect --password Passw0rd", "Passw0rd"),
+        ("connect --password=TOPSECRET1", "TOPSECRET1"),
+        ("connect --password '$DB_PASSWORD'", "$DB_PASSWORD"),
+        ('connect --password "$uper$ecret1"', "$uper$ecret1"),
+        # The option names follow the assignment vocabulary.
+        ("connect --passwd demo-only", "demo-only"),
+        ("connect --api-key demo-only-key-1", "demo-only-key-1"),
+        ("connect --api_key=demo-only-key-1", "demo-only-key-1"),
+        ("connect --client-secret 'demo only'", "demo only"),
+        ("connect --access-token demo-only-token-1", "demo-only-token-1"),
+        # A bounded prefix, as environment variable names already allow.
+        ("connect --db-password demo-only", "demo-only"),
+        ("connect --SMTP_PASSWORD=demo-only", "demo-only"),
+        ("connect --password-file demo-only", None),
+    ],
+)
+def test_cli_secret_options_keep_real_values_and_share_the_field_names(text: str, value):
+    results = StructuredSecretRecognizer().analyze(text, ["SECRET"])
+    assert [text[r.start : r.end] for r in results] == ([value] if value else [])
 
 
 @pytest.mark.parametrize(
@@ -91,6 +277,117 @@ def make_engine(*, method: str = "redact", block: list[str] | None = None):
 
 
 URI = "postgresql://service:synthetic-password@db.example.invalid:5432/app"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["placeholder", "redact", "mask"])
+async def test_codex_cli_password_is_scrubbed_after_previous_tool_output(method: str):
+    value = "demo-only-cli-password"
+    command = (
+        "text(await tools.exec_command({cmd:'python3 coffre.py "
+        '--mot-de-passe "demo-only-cli-password"\',max_output_tokens:1000}));\n'
+    )
+    engine, detector = make_engine(method=method)
+    body = {
+        "input": [
+            {
+                "type": "custom_tool_call_output",
+                "output": [{"type": "text", "text": f'password="{value}"'}],
+            },
+            {"type": "custom_tool_call", "name": "exec", "input": command},
+        ]
+    }
+    calls = []
+    for _ in range(2):
+        out, mapping = await scrub_responses_request(engine, body)
+        assert value not in json.dumps(out)
+        scrubbed = out["input"][1]["input"]
+        assert "--mot-de-passe" in scrubbed
+        assert mapping.get_entity_type(value) == "SECRET"
+        if method == "placeholder":
+            assert scrubbed == command.replace(value, mapping.get_fake(value))
+            assert engine.deanonymizer.deanonymize(scrubbed, mapping) == command
+        else:
+            assert mapping.get_all_fakes() == {}
+        calls.append(detector.calls)
+    assert calls[0] == calls[1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["placeholder", "redact", "mask"])
+@pytest.mark.parametrize("encoding", ["js-double", "js-single", "json-command", "json-js"])
+@pytest.mark.parametrize(
+    ("quote", "value"),
+    [
+        ('"', "demo-only-cli-password"),
+        ('"', r"demo \"with quotes\" C:\\fixture\\path"),
+        ("'", 'demo "with quotes" C:\\fixture\\path'),
+        ("'", "demo trailing\\"),
+    ],
+)
+async def test_codex_encoded_cli_password_is_scrubbed_on_cold_and_cached_requests(
+    method: str, encoding: str, quote: str, value: str
+):
+    shell = f"python3 coffre.py --mot-de-passe {quote}{value}{quote}"
+    command, encoded_value = encoded_cli_call(shell, value, encoding)
+    engine, detector = make_engine(method=method)
+    body = {
+        "input": [
+            {
+                "type": "custom_tool_call_output",
+                "output": [{"type": "text", "text": f"password={json.dumps(value)}"}],
+            },
+            {"type": "custom_tool_call", "name": "exec", "input": command},
+        ]
+    }
+    calls = []
+    for _ in range(2):
+        out, mapping = await scrub_responses_request(engine, body)
+        assert value not in json.dumps(out)
+        scrubbed = out["input"][1]["input"]
+        assert "--mot-de-passe" in scrubbed
+        assert mapping.get_entity_type(encoded_value) == "SECRET"
+        prefix, suffix = command.split(encoded_value)
+        assert scrubbed.startswith(prefix) and scrubbed.endswith(suffix)
+        if method == "placeholder":
+            assert scrubbed == command.replace(encoded_value, mapping.get_fake(encoded_value))
+            assert engine.deanonymizer.deanonymize(scrubbed, mapping) == command
+        else:
+            assert mapping.get_all_fakes() == {}
+        calls.append(detector.calls)
+    assert calls[0] == calls[1]
+
+
+@pytest.mark.asyncio
+async def test_codex_multiple_encoded_cli_secrets_preserve_exact_source_after_restoration():
+    first = r"demo \"first quote\" C:\\fixture\\one"
+    second = 'demo "second quote" C:\\fixture\\two'
+    shell = f"one --password \"{first}\" --user ordinary; two --mot-de-passe '{second}'"
+    command, encoded_first = encoded_cli_call(shell, first, "js-double")
+    _, encoded_second = encoded_cli_call(shell, second, "js-double")
+    engine, detector = make_engine(method="placeholder")
+    body = {"input": [{"type": "custom_tool_call", "name": "exec", "input": command}]}
+    for _ in range(2):
+        out, mapping = await scrub_responses_request(engine, body)
+        scrubbed = out["input"][0]["input"]
+        assert scrubbed == command.replace(encoded_first, mapping.get_fake(encoded_first)).replace(
+            encoded_second, mapping.get_fake(encoded_second)
+        )
+        assert engine.deanonymizer.deanonymize(scrubbed, mapping) == command
+    assert detector.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_codex_encoded_cli_password_cannot_bypass_block_gate_on_cold_or_cached_requests():
+    value = "demo-only-cli-password"
+    command, _ = encoded_cli_call(f'connect --password "{value}"', value, "js-double")
+    engine, detector = make_engine(method="placeholder", block=["SECRET"])
+    body = {"input": [{"type": "custom_tool_call", "name": "exec", "input": command}]}
+    for _ in range(2):
+        with pytest.raises(PIIBlockedError, match="SECRET") as exc:
+            await scrub_responses_request(engine, body)
+        assert value not in str(exc.value)
+    assert detector.calls == 1
 
 
 @pytest.mark.asyncio

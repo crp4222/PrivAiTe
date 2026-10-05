@@ -39,17 +39,17 @@ This is local pseudonymization, not anonymization, and detection is best-effort 
 docker run -d -p 8400:8400 \
   -e PRIVAITE_API_KEYS=change-me \
   -e OPENAI_API_KEY=sk-... \
-  ghcr.io/crp4222/privaite:0.7.0
+  ghcr.io/crp4222/privaite:0.7.1
 ```
 
-The same image is on Docker Hub too: swap the last line for `crp4222/privaite:0.7.0` if you prefer pulling from there. Release details: [PrivAiTe 0.7.0](https://github.com/crp4222/PrivAiTe/releases/tag/v0.7.0).
+The same image is on Docker Hub too: swap the last line for `crp4222/privaite:0.7.1` if you prefer pulling from there. Release details: [PrivAiTe 0.7.1](https://github.com/crp4222/PrivAiTe/releases/tag/v0.7.1).
 
 Two keys, two roles: `PRIVAITE_API_KEYS` is the key your client sends to PrivAiTe (pick any value); `OPENAI_API_KEY` is your real provider key, which stays in the container and never reaches your client. This exposes `gpt-4o-mini` and `gpt-4o`; for any other provider (Ollama, Azure, anything LiteLLM supports), mount a config: [configuration](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#docker-with-a-custom-config).
 
 **pip:**
 
 ```bash
-python -m pip install --upgrade "privaite>=0.7.0"
+python -m pip install --upgrade "privaite>=0.7.1"
 # One spaCy model per scanned language; the default preset scans EN + FR.
 python -m spacy download en_core_web_lg && python -m spacy download fr_core_news_md
 
@@ -154,7 +154,7 @@ The presets are the statistical half of the answer: a benchmarked detector with 
 
 ## What it scans
 
-Before anything is forwarded: `messages[].content` (plain string or multimodal text parts), `tool_calls[].function.arguments` and the legacy `function_call.arguments` (parsed as JSON, scrubbed value by value including bare numeric leaves, keys and function names intact), `/v1/completions` `prompt` and `suffix`, `/v1/embeddings` `input`, chat `prediction.content` (predicted outputs) and `web_search_options.user_location`. On the way back, values are restored in content, tool calls, reasoning traces, refusals and audio transcripts, streaming included.
+Before anything is forwarded: `messages[].content` (plain string or multimodal text parts), plaintext `messages[].reasoning_content`, `reasoning`, `refusal` and `audio.transcript` echoed by clients, `tool_calls[].function.arguments` and the legacy `function_call.arguments` (parsed as JSON, scrubbed value by value including bare numeric leaves, keys and function names intact), `/v1/completions` `prompt` and `suffix`, `/v1/embeddings` `input`, chat `prediction.content` (predicted outputs) and `web_search_options.user_location`. On the way back, values are restored in content, tool calls, reasoning traces, refusals and audio transcripts, streaming included.
 
 NOT scanned (know your surface): `messages[].name`, top-level `user`/`metadata`, `tools` definitions, JSON object keys, and tokenized (integer-array) inputs, which carry no text to inspect. Keep PII out of those fields. Endpoints, strict mode and passthrough caveats: [docs/api.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/api.md).
 
@@ -173,7 +173,7 @@ See [request-local window reuse](https://github.com/crp4222/PrivAiTe/blob/main/d
 **What it does NOT protect against:**
 
 - **PII the detector misses.** Detection is statistical and never 100% (see the [benchmark](https://github.com/crp4222/PrivAiTe#benchmark)). A name it doesn't recognize reaches the provider. Treat the output as best-effort, not a guarantee.
-- **Unrecognized secret formats.** Context changed the model's predictions in the historical log benchmark. 0.5.0 adds rules for common credential assignments, URI passwords and bearer headers, including that fixture's field names. Unknown names, encoded or split values, and bare values without their field context can still survive. This affects every surface that uses the engine. Supported formats and remaining boundary limits are in [detection](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md).
+- **Unrecognized secret formats.** Context changed the model's predictions in the historical log benchmark. 0.5.0 adds rules for common credential assignments, URI passwords and bearer headers, including that fixture's field names. Unknown names, encoded or split values, and bare values without their field context can still survive; since 0.7.1 a bare copy is covered when the same request showed the value in a recognized field first. This affects every surface that uses the engine. Supported formats and remaining boundary limits are in [detection](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md).
 - **Re-identification from context.** Even with names replaced, the surrounding text can stay identifying ("the CEO of `<ORG_1>` who resigned in March").
 - **A compromised local machine.** The mapping and raw text live in local memory; this is not a defense against a local attacker.
 - **The provider correlating** requests within a session.
