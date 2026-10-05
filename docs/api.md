@@ -31,6 +31,7 @@ on the [gateway page](gateway.md).
 Scanned before anything is forwarded to the provider:
 
 - `messages[].content`, whether a plain string or a multimodal list of parts (text parts are scrubbed, images and audio are left alone).
+- Plaintext `messages[].reasoning_content`, `messages[].reasoning`, `messages[].refusal` and `messages[].audio.transcript`, since 0.7.1. Clients can echo restored response fields on the next turn; these strings are scrubbed again. Other audio fields remain unchanged. The gateway's signed or encrypted reasoning blocks follow its separate [relay rules](gateway.md#what-is-scanned-and-what-is-not).
 - `tool_calls[].function.arguments` and the legacy `function_call.arguments`: parsed as JSON and scrubbed value by value, including numeric values (a card number sent as a bare JSON number is detected too; on a hit the leaf becomes the masked string). Object keys and the function name stay intact. Arguments that are not valid JSON are scrubbed as free text.
 - `/v1/completions` `prompt` and `/v1/embeddings` `input`, as a string or a list of strings.
 - Auxiliary request fields that carry user text: chat `prediction.content` (predicted outputs, string or text-part list) and `web_search_options.user_location`, plus the `/v1/completions` `suffix`. These are request inputs, scrubbed on the way in only.

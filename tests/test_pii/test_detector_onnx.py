@@ -16,6 +16,7 @@ import types
 
 import numpy as np
 import pytest
+from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
 from privaite.config.schema import (
@@ -24,6 +25,7 @@ from privaite.config.schema import (
     MLModelDetectorConfig,
     OnnxDetectorConfig,
 )
+from privaite.pii import detector_onnx
 from privaite.pii.detector_onnx import (
     _WINDOW_OVERLAP,
     _WINDOW_TOKENS,
@@ -33,6 +35,7 @@ from privaite.pii.detector_onnx import (
     _stitch_windows,
     decode_bioes_spans,
 )
+from privaite.pii.engine import PIIProcessingError
 
 
 def _detector(**config_kwargs) -> OnnxPrivacyFilterDetector:
@@ -148,7 +151,11 @@ class _FakeSession:
 
 
 def _fake_runtime(
-    monkeypatch, tmp_path, session_providers: list[str], available: list[str] | None = None
+    monkeypatch,
+    tmp_path,
+    session_providers: list[str],
+    available: list[str] | None = None,
+    special_tokens: int = 0,
 ) -> dict:
     """Stand in for onnxruntime, transformers and the model download so
     initialize() runs without touching the network or a real model.
@@ -173,7 +180,7 @@ def _fake_runtime(
         @staticmethod
         def from_pretrained(model_name, revision=None, trust_remote_code=False):
             created["tokenizer_args"] = (model_name, trust_remote_code)
-            return "tokenizer"
+            return types.SimpleNamespace(num_special_tokens_to_add=lambda: special_tokens)
 
     transformers.AutoTokenizer = _FakeAutoTokenizer  # type: ignore[attr-defined]
 
@@ -327,9 +334,7 @@ _LABEL2ID = {label: idx for idx, label in ID2LABEL.items()}
 
 
 class _CharTokenizer:
-    """Character-level stand-in honoring the exact tokenizer contract that
-    _run_inference relies on: truncation + stride overflow rows, offsets
-    absolute into the original text, list-of-lists output."""
+    """Character-level tokenization with absolute offsets and legacy overflow."""
 
     def __call__(
         self,
@@ -339,7 +344,16 @@ class _CharTokenizer:
         stride: int = 0,
         return_overflowing_tokens: bool = False,
         return_offsets_mapping: bool = False,
+        add_special_tokens: bool = True,
     ) -> dict:
+        if not truncation:
+            assert not add_special_tokens and return_offsets_mapping
+            return {
+                "input_ids": [ord(ch) for ch in text],
+                "attention_mask": [1] * len(text),
+                "token_type_ids": [i % 2 for i in range(len(text))],
+                "offset_mapping": [(i, i + 1) for i in range(len(text))],
+            }
         assert truncation and return_overflowing_tokens and return_offsets_mapping
         rows_ids: list[list[int]] = []
         rows_mask: list[list[int]] = []
@@ -412,6 +426,283 @@ def _fake_onnx_detector(max_length: int) -> OnnxPrivacyFilterDetector:
     detector._session = _UppercaseRunSession()
     detector._tokenizer = _CharTokenizer()
     return detector
+
+
+class _OverflowDroppingTokenizer(_CharTokenizer):
+    """Truncation returns only the first row even when overflow is requested."""
+
+    def __call__(self, text, **kwargs):
+        encoding = super().__call__(text, **kwargs)
+        if kwargs.get("truncation", True):
+            return {key: rows[:1] for key, rows in encoding.items()}
+        return encoding
+
+
+class _RecordingSession(_UppercaseRunSession):
+    def __init__(self):
+        super().__init__()
+        self.feeds = []
+
+    def get_inputs(self):
+        return [
+            types.SimpleNamespace(name=name)
+            for name in ("input_ids", "attention_mask", "token_type_ids")
+        ]
+
+    def run(self, output_names, feed):
+        self.feeds.append(feed)
+        return super().run(output_names, feed)
+
+
+@pytest.mark.asyncio
+async def test_missing_tokenizer_overflow_does_not_leave_tail_unscanned():
+    detector = _fake_onnx_detector(max_length=1024)
+    detector._tokenizer = _OverflowDroppingTokenizer()
+    text = "a" * 1200 + "SECRET" + "b" * 359
+
+    entities = await detector.detect(text)
+
+    assert [(e.start, e.end, e.text) for e in entities] == [(1200, 1206, "SECRET")]
+
+
+@pytest.mark.parametrize(
+    "token_count,expected",
+    [
+        (0, []),
+        (1, [(0, 1)]),
+        (896, [(0, 896)]),
+        (1024, [(0, 1024)]),
+        (1025, [(0, 1024), (896, 1025)]),
+        (1565, [(0, 1024), (896, 1565)]),
+        (1920, [(0, 1024), (896, 1920)]),
+        (3000, [(0, 1024), (896, 1920), (1792, 2816), (2688, 3000)]),
+    ],
+)
+def test_manual_windows_are_exact_slices_with_absolute_offsets(token_count, expected):
+    detector = _fake_onnx_detector(max_length=1024)
+    detector._session = _RecordingSession()
+    detector._tokenizer = _OverflowDroppingTokenizer()
+    text = "".join(chr(97 + i % 26) for i in range(token_count))
+    full = detector._tokenizer(
+        text, truncation=False, add_special_tokens=False, return_offsets_mapping=True
+    )
+    seen_offsets = []
+    run_window = detector._run_window
+
+    def record_window(encoding, row, input_names):
+        seen_offsets.append(encoding["offset_mapping"][row])
+        return run_window(encoding, row, input_names)
+
+    detector._run_window = record_window
+    detector._run_inference(text)
+
+    assert len(detector._session.feeds) == len(expected)
+    covered = set()
+    for feed, offsets, (start, end) in zip(detector._session.feeds, seen_offsets, expected):
+        for key in ("input_ids", "attention_mask", "token_type_ids"):
+            assert feed[key].dtype == np.int64
+            assert feed[key].tolist() == [full[key][start:end]]
+        assert offsets == full["offset_mapping"][start:end]
+        covered.update(range(start, end))
+    assert covered == set(range(token_count))
+
+
+@pytest.mark.parametrize("ranges", [[], [(0, 1024)], [(1, 1565)], [(0, 100), (101, 1565)]])
+def test_window_coverage_guard_rejects_missing_tokens(ranges):
+    with pytest.raises(RuntimeError, match="coverage"):
+        detector_onnx._check_window_coverage(ranges, 1565)
+
+
+@pytest.mark.parametrize("window,overlap", [(0, 0), (32, -1), (32, 32)])
+def test_invalid_window_overlap_is_rejected(window, overlap):
+    with pytest.raises(ValueError, match="overlap"):
+        detector_onnx._window_ranges(100, window, overlap)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["attention_mask", "token_type_ids", "offset_mapping"])
+async def test_inconsistent_token_encoding_lengths_block_before_inference(field):
+    detector = _fake_onnx_detector(max_length=1024)
+    detector._session = _RecordingSession()
+    text = "SECRET"
+    encoding = _CharTokenizer()(
+        text, truncation=False, add_special_tokens=False, return_offsets_mapping=True
+    )
+    encoding[field] = encoding[field][:-1]
+    detector._tokenizer = lambda *args, **kwargs: encoding
+
+    with pytest.raises(RuntimeError, match="Inconsistent ONNX token encoding lengths"):
+        await detector.detect(text)
+
+    assert detector._session.feeds == []
+
+
+@pytest.mark.asyncio
+async def test_incomplete_window_coverage_blocks_engine_and_provider(monkeypatch, caplog):
+    from tests.test_api.test_chat_endpoint import _make_app
+
+    monkeypatch.setattr(detector_onnx, "_window_ranges", lambda *args: [(0, 1024)])
+    detector = _fake_onnx_detector(max_length=1024)
+    app, router = _make_app()
+    app.state.pii_engine.detectors = [detector]
+    messages = [{"role": "tool", "content": "a" * 1200 + "SECRET" + "b" * 359}]
+
+    with pytest.raises(RuntimeError, match="coverage"):
+        await detector.detect(messages[0]["content"])
+    with pytest.raises(PIIProcessingError):
+        await app.state.pii_engine.process_request(messages)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/v1/chat/completions", json={"model": "m", "messages": messages}
+        )
+
+    assert response.status_code == 500
+    assert router.received_messages is None
+    assert messages[0]["content"] not in caplog.text
+
+
+class _SilentlyTruncatingTokenizer(_CharTokenizer):
+    """Drops the tail even when truncation is disabled."""
+
+    def __call__(self, text, **kwargs):
+        encoding = super().__call__(text, **kwargs)
+        return {key: tokens[:1024] for key, tokens in encoding.items()}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    ["/v1/chat/completions", "/v1/messages", "/v1/messages/count_tokens", "/v1/responses"],
+)
+async def test_silent_tokenizer_truncation_blocks_before_inference_and_provider(path, caplog):
+    from tests.test_api.test_chat_endpoint import _make_app
+    from tests.test_gateway.conftest import make_gateway_app
+
+    detector = _fake_onnx_detector(max_length=1024)
+    detector._tokenizer = _SilentlyTruncatingTokenizer()
+    detector._session = _RecordingSession()
+    text = "a" * 1200 + "SECRET" + "b" * 359
+    if path == "/v1/chat/completions":
+        app, upstream = _make_app()
+        app.state.pii_engine.detectors = [detector]
+    else:
+        app, upstream = make_gateway_app(detector=detector)
+    if path == "/v1/responses":
+        body = {
+            "model": "m",
+            "input": [{"type": "function_call_output", "call_id": "t1", "output": text}],
+        }
+    else:
+        body = {"model": "m", "messages": [{"role": "user", "content": text}]}
+        if path != "/v1/chat/completions":
+            body["max_tokens"] = 128
+
+    with pytest.raises(RuntimeError, match="text coverage"):
+        await detector.detect(text)
+    with pytest.raises(PIIProcessingError):
+        await app.state.pii_engine.process_request([{"role": "tool", "content": text}])
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(path, json=body)
+
+    assert response.status_code == 500
+    assert detector._session.feeds == []
+    if path == "/v1/chat/completions":
+        assert upstream.received_messages is None
+    else:
+        assert upstream.request is None
+        await app.state.gateway_client.aclose()
+    assert "SECRET" not in caplog.text + response.text
+
+
+@pytest.mark.parametrize(
+    "text,offsets",
+    [
+        ("SECRET", []),
+        ("SECRET", [(0, 3)]),
+        ("SECRET", [(1, 6)]),
+        ("SECRET", [(0, 2), (3, 6)]),
+        ("SECRET", [(-1, 6)]),
+        ("SECRET", [(0, 7)]),
+        ("SECRET", [(3, 2)]),
+        ("SECRET", [(0, 0), (0, 3), (3, 3)]),
+        ("SECRET", [(0, 1), (1, 2), (2, 3), (3, 4), (4, 6), (4, 5)]),
+        ("SECRET", [(0, 2), (2, 4), (1, 6)]),
+    ],
+)
+def test_text_coverage_guard_rejects_missing_characters_and_invalid_offsets(text, offsets):
+    with pytest.raises(RuntimeError, match="text coverage"):
+        detector_onnx._check_text_coverage(offsets, text)
+
+
+@pytest.mark.asyncio
+async def test_out_of_order_offsets_block_before_inference():
+    detector = _fake_onnx_detector(max_length=1024)
+    detector._session = _RecordingSession()
+    encoding = _CharTokenizer()(
+        "SECRET", truncation=False, add_special_tokens=False, return_offsets_mapping=True
+    )
+    encoding["offset_mapping"][-2:] = [(4, 6), (4, 5)]
+    detector._tokenizer = lambda *args, **kwargs: encoding
+
+    with pytest.raises(RuntimeError, match="text coverage"):
+        await detector.detect("SECRET")
+
+    assert detector._session.feeds == []
+
+
+@pytest.mark.parametrize(
+    "text,offsets",
+    [
+        ("", []),
+        (" \n\t ", []),
+        ("  name  ", [(2, 6)]),
+        ("first last", [(0, 5), (6, 10)]),
+        ("é🚀漢", [(0, 1), (1, 2), (1, 2), (2, 3)]),
+        ("name", [(0, 0), (0, 4), (4, 4)]),
+        ("name", [(0, 4), (0, 0)]),
+    ],
+)
+def test_text_coverage_guard_accepts_whitespace_gaps_and_overlapping_unicode_offsets(text, offsets):
+    detector_onnx._check_text_coverage(offsets, text)
+
+
+def test_real_privacy_filter_tokenizer_covers_long_text():
+    from transformers import AutoTokenizer
+
+    config = OnnxDetectorConfig()
+    tokenizer = AutoTokenizer.from_pretrained(
+        config.model_name,
+        revision=config.revision,
+        trust_remote_code=False,
+        local_files_only=True,
+    )
+    assert tokenizer.num_special_tokens_to_add() == 0
+    text = "word " * 1200 + "Sophie Marchand, 12 rue des Lilas, 29200 Brest" + " word" * 359
+    full = tokenizer(text, add_special_tokens=False, truncation=False, return_offsets_mapping=True)
+    assert len(full["input_ids"]) > 1024
+    detector = _detector()
+    detector._tokenizer = tokenizer
+    detector._session = _RecordingSession()
+
+    detector._run_inference(text)
+
+    window, overlap = detector._window_geometry()
+    covered = set()
+    for row, feed in enumerate(detector._session.feeds):
+        start = row * (window - overlap)
+        end = min(start + window, len(full["input_ids"]))
+        assert feed["input_ids"].tolist() == [full["input_ids"][start:end]]
+        assert feed["attention_mask"].tolist() == [full["attention_mask"][start:end]]
+        covered.update(range(start, end))
+    assert covered == set(range(len(full["input_ids"])))
+
+
+@pytest.mark.asyncio
+async def test_initialize_rejects_tokenizers_that_add_special_tokens(monkeypatch, tmp_path):
+    _fake_runtime(monkeypatch, tmp_path, ["CPUExecutionProvider"], special_tokens=2)
+
+    with pytest.raises(ValueError, match="special tokens"):
+        await _detector(model_name="custom/model", revision=None).initialize()
 
 
 @pytest.mark.asyncio
@@ -551,7 +842,7 @@ async def test_initialize_creates_session_with_selected_providers(monkeypatch, t
     assert created["providers"] == ["CPUExecutionProvider"]
     assert created["tokenizer_args"] == ("openai/privacy-filter", False)
     assert detector._session.get_providers() == ["CPUExecutionProvider"]
-    assert detector._tokenizer == "tokenizer"
+    assert detector._tokenizer.num_special_tokens_to_add() == 0
 
 
 # ---------------------------------------------------------------------------

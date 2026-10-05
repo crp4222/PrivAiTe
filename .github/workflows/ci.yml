@@ -38,6 +38,15 @@ jobs:
           python -m spacy download en_core_web_lg
           python -m spacy download fr_core_news_md
 
+      - name: Download Privacy Filter tokenizer
+        run: |
+          python - <<'PY'
+          from transformers import AutoTokenizer
+          from privaite.config.schema import OnnxDetectorConfig
+          config = OnnxDetectorConfig()
+          AutoTokenizer.from_pretrained(config.model_name, revision=config.revision, trust_remote_code=False)
+          PY
+
       - name: Lint
         run: ruff check .
 
@@ -45,6 +54,8 @@ jobs:
         run: ruff format --check .
 
       - name: Test
+        env:
+          HF_HUB_OFFLINE: "1"
         run: python -m pytest tests/ -v --tb=short
 
   typecheck:

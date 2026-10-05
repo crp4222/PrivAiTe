@@ -376,7 +376,9 @@ otherwise. Disabling one also narrows what `block_entities` considers
 enforceable, so a rule that only that recognizer could satisfy is refused at
 boot rather than never firing. An unrecognized name is refused when the config
 loads, so a typo cannot leave you believing a recognizer is off while it is
-still masking.
+still masking. Disabling `StructuredSecretRecognizer` also turns off the
+propagation of the credentials it identifies (see
+[detection](detection.md#structured-credentials-and-overlapping-types)).
 
 These recognizers carry vocabulary, and vocabulary follows the language they are
 built for: a French deployment gets the French cues, an Italian one the Italian

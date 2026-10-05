@@ -51,12 +51,27 @@ them as invariants, not suggestions.
 ## What is and isn't scanned (know the surface)
 
 Scanned: `messages[].content` (string, multimodal text parts, or bare strings in a
-list); `tool_calls`/`function_call` arguments parsed as JSON and scrubbed value by
+list); plaintext `messages[].reasoning_content`, `reasoning`, `refusal` and
+`audio.transcript` (clients can echo restored response fields on the next turn);
+`tool_calls`/`function_call` arguments parsed as JSON and scrubbed value by
 value **including numeric leaves with >=7 digits** (a card number sent as a bare
 number is caught); `/v1/completions` `prompt` and `suffix`; `/v1/embeddings`
 `input`; chat `prediction.content` and `web_search_options.user_location`
 (auxiliary request fields, scrubbed input-side via `process_request_value`, no
 restore path needed).
+
+A credential the structured secret rules matched is `SECRET` in every text
+scrubbed after it in the same request (`PIIEngine._with_known_values`, at the
+choke point, so both scrub surfaces get it). Re-detecting a credential the client
+echoes back is not reliable: an agent repeats a restored password bare, in its
+reasoning or in the next command. The values live in `PIIMapping.remember`, apart
+from the per-value type, which a later detection of the same string under
+another type overwrites (that overwrite silently stopped the propagation once).
+A copy goes through the normal overlap resolution, so a blocked type still
+blocks and an irreversible one stays irreversible. Keep it narrow: rule-matched
+values only (propagating what the ONNX model labels `SECRET` copied a plugin
+name 24 times in one Codex session), 8 characters minimum with a digit, exact
+copies, forward only.
 
 NOT scanned (documented limitation, keep it documented if you change it):
 `messages[].name`, top-level `user`/`metadata`, `tools`/`functions` definitions,

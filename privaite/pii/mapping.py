@@ -22,6 +22,7 @@ class PIIMapping:
     # these would write a real value into the client's own "<PERSON_1>" (a test
     # fixture, a template variable, or a planted "?to=<EMAIL_ADDRESS_1>").
     _reserved: set[str] = field(default_factory=set)
+    _known: dict[str, str] = field(default_factory=dict)
 
     def add(self, original: str, fake: str, entity_type: str) -> None:
         self._original_to_fake[original] = fake
@@ -91,6 +92,15 @@ class PIIMapping:
 
     def get_entity_type(self, original: str) -> str | None:
         return self._entity_types.get(original)
+
+    def remember(self, value: str, entity_type: str) -> None:
+        # A value the engine propagates to the rest of the request (see
+        # PIIEngine._with_known_values). Kept apart from _entity_types, which a
+        # later detection of the same string under another type overwrites.
+        self._known.setdefault(value, entity_type)
+
+    def known_values(self) -> dict[str, str]:
+        return dict(self._known)
 
     def entity_type_counts(self) -> dict[str, int]:
         # Per-type detection counts, including lossy mask/redact ones that never

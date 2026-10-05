@@ -59,9 +59,51 @@ _WINDOW_TOKENS = 1024
 _WINDOW_OVERLAP = 128
 
 # Per-window token predictions: (labels, scores, offsets), offsets absolute
-# into the original text (fast tokenizers report offsets into the full text
-# even for overflow windows).
+# into the original text (sliced from the full tokenization).
 _WindowTokens = tuple[list[str], list[float], list[tuple[int, int]]]
+
+
+def _window_ranges(token_count: int, window: int, overlap: int) -> list[tuple[int, int]]:
+    if not 0 <= overlap < window:
+        raise ValueError("ONNX window overlap must be smaller than the window")
+    ranges: list[tuple[int, int]] = []
+    start = 0
+    while start < token_count:
+        end = min(start + window, token_count)
+        ranges.append((start, end))
+        if end == token_count:
+            break
+        start += window - overlap
+    return ranges
+
+
+def _check_window_coverage(ranges: list[tuple[int, int]], token_count: int) -> None:
+    """Reject missing source tokens before any detections can be returned."""
+    covered_end = 0
+    for start, end in ranges:
+        if not 0 <= start <= covered_end or not start < end <= token_count:
+            raise RuntimeError("Incomplete ONNX token coverage")
+        covered_end = max(covered_end, end)
+    if covered_end != token_count:
+        raise RuntimeError("Incomplete ONNX token coverage")
+
+
+def _check_text_coverage(offsets: Sequence[tuple[int, int]], text: str) -> None:
+    """Reject missing text, allowing whitespace gaps and overlapping Unicode offsets."""
+    previous_start = 0
+    covered_end = 0
+    for start, end in offsets:
+        if not 0 <= start <= end <= len(text):
+            raise RuntimeError("Incomplete ONNX text coverage")
+        if start == end:
+            continue
+        if start < previous_start or end < covered_end:
+            raise RuntimeError("Incomplete ONNX text coverage")
+        if start > covered_end and not text[covered_end:start].isspace():
+            raise RuntimeError("Incomplete ONNX text coverage")
+        previous_start, covered_end = start, end
+    if covered_end < len(text) and not text[covered_end:].isspace():
+        raise RuntimeError("Incomplete ONNX text coverage")
 
 
 def _shared_run_length(
@@ -375,6 +417,19 @@ class OnnxPrivacyFilterDetector(PIIDetector):
             import onnxruntime as ort
             from transformers import AutoTokenizer
 
+            tokenizer = AutoTokenizer.from_pretrained(
+                self.config.model_name,
+                revision=self.config.revision,
+                trust_remote_code=self.config.trust_remote_code,
+            )
+            # Manual windows support tokenizers with no special tokens only.
+            # Reject others at startup rather than omit their required framing.
+            if tokenizer.num_special_tokens_to_add() != 0:
+                raise ValueError(
+                    "ONNX windowing does not support tokenizers that add special tokens"
+                )
+            self._tokenizer = tokenizer
+
             model_path = download_onnx_model(
                 repo_id=self.config.model_name,
                 variant=self.config.onnx_variant,
@@ -397,12 +452,6 @@ class OnnxPrivacyFilterDetector(PIIDetector):
                 providers=requested,
             )
             self._log_session_providers(requested)
-
-            self._tokenizer = AutoTokenizer.from_pretrained(
-                self.config.model_name,
-                revision=self.config.revision,
-                trust_remote_code=self.config.trust_remote_code,
-            )
 
         logger.info("Loading ONNX privacy-filter model (%s)...", self.config.model_name)
         await asyncio.to_thread(_load)
@@ -491,19 +540,26 @@ class OnnxPrivacyFilterDetector(PIIDetector):
 
     def _run_inference(self, text: str) -> list[dict]:
         window, overlap = self._window_geometry()
+        # Tokenizer overflow can silently drop rows, so slice the full encoding
+        # ourselves and verify coverage of both source tokens and original text.
         encoding = self._tokenizer(
             text,
-            truncation=True,
-            max_length=window,
-            stride=overlap,
-            return_overflowing_tokens=True,
+            add_special_tokens=False,
+            truncation=False,
             return_offsets_mapping=True,
         )
+        token_count = len(encoding["input_ids"])
+        ranges = _window_ranges(token_count, window, overlap)
+        _check_window_coverage(ranges, token_count)
+        windows = {}
+        for key in ("input_ids", "attention_mask", "token_type_ids", "offset_mapping"):
+            if key in encoding:
+                if len(encoding[key]) != token_count:
+                    raise RuntimeError("Inconsistent ONNX token encoding lengths")
+                windows[key] = [encoding[key][start:end] for start, end in ranges]
+        _check_text_coverage(encoding["offset_mapping"], text)
         input_names = {inp.name for inp in self._session.get_inputs()}
-        rows = [
-            self._run_window(encoding, row, input_names)
-            for row in range(len(encoding["input_ids"]))
-        ]
+        rows = [self._run_window(windows, row, input_names) for row in range(len(ranges))]
         labels, scores, offsets = _stitch_windows(rows, overlap)
         return decode_bioes_spans(labels, scores, offsets, text)
 
