@@ -140,6 +140,32 @@ def test_no_install_instruction_points_at_a_superseded_version() -> None:
     assert not stale, f"install instructions on a superseded version: {sorted(stale)}"
 
 
+def test_files_downloaded_by_the_docs_come_from_the_shipped_tag() -> None:
+    """The quick start downloads the shipped config from raw.githubusercontent.com.
+
+    A link to `main` hands a pip user the config of whatever is being developed,
+    and a link to an older tag hands them the previous release's. The version
+    regex above cannot see either: it only reads docker tags and pip specifiers.
+    """
+    import re
+
+    from privaite import __version__
+
+    pages = [REPO_ROOT / "README.md", REPO_ROOT / "llms.txt"]
+    pages += sorted((REPO_ROOT / "docs").glob("*.md"))
+    pages += sorted((REPO_ROOT / "integrations").glob("*/README.md"))
+
+    ref = re.compile(r"raw\.githubusercontent\.com/crp4222/PrivAiTe/([^/\s)]+)/config/")
+    wrong = [
+        f"{page.relative_to(REPO_ROOT)} -> {found}"
+        for page in pages
+        for found in ref.findall(page.read_text())
+        if found != f"v{__version__}"
+    ]
+    assert not wrong, f"config downloaded from another ref than v{__version__}: {wrong}"
+    assert ref.search((REPO_ROOT / "README.md").read_text()), "the quick start lost its config link"
+
+
 def test_nothing_is_still_announced_as_unreleased() -> None:
     """Prose calling shipped behaviour "unreleased" reads as "not available yet"."""
     pages = [REPO_ROOT / "README.md", REPO_ROOT / "llms.txt"]

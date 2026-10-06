@@ -2,13 +2,14 @@
 description: >-
   PrivAiTe vs Microsoft Presidio, Protect AI LLM Guard and LiteLLM's Presidio
   guardrail: recall, false positives and tool-call PII coverage, measured on a
-  reproducible benchmark. Plus why guard models (Llama Guard, Shieldstral)
-  answer a different question.
+  reproducible benchmark. Plus what the gateways built for agent traffic
+  (PasteGuard, maskit, CosyRedactGateway, LangSmith and others) state in their
+  own docs, and why guard models answer a different question.
 ---
 
 # PrivAiTe vs Presidio, LLM Guard, and LiteLLM PII masking
 
-PrivAiTe is a drop-in, self-hosted LLM proxy that redacts PII before it reaches the provider and restores it in the reply. Unlike Microsoft Presidio (a library you assemble), Protect AI LLM Guard, or LiteLLM's built-in Presidio guardrail, it also redacts PII inside **tool-call arguments** (the part every tested competitor misses: 100% of the PII placed in a tool-call argument survives in both measured competitors) and multimodal content, reversibly and with zero telemetry.
+PrivAiTe is a drop-in, self-hosted LLM proxy that redacts PII before it reaches the provider and restores it in the reply. Compared with the three tools measured below (Microsoft Presidio, a library you assemble; Protect AI LLM Guard; LiteLLM's built-in Presidio guardrail), it also redacts PII inside **tool-call arguments** and multimodal content, reversibly and with zero telemetry: 100% of the PII placed in a tool-call argument survives in both measured guardrails. That is a statement about those tools, not about the field: several gateways built for agent traffic now handle tool calls too, and they are listed [further down](#gateways-built-for-agent-traffic).
 
 This is local pseudonymization, not anonymization, and detection is best-effort. You remain the data controller. See the [threat model](../README.md#threat-model).
 
@@ -42,13 +43,39 @@ LiteLLM's guardrail does scrub multimodal text parts (hence its low multimodal l
 
 Contamination note, in the competitors' favor and still insufficient: LLM Guard's detection model is fine-tuned on the exact dataset family behind this corpus, so its 76.9% is an optimistic upper bound, while PrivAiTe's default model did not train on it. On an out-of-distribution corpus (non-AI4Privacy), the PrivAiTe onnx stack holds ~84% recall while the AI4Privacy-tuned model drops to ~62%: see [OOD_COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md).
 
+## Gateways built for agent traffic
+
+These projects sit in front of coding agents or LLM APIs like PrivAiTe does. None of them was run in the benchmark above: the table reports what each project's own README or docs state, as read on 6 October 2026, not a measurement. "Not stated" means the page read does not say, not that the feature is missing.
+
+| Project | Shape | Detection, as stated | Reply restored | Tool-call arguments |
+|---|---|---|---|---|
+| [PasteGuard](https://github.com/sgasser/pasteguard) | Local proxy, browser extension, coding agents | Checksums and format checks, plus GLiNER for names and places; secrets (API keys, private keys, JWTs, passwords, connection strings) | Yes ("restores supported placeholders in the response"); streaming responses are handled | Not stated |
+| [maskit](https://github.com/xiaYuTian11/maskit) | Local gateway for coding tools, browser extension | 21 rule categories (7 on by default); optional local ONNX model for names, organizations and addresses, off by default | Yes, streaming for OpenAI and Anthropic | Restored; signed thinking blocks keep their placeholders |
+| [CosyRedactGateway](https://github.com/CassiopeiaCode/CosyRedactGateway) | Single-file credential gateway (OpenAI Chat Completions, Responses, Anthropic Messages) | High-entropy credential detection, structured rules, Gitleaks-compatible rules; emails, bank cards, ID numbers | Yes, in responses and supported streams | Restored, including streamed deltas |
+| [packyme/privacy-filter](https://github.com/packyme/privacy-filter) | Go library with HTTP and gRPC services | Regex for structured PII; gitleaks rules, contextual regex and entropy for secrets; no names, by design | No: placeholders "are irreversible" | Not applicable (a text filter) |
+| [DontFeedTheAI](https://github.com/zeroc00I/DontFeedTheAI) | Proxy for AI-assisted pentesting (Claude Code, OpenAI-compatible clients) | Local Ollama model for hostnames, organization names and credentials in prose; regex for IPs, hashes, tokens and API keys | Yes | Not stated |
+| [LangSmith LLM Gateway](https://docs.langchain.com/langsmith/llm-gateway-redaction) | Managed gateway policy | PII and secrets policy | Yes, streamed or not | Structured arguments are scanned; arguments that arrive as a single JSON string are skipped, as are system and developer prompts |
+
+So looking inside tool calls and restoring a streamed reply are no longer what sets PrivAiTe apart from every alternative. What it brings, stated about itself only:
+
+- **Tool-call arguments are parsed as JSON and scrubbed value by value**, including when they arrive as a single JSON string, which is how the OpenAI chat format sends them.
+- **A contextual model for names and addresses with a published recall** on a public corpus, and a [benchmark anyone can rerun](https://github.com/crp4222/privaite-bench).
+- **A wire-level measurement on real Claude Code and Codex sessions**, misses included ([write-up](agent-leak-measurement.md)).
+- **The same engine three ways**: proxy, Open WebUI filter, LiteLLM guardrail. It fails closed: a detection error blocks the request.
+
 ## When to pick which
 
 - **Pick Presidio** if you want a detection library to embed in your own pipeline and you will handle the proxying, reversal, and tool-call cases yourself.
 - **Pick LLM Guard** if you want a broader prompt-security toolkit (prompt injection, toxicity) and PII is one part of it.
 - **Pick LiteLLM's guardrail** if you already run the LiteLLM proxy and only need flat message-text PII handling.
 - **Pick a guard model** (Llama Guard, OpenAI's gpt-oss-safeguard, Mistral's Shieldstral) if your question is "is this content acceptable?" rather than "what personal data is in it, and how do I get it back?": they classify, they do not redact. [Why the two don't substitute for each other](#guard-models-answer-a-different-question).
-- **Pick PrivAiTe** if you want a drop-in proxy that protects the whole prompt-egress path, including tool-call arguments and multimodal content, reversibly, with zero telemetry, and works with any OpenAI-compatible client.
+- **Pick PasteGuard** if you also want a browser extension for web chat, a dashboard of what was masked, or routing sensitive requests to a local model.
+- **Pick CosyRedactGateway** if credentials are your concern, including random-looking tokens with no known prefix and no `password=` label, or if you want a single-file gateway.
+- **Pick maskit** if your data is Chinese-language (ID cards, licence plates, USCC codes) and you want a console and a browser extension.
+- **Pick packyme/privacy-filter** if you need millisecond, irreversible redaction embedded in a Go gateway and do not need names.
+- **Pick DontFeedTheAI** for pentest engagements, where hostnames, IPs and hashes are the sensitive data.
+- **Pick LangSmith's gateway** if you already run LangSmith and want a managed policy.
+- **Pick PrivAiTe** if you want measured detection, names and addresses included, on the whole egress path (message text, tool-call arguments, tool results, multimodal text), reversibly, with zero telemetry, and a benchmark you can rerun to check it.
 
 ## Guard models answer a different question
 

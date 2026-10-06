@@ -14,10 +14,14 @@
 [![CI](https://github.com/crp4222/PrivAiTe/actions/workflows/ci.yml/badge.svg)](https://github.com/crp4222/PrivAiTe/actions) [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/) [![License](https://img.shields.io/badge/license-BSD--3--Clause-green.svg)](https://github.com/crp4222/PrivAiTe/blob/main/LICENSE) [![PyPI](https://img.shields.io/pypi/v/privaite.svg)](https://pypi.org/project/privaite/)
 
 ```text
-Your agent runs `cat .env` and sends:              The provider receives:
-OPENAI_API_KEY=sk-demo-0000-not-a-real-key    ->   OPENAI_API_KEY=[SECRET]
-DB_PASSWORD=demo-pass-4821                    ->   DB_PASSWORD=[SECRET]
-ADMIN_EMAIL=marie.dupont@example.com          ->   ADMIN_EMAIL=<EMAIL_ADDRESS_1>
+# your agent reads .env and sends:
+OPENAI_API_KEY=sk-demo-0000-fake-key
+DB_PASSWORD=demo-pass-4821
+ADMIN_EMAIL=marie.dupont@example.com
+# the provider receives:
+OPENAI_API_KEY=[SECRET]
+DB_PASSWORD=[SECRET]
+ADMIN_EMAIL=<EMAIL_ADDRESS_1>
 ```
 
 That is real engine output with the shipped config, not a mock-up. In the reply, `<EMAIL_ADDRESS_1>` becomes the real address again, streaming included. `[SECRET]` does not come back: the shipped configs redact secrets and mask card numbers for good, a [per-type setting](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#entity-overrides-per-type-methods). Detection runs locally and is best-effort, not a guarantee: the [threat model](https://github.com/crp4222/PrivAiTe#threat-model) says what it does not cover.
@@ -25,7 +29,9 @@ That is real engine output with the shipped config, not a mock-up. In the reply,
 ## See it work in one command, no API key
 
 ```bash
-docker run --rm ghcr.io/crp4222/privaite:0.7.1 python -m privaite verify
+docker run --rm \
+  ghcr.io/crp4222/privaite:0.7.1 \
+  python -m privaite verify
 ```
 
 ```text
@@ -37,7 +43,7 @@ docker run --rm ghcr.io/crp4222/privaite:0.7.1 python -m privaite verify
 RESULT: PASSED, every planted value was replaced before the request left.
 ```
 
-It starts a throwaway provider on 127.0.0.1, sends the same agent-shaped request straight to it and then through PrivAiTe, and prints what each request body contained. About 20 seconds on a laptop CPU once the image is pulled (it carries the detection model and takes about 3 GB on disk). With pip, `privaite verify` does the same after the install below; its first run downloads the model (about 900 MB). It exits non-zero if a value leaks: [docs/verify.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/verify.md).
+It starts a throwaway provider on 127.0.0.1, sends the same agent-shaped request straight to it and then through PrivAiTe, and prints what each request body contained: every planted value shows `LEAK` when sent directly and `clean` through the proxy. About 20 seconds on a laptop CPU once the image is pulled (it carries the detection model and takes about 3 GB on disk). With pip, `privaite verify` does the same after the install below; its first run downloads the model (about 900 MB). It exits non-zero if a value leaks: [docs/verify.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/verify.md).
 
 ## Quick start
 
@@ -53,7 +59,7 @@ docker run -d -p 8400:8400 \
 ```bash
 python -m pip install --upgrade "privaite>=0.7.1"
 python -m spacy download en_core_web_lg && python -m spacy download fr_core_news_md
-curl -fsSLO https://raw.githubusercontent.com/crp4222/PrivAiTe/main/config/privaite.openai.yaml
+curl -fsSLO https://raw.githubusercontent.com/crp4222/PrivAiTe/v0.7.1/config/privaite.openai.yaml
 OPENAI_API_KEY=sk-... PRIVAITE_API_KEYS=change-me python -m privaite --config privaite.openai.yaml
 ```
 
@@ -69,25 +75,20 @@ gateway:
     base_url: "https://api.anthropic.com/v1"
 ```
 
-Then run `ANTHROPIC_BASE_URL=http://localhost:8400 claude`. Also set `pii.detection_cache.enabled: true`: agent CLIs resend the whole conversation every turn, and the cache avoids re-scanning it (the [threat model](https://github.com/crp4222/PrivAiTe/blob/main/docs/threat-model.md) spells out its memory tradeoff). Codex support is beta; setup, scanned surface and limits are in [docs/gateway.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/gateway.md).
-
-In wire-level captures of real sessions on a repository with 24 planted values, Claude Code sent 24 of 24 to its provider and Codex 20 of 24 when run directly. Through the gateway, none reached it on the small fixture and 2 of 24 did on a larger session: [the measurement](https://github.com/crp4222/PrivAiTe/blob/main/docs/agent-leak-measurement.md).
+Then run `ANTHROPIC_BASE_URL=http://localhost:8400 claude`. Also set `pii.detection_cache.enabled: true`: agent CLIs resend the whole conversation every turn, and the cache avoids re-scanning it (the [threat model](https://github.com/crp4222/PrivAiTe/blob/main/docs/threat-model.md) spells out its memory tradeoff). Codex support is beta; setup, scanned surface and limits are in [docs/gateway.md](https://github.com/crp4222/PrivAiTe/blob/main/docs/gateway.md). In wire-level captures of real sessions on a repository with 24 planted values, Claude Code sent 24 of 24 to its provider and Codex 20 of 24 when run directly. Through the gateway, none reached it on the small fixture and 2 of 24 did on a larger session: [the measurement](https://github.com/crp4222/PrivAiTe/blob/main/docs/agent-leak-measurement.md).
 
 - **Measured, not promised.** Those numbers do not establish zero leaks on arbitrary agent traffic.
 - **It protects the egress, not the agent.** The CLI keeps the real values in its own context and local transcripts.
 - **The agent's own prompt is not scanned.** The `system` and `instructions` fields pass through as-is, and Claude Code puts your `CLAUDE.md` there.
 - **The gateway routes are open.** They accept a request that carries no `PRIVAITE_API_KEYS` value, and the server binds `0.0.0.0` by default with no rate limit: bind it to localhost or keep the port off untrusted networks.
 
-## Why it is different
+## What it does
 
-- **It reads inside the JSON.** Tool-call arguments are parsed and scrubbed value by value, and tool results and multimodal text parts are scanned like any message. The text-only guardrails in the benchmark below leave tool-call arguments untouched.
+- **It reads inside the JSON.** Tool-call arguments are parsed and scrubbed value by value; tool results and multimodal text parts are scanned like any message.
 - **It restores the reply, streaming included**, in content, tool calls and reasoning.
-- **It fails closed.** If detection errors, the request is blocked, not forwarded.
-- **It runs on your machine, with no telemetry.** Detection is Presidio plus OpenAI's open privacy-filter model.
+- **It fails closed and stays local.** If detection errors, the request is blocked, not forwarded. Detection (Presidio plus OpenAI's open privacy-filter model) runs on your machine, with no telemetry.
 
 ## Benchmark
-
-Measured on 120 real documents from the open [AI4Privacy `pii-masking-200k`](https://huggingface.co/datasets/ai4privacy/pii-masking-200k) dataset (458 PII items in DE, EN, FR, IT), plus 14 clean documents for false positives.
 
 | Solution | Recall (span) | Recall (strict) | False positives | Tool-call protection |
 |---|---|---|---|---|
@@ -96,7 +97,7 @@ Measured on 120 real documents from the open [AI4Privacy `pii-masking-200k`](htt
 | LiteLLM Presidio guardrail | 70.3% | 65.3% | 3 / 14 | 0.0% |
 | LLM Guard (Anonymize) | 76.9% | 74.9% | 5 / 14 | 0.0% |
 
-Read the 100% precisely, it is structural: of the PII PrivAiTe detects in plain text, all of it is also removed from tool-call JSON, so its tool-call leak equals its detection misses (14.8% on this corpus). LLM Guard's model is fine-tuned on this exact dataset, so its recall here is optimistic. Methodology, per-language tables, out-of-distribution checks and reproduction: [privaite-bench](https://github.com/crp4222/privaite-bench). PrivAiTe is not always the right pick: [when to choose another tool](https://github.com/crp4222/PrivAiTe/blob/main/docs/comparison.md#when-to-pick-which).
+Measured on 120 real documents from the open [AI4Privacy `pii-masking-200k`](https://huggingface.co/datasets/ai4privacy/pii-masking-200k) dataset (458 PII items in DE, EN, FR, IT), plus 14 clean documents for false positives. Read the 100% precisely, it is structural: of the PII PrivAiTe detects in plain text, all of it is also removed from tool-call JSON, so its tool-call leak equals its detection misses (14.8% on this corpus). The two guardrails measured here do not look inside tool-call arguments; other gateways do, and the [comparison](https://github.com/crp4222/PrivAiTe/blob/main/docs/comparison.md) lists what each project states and when to pick it instead. LLM Guard's model is fine-tuned on this exact dataset, so its recall here is optimistic. Methodology, per-language tables, out-of-distribution checks and reproduction: [privaite-bench](https://github.com/crp4222/privaite-bench).
 
 ## Integrations
 
@@ -109,9 +110,8 @@ PrivAiTe does **local pseudonymization**, not anonymization: the real-to-placeho
 
 - **Missed detections.** Detection is statistical; a value it does not recognize reaches the provider (see the [benchmark](https://github.com/crp4222/PrivAiTe#benchmark)).
 - **Unrecognized secret formats:** unknown field names, encoded or split values, bare values without their field context.
-- **Re-identification from context** ("the CEO of `<ORG_1>` who resigned in March").
+- **Re-identification.** The surrounding text can stay identifying ("the CEO of `<ORG_1>` who resigned in March"), and the provider can correlate requests within a session.
 - **A compromised local machine.** The mapping and the raw text live in local memory.
-- **The provider correlating** requests within a session.
 - **A model inventing a value** instead of copying a placeholder: nothing can be restored then.
 - **The agent itself, in gateway mode.** The CLI keeps the real values locally, and its own prompt is relayed unscanned.
 
@@ -119,7 +119,7 @@ For GDPR or HIPAA, treat this as pseudonymization plus transfer minimization; yo
 
 ## Docs
 
-- **Presets:** `onnx` is the default; `light` is faster and needs no model download, with lower recall. [Presets](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md#presets)
+- **Presets:** `onnx` is the default. `light` is faster and needs no model download, but it misses names the default finds: the demo above fails with `--preset light`. [Presets](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md#presets)
 - **Your own types and hard blocks:** regex `custom_patterns`, a per-type fate, and `block_entities` for what must never leave. [Your policy, your types](https://github.com/crp4222/PrivAiTe/blob/main/docs/policy.md)
 - **What is scanned and what is not:** the exact request fields. [API reference](https://github.com/crp4222/PrivAiTe/blob/main/docs/api.md#what-gets-anonymized)
 - **Everything else:** [detection](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md), [configuration](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md), [redacting PII before an LLM call](https://github.com/crp4222/PrivAiTe/blob/main/docs/redact-pii-before-llm.md), [changelog](https://github.com/crp4222/PrivAiTe/blob/main/CHANGELOG.md), and the same pages as a site: [crp4222.github.io/PrivAiTe](https://crp4222.github.io/PrivAiTe/). To develop: clone, `pip install -e ".[dev]"`, download the two spaCy models above, then `python -m pytest tests/`.
@@ -351,7 +351,7 @@ Neither is perfect alone:
 
 \*Span recall on the [AI4Privacy benchmark](https://github.com/crp4222/PrivAiTe#benchmark): 120 real documents (458 PII items, labeled by 10 independent auditor agents and cross-checked against the dataset's own mask) across DE, EN, FR, IT, plus 14 clean documents for false positives. The latencies are means per corpus document from that local run, not large agent-request latency guarantees. `max` adds GLiNER (trained on data independent of AI4Privacy): on out-of-distribution corpora it raises recall by several points at the cost of more false positives and a torch dependency (`pip install 'privaite[gliner]'`); with it selected but not installed, the proxy fails at startup with an install hint rather than silently degrading.
 
-**`onnx`** combines contextual recognition with structured rules. **`light`** uses Presidio and the same structured-secret rules; it has no contextual Privacy Filter model, and needs no model download beyond the spaCy language models.
+**`onnx`** combines contextual recognition with structured rules. **`light`** uses Presidio and the same structured-secret rules; it has no contextual Privacy Filter model, and needs no model download beyond the spaCy language models. It misses names that no cue introduces when the text is not in the first configured language: `privaite verify --preset light` reports the English name of its own demo as leaked.
 
 > **Footgun:** do not pin `detectors.presidio.entities` to a short allowlist on the `light` path. It restricts detection to only those types and roughly halves recall (to ~36%). Leave `entities` unset; the proxy logs a warning at startup if it detects a low-recall configuration.
 
@@ -1137,7 +1137,11 @@ in a script, and `--json` gives the machine-readable form.
 
 The `direct` column is the baseline: it is also what a text-only guardrail
 forwards for the two structured fields, since those never pass through its
-scrubber. `--preset light` skips the model download at the cost of recall.
+scrubber. `--preset light` skips the model download at the cost of recall, and
+this demo shows the cost: with the default settings `light` leaves `Marie Dupont`
+in the message text, so the command prints that line as `LEAK` and exits
+non-zero. `light` has no contextual model, and it only trusts spaCy's names for
+the first configured language, which is French by default.
 
 This output is what to paste into an issue when something leaks, and it is
 reproducible by anyone without your setup or your data.
@@ -1236,7 +1240,7 @@ For GDPR/HIPAA: treat this as pseudonymization + transfer minimization, not anon
 
 # PrivAiTe vs Presidio, LLM Guard, and LiteLLM PII masking
 
-PrivAiTe is a drop-in, self-hosted LLM proxy that redacts PII before it reaches the provider and restores it in the reply. Unlike Microsoft Presidio (a library you assemble), Protect AI LLM Guard, or LiteLLM's built-in Presidio guardrail, it also redacts PII inside **tool-call arguments** (the part every tested competitor misses: 100% of the PII placed in a tool-call argument survives in both measured competitors) and multimodal content, reversibly and with zero telemetry.
+PrivAiTe is a drop-in, self-hosted LLM proxy that redacts PII before it reaches the provider and restores it in the reply. Compared with the three tools measured below (Microsoft Presidio, a library you assemble; Protect AI LLM Guard; LiteLLM's built-in Presidio guardrail), it also redacts PII inside **tool-call arguments** and multimodal content, reversibly and with zero telemetry: 100% of the PII placed in a tool-call argument survives in both measured guardrails. That is a statement about those tools, not about the field: several gateways built for agent traffic now handle tool calls too, and they are listed [further down](#gateways-built-for-agent-traffic).
 
 This is local pseudonymization, not anonymization, and detection is best-effort. You remain the data controller. See the [threat model](../README.md#threat-model).
 
@@ -1270,13 +1274,39 @@ LiteLLM's guardrail does scrub multimodal text parts (hence its low multimodal l
 
 Contamination note, in the competitors' favor and still insufficient: LLM Guard's detection model is fine-tuned on the exact dataset family behind this corpus, so its 76.9% is an optimistic upper bound, while PrivAiTe's default model did not train on it. On an out-of-distribution corpus (non-AI4Privacy), the PrivAiTe onnx stack holds ~84% recall while the AI4Privacy-tuned model drops to ~62%: see [OOD_COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md).
 
+## Gateways built for agent traffic
+
+These projects sit in front of coding agents or LLM APIs like PrivAiTe does. None of them was run in the benchmark above: the table reports what each project's own README or docs state, as read on 6 October 2026, not a measurement. "Not stated" means the page read does not say, not that the feature is missing.
+
+| Project | Shape | Detection, as stated | Reply restored | Tool-call arguments |
+|---|---|---|---|---|
+| [PasteGuard](https://github.com/sgasser/pasteguard) | Local proxy, browser extension, coding agents | Checksums and format checks, plus GLiNER for names and places; secrets (API keys, private keys, JWTs, passwords, connection strings) | Yes ("restores supported placeholders in the response"); streaming responses are handled | Not stated |
+| [maskit](https://github.com/xiaYuTian11/maskit) | Local gateway for coding tools, browser extension | 21 rule categories (7 on by default); optional local ONNX model for names, organizations and addresses, off by default | Yes, streaming for OpenAI and Anthropic | Restored; signed thinking blocks keep their placeholders |
+| [CosyRedactGateway](https://github.com/CassiopeiaCode/CosyRedactGateway) | Single-file credential gateway (OpenAI Chat Completions, Responses, Anthropic Messages) | High-entropy credential detection, structured rules, Gitleaks-compatible rules; emails, bank cards, ID numbers | Yes, in responses and supported streams | Restored, including streamed deltas |
+| [packyme/privacy-filter](https://github.com/packyme/privacy-filter) | Go library with HTTP and gRPC services | Regex for structured PII; gitleaks rules, contextual regex and entropy for secrets; no names, by design | No: placeholders "are irreversible" | Not applicable (a text filter) |
+| [DontFeedTheAI](https://github.com/zeroc00I/DontFeedTheAI) | Proxy for AI-assisted pentesting (Claude Code, OpenAI-compatible clients) | Local Ollama model for hostnames, organization names and credentials in prose; regex for IPs, hashes, tokens and API keys | Yes | Not stated |
+| [LangSmith LLM Gateway](https://docs.langchain.com/langsmith/llm-gateway-redaction) | Managed gateway policy | PII and secrets policy | Yes, streamed or not | Structured arguments are scanned; arguments that arrive as a single JSON string are skipped, as are system and developer prompts |
+
+So looking inside tool calls and restoring a streamed reply are no longer what sets PrivAiTe apart from every alternative. What it brings, stated about itself only:
+
+- **Tool-call arguments are parsed as JSON and scrubbed value by value**, including when they arrive as a single JSON string, which is how the OpenAI chat format sends them.
+- **A contextual model for names and addresses with a published recall** on a public corpus, and a [benchmark anyone can rerun](https://github.com/crp4222/privaite-bench).
+- **A wire-level measurement on real Claude Code and Codex sessions**, misses included ([write-up](agent-leak-measurement.md)).
+- **The same engine three ways**: proxy, Open WebUI filter, LiteLLM guardrail. It fails closed: a detection error blocks the request.
+
 ## When to pick which
 
 - **Pick Presidio** if you want a detection library to embed in your own pipeline and you will handle the proxying, reversal, and tool-call cases yourself.
 - **Pick LLM Guard** if you want a broader prompt-security toolkit (prompt injection, toxicity) and PII is one part of it.
 - **Pick LiteLLM's guardrail** if you already run the LiteLLM proxy and only need flat message-text PII handling.
 - **Pick a guard model** (Llama Guard, OpenAI's gpt-oss-safeguard, Mistral's Shieldstral) if your question is "is this content acceptable?" rather than "what personal data is in it, and how do I get it back?": they classify, they do not redact. [Why the two don't substitute for each other](#guard-models-answer-a-different-question).
-- **Pick PrivAiTe** if you want a drop-in proxy that protects the whole prompt-egress path, including tool-call arguments and multimodal content, reversibly, with zero telemetry, and works with any OpenAI-compatible client.
+- **Pick PasteGuard** if you also want a browser extension for web chat, a dashboard of what was masked, or routing sensitive requests to a local model.
+- **Pick CosyRedactGateway** if credentials are your concern, including random-looking tokens with no known prefix and no `password=` label, or if you want a single-file gateway.
+- **Pick maskit** if your data is Chinese-language (ID cards, licence plates, USCC codes) and you want a console and a browser extension.
+- **Pick packyme/privacy-filter** if you need millisecond, irreversible redaction embedded in a Go gateway and do not need names.
+- **Pick DontFeedTheAI** for pentest engagements, where hostnames, IPs and hashes are the sensitive data.
+- **Pick LangSmith's gateway** if you already run LangSmith and want a managed policy.
+- **Pick PrivAiTe** if you want measured detection, names and addresses included, on the whole egress path (message text, tool-call arguments, tool results, multimodal text), reversibly, with zero telemetry, and a benchmark you can rerun to check it.
 
 ## Guard models answer a different question
 

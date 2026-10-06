@@ -20,10 +20,14 @@ phones home.
 [See it work](#see-it-work-in-one-command-no-api-key) | [Get started](#install) | [See the benchmark](https://github.com/crp4222/privaite-bench) | [GitHub](https://github.com/crp4222/PrivAiTe)
 
 ```text
-Your agent runs `cat .env` and sends:              The provider receives:
-OPENAI_API_KEY=sk-demo-0000-not-a-real-key    ->   OPENAI_API_KEY=[SECRET]
-DB_PASSWORD=demo-pass-4821                    ->   DB_PASSWORD=[SECRET]
-ADMIN_EMAIL=marie.dupont@example.com          ->   ADMIN_EMAIL=<EMAIL_ADDRESS_1>
+# your agent reads .env and sends:
+OPENAI_API_KEY=sk-demo-0000-fake-key
+DB_PASSWORD=demo-pass-4821
+ADMIN_EMAIL=marie.dupont@example.com
+# the provider receives:
+OPENAI_API_KEY=[SECRET]
+DB_PASSWORD=[SECRET]
+ADMIN_EMAIL=<EMAIL_ADDRESS_1>
 ```
 
 That is real engine output with the shipped config, not a mock-up. In the reply,
@@ -37,7 +41,9 @@ Detection runs locally and is best-effort, not a guarantee: the
 ## See it work in one command, no API key
 
 ```bash
-docker run --rm ghcr.io/crp4222/privaite:0.7.1 python -m privaite verify
+docker run --rm \
+  ghcr.io/crp4222/privaite:0.7.1 \
+  python -m privaite verify
 ```
 
 It starts a throwaway provider on 127.0.0.1, sends the same agent-shaped request
@@ -143,7 +149,8 @@ The benchmark is public and reproducible. Run it yourself.
   image).
 - **light.** Presidio with PrivAiTe's recognizers; 0.5.0 also
   covers common structured-secret formats. No Privacy Filter model is loaded;
-  spaCy language models are still required.
+  spaCy language models are still required. It misses names the default finds:
+  `privaite verify --preset light` reports the name in its own demo as leaked.
 
 ---
 
@@ -184,7 +191,7 @@ full quickstart, config reference, and threat model are in the
 - [Threat model](threat-model.md): what PrivAiTe protects against, what it does not, and what the optional detection cache keeps in memory
 - [Agent CLI gateway](gateway.md): Claude Code setup, Codex setup (beta), scanned surface, honest limits
 - [What a coding agent sends to its provider](agent-leak-measurement.md): wire-level measurement of real Claude Code and Codex sessions, 24/24 unprotected, 0/24 and 2/24 through the gateway, with the miss mechanism
-- [PrivAiTe vs Presidio, LLM Guard, LiteLLM](comparison.md): feature and benchmark comparison
+- [PrivAiTe vs Presidio, LLM Guard, LiteLLM](comparison.md): feature and benchmark comparison, plus what the gateways built for agent traffic state in their own docs
 
 ---
 
