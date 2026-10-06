@@ -361,6 +361,7 @@ The default `onnx` preset does detect personal addresses (as `LOCATION`) and per
 
 - **Generic place names (the Presidio LOCATION recognizer):** "Paris" or "London" on their own aren't PII, and spaCy flags ordinary words ("Kubernetes", "Saturday") as locations. The `onnx` preset keeps this recognizer off and relies on the model's context-aware address detection instead. PrivAiTe's own cue-based location patterns ("elle habite à X", "lives in X", "domicilié à X") do fire under every preset: they require a residence cue, so they do not carry spaCy's false-positive rate. Any recognizer PrivAiTe registers, and any `custom_patterns` type, is exempt from a preset's entity allowlist; the allowlist only scopes Presidio's own recognizers. Use [`disabled_recognizers`](configuration.md#built-in-recognizers) to switch one off. Their cues are vocabulary, so each one only fires under the language it is written in: configure every language your traffic uses.
 - **The Presidio URL regex:** it matches code like `logging.getLogger` because `.ge` is a valid TLD. The `onnx` preset keeps it off, and the model still catches genuine personal URLs.
+- **spaCy dates on code:** the English model also labels code as dates (`connect(api_key`, `f.write(json.dumps(entry`). A span that holds code (a call, a snake_case identifier, brackets, an assignment) is cut there, and only the pieces holding a digit are kept, so the code is not rewritten while every number the span covered stays covered. Any other span is kept as spaCy reported it.
 
 The `light` preset has no contextual Privacy Filter model. 0.5.0 adds the same structured-secret rules to every preset that enables Presidio. Broad password recognition still requires an ML detector; these rules do not make `light` equivalent to `onnx`.
 
@@ -812,6 +813,16 @@ Each language needs its spaCy model: `python -m spacy download de_core_news_md`.
 The default list is `["fr", "en"]`, so a fresh install fetches `fr_core_news_md`
 on first boot if it is missing; set `languages: ["en"]` for an English-only,
 no-surprise-download setup.
+
+The order matters. Pattern recognizers and the contextual rules run for every
+listed language, but spaCy's statistical NER is kept only for the first one:
+a model reading text in another language produced false positives, such as
+"résumer" taken for a person. Put the language of most of your traffic first.
+With the default `["fr", "en"]`, English text gets no spaCy names; the `onnx`
+preset finds them with its own model, `light` does not ("I am Marie Dupont"
+is missed there). An English-first list fixes that for `light`, at the cost of
+the English model's guesses on French text ("Peux-tu" or "Python" as
+organizations).
 
 ## Built-in recognizers
 

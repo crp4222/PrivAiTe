@@ -353,6 +353,16 @@ The default list is `["fr", "en"]`, so a fresh install fetches `fr_core_news_md`
 on first boot if it is missing; set `languages: ["en"]` for an English-only,
 no-surprise-download setup.
 
+The order matters. Pattern recognizers and the contextual rules run for every
+listed language, but spaCy's statistical NER is kept only for the first one:
+a model reading text in another language produced false positives, such as
+"résumer" taken for a person. Put the language of most of your traffic first.
+With the default `["fr", "en"]`, English text gets no spaCy names; the `onnx`
+preset finds them with its own model, `light` does not ("I am Marie Dupont"
+is missed there). An English-first list fixes that for `light`, at the cost of
+the English model's guesses on French text ("Peux-tu" or "Python" as
+organizations).
+
 ## Built-in recognizers
 
 On top of Presidio's own recognizers, PrivAiTe registers a few of its own:
