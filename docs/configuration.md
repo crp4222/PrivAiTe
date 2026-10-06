@@ -470,3 +470,31 @@ is unavailable.
 `auto` never selects CoreML for the ONNX detector: it is slower than CPU at every
 measured input size and accumulates compiled-model memory until the host process
 is killed. `device: "coreml"` stays available as an explicit opt-in.
+
+## Outbound connections
+
+The only request PrivAiTe makes on your behalf is the one to your provider.
+Two downloads happen once, on a first run outside Docker: the detection model
+from the Hugging Face Hub (about 900 MB) and any missing spaCy language model.
+The Docker image carries both.
+
+Several dependencies contact a third party on their own, and PrivAiTe turns
+each of them off:
+
+| Dependency | What it did by default | How it is turned off |
+|---|---|---|
+| ONNX Runtime 1.29 and later | Uploads telemetry (runtime, hardware and model metadata, a hashed device identifier) to `mobile.events.data.microsoft.com` | `ORT_DISABLE_TELEMETRY=1`, and `disable_telemetry_events()` when the session is created |
+| LiteLLM | Fetches its price table from `raw.githubusercontent.com` at import | `LITELLM_LOCAL_MODEL_COST_MAP=True` (the bundled table is used) |
+| Hugging Face Hub | Asks the Hub about model files on every start, cached or not | A pinned `revision` is read from the cache without a request; `HF_HUB_DISABLE_TELEMETRY=1` |
+| tldextract (used by Presidio) | Downloads the public suffix list from `publicsuffix.org` | Its bundled list is used |
+
+None of these carried request text. The three environment variables are set
+when `privaite` is imported, before the libraries read them, and the Docker
+image sets them too. A value you export yourself is kept, so
+`LITELLM_LOCAL_MODEL_COST_MAP=False` brings the remote price table back.
+
+Two limits. A host process that loaded one of these libraries before importing
+`privaite` (Open WebUI with the filter, a LiteLLM proxy with the guardrail) has
+already read its environment: set the variables on that process. And an
+unpinned `revision` (a branch name) still asks the Hub what it points at; set
+`HF_HUB_OFFLINE=1` for a process that must never do that.

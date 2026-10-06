@@ -178,7 +178,7 @@ def _fake_runtime(
 
     class _FakeAutoTokenizer:
         @staticmethod
-        def from_pretrained(model_name, revision=None, trust_remote_code=False):
+        def from_pretrained(model_name, revision=None, trust_remote_code=False, **kwargs):
             created["tokenizer_args"] = (model_name, trust_remote_code)
             return types.SimpleNamespace(num_special_tokens_to_add=lambda: special_tokens)
 

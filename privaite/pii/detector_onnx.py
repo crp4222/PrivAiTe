@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import shutil
 from collections.abc import Sequence
 from pathlib import Path
@@ -17,6 +18,9 @@ from privaite.pii.entity import PIIEntity
 from privaite.pii.window_cache import current_window_cache, inference_request
 
 logger = logging.getLogger("privaite.pii.detector_onnx")
+
+# A full commit hash: a revision that can never point at something else.
+_COMMIT_HASH = re.compile(r"[0-9a-f]{40}")
 
 _ENTITY_ORDER = [
     "account_number",
@@ -301,7 +305,7 @@ def download_onnx_model(
     cache_dir: str | None = None,
     revision: str | None = None,
 ) -> Path:
-    from huggingface_hub import hf_hub_download
+    from huggingface_hub import _CACHED_NO_EXIST, hf_hub_download, try_to_load_from_cache
 
     # No default of its own: a caller that omits the variant (the Docker image
     # prefetch) must fetch the file the detector will load at startup.
@@ -316,27 +320,42 @@ def download_onnx_model(
     except ImportError:  # pragma: no cover - only on hub < 0.25
         from huggingface_hub.utils import EntryNotFoundError
 
-    local_path = Path(
-        hf_hub_download(
-            repo_id=repo_id,
-            filename=f"onnx/model_{variant}.onnx",
-            cache_dir=cache_dir,
-            revision=revision,
-        )
-    )
-    data_path: Path | None = None
-    try:
-        # Only variants with externalized weights ship this side file; a variant
-        # packed into a single .onnx must not fail here.
-        data_path = Path(
+    def cached(filename: str) -> Any:
+        """What the local cache knows about a file of a pinned revision.
+
+        hf_hub_download asks the Hub about a file it has not seen at this
+        revision, and for a file that does not exist (the side file of a
+        single-file variant) it asks again on every start. A pinned commit
+        never changes, so what the cache knows about it is final. A moving
+        revision (a branch name) is always resolved by the Hub.
+        """
+        if not revision or not _COMMIT_HASH.fullmatch(revision):
+            return None
+        return try_to_load_from_cache(repo_id, filename, cache_dir=cache_dir, revision=revision)
+
+    def download(filename: str) -> Path:
+        return Path(
             hf_hub_download(
-                repo_id=repo_id,
-                filename=f"onnx/model_{variant}.onnx_data",
-                cache_dir=cache_dir,
-                revision=revision,
+                repo_id=repo_id, filename=filename, cache_dir=cache_dir, revision=revision
             )
         )
-    except EntryNotFoundError:
+
+    model_file = f"onnx/model_{variant}.onnx"
+    known = cached(model_file)
+    local_path = Path(known) if isinstance(known, str) else download(model_file)
+
+    # Only variants with externalized weights ship this side file; a variant
+    # packed into a single .onnx must not fail here.
+    data_path: Path | None = None
+    known = cached(f"{model_file}_data")
+    if isinstance(known, str):
+        data_path = Path(known)
+    elif known is not _CACHED_NO_EXIST:
+        try:
+            data_path = download(f"{model_file}_data")
+        except EntryNotFoundError:
+            pass
+    if data_path is None:
         logger.info("Variant %s has no .onnx_data side file (single-file model)", variant)
 
     model_path = colocate_external_data(local_path, data_path)
@@ -417,11 +436,13 @@ class OnnxPrivacyFilterDetector(PIIDetector):
             import onnxruntime as ort
             from transformers import AutoTokenizer
 
-            tokenizer = AutoTokenizer.from_pretrained(
-                self.config.model_name,
-                revision=self.config.revision,
-                trust_remote_code=self.config.trust_remote_code,
-            )
+            # A host that initialised ONNX Runtime before importing privaite
+            # (Open WebUI does) no longer reads ORT_DISABLE_TELEMETRY.
+            telemetry_off = getattr(ort, "disable_telemetry_events", None)
+            if telemetry_off is not None:
+                telemetry_off()
+
+            tokenizer = self._load_tokenizer(AutoTokenizer)
             # Manual windows support tokenizers with no special tokens only.
             # Reject others at startup rather than omit their required framing.
             if tokenizer.num_special_tokens_to_add() != 0:
@@ -456,6 +477,26 @@ class OnnxPrivacyFilterDetector(PIIDetector):
         logger.info("Loading ONNX privacy-filter model (%s)...", self.config.model_name)
         await asyncio.to_thread(_load)
         logger.info("ONNX model loaded successfully")
+
+    def _load_tokenizer(self, auto_tokenizer: Any) -> Any:
+        """The tokenizer, from the local cache when the revision is pinned.
+
+        from_pretrained checks the Hub for each file even when all of them are
+        cached. A pinned commit never changes, so the cache is tried first and
+        the Hub only asked when something is missing.
+        """
+        kwargs = {
+            "revision": self.config.revision,
+            "trust_remote_code": self.config.trust_remote_code,
+        }
+        if self.config.revision and _COMMIT_HASH.fullmatch(self.config.revision):
+            try:
+                return auto_tokenizer.from_pretrained(
+                    self.config.model_name, local_files_only=True, **kwargs
+                )
+            except OSError:
+                pass
+        return auto_tokenizer.from_pretrained(self.config.model_name, **kwargs)
 
     def _log_session_providers(self, requested: list[str]) -> None:
         """Report the execution providers the session ACTUALLY runs on.
