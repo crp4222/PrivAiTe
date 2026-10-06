@@ -8,8 +8,23 @@ description: >-
 # Configuration reference
 
 Everything below goes in your `privaite.yaml` (`python -m privaite --config privaite.yaml`).
-The [README quick start](https://github.com/crp4222/PrivAiTe#quick-start) has the minimal
-working file; this page covers every knob.
+The [README quick start](https://github.com/crp4222/PrivAiTe#quick-start) runs the shipped
+`config/privaite.openai.yaml`; this page covers every knob. The minimal working file is:
+
+```yaml
+providers:
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: ${OPENAI_API_KEY}
+pii:
+  enabled: true
+  preset: onnx    # or "light": faster, no model download, classic PII only
+```
+
+With that file every detected type gets a reversible placeholder. The shipped
+configs add two per-type exceptions on top, a masked `CREDIT_CARD` and a redacted
+`SECRET`: see [entity overrides](#entity-overrides-per-type-methods).
 
 ## Unknown keys fail at boot
 
@@ -259,7 +274,7 @@ drops to well under a second from turn 2 on, with byte-identical output.
 ```yaml
 pii:
   detection_cache:
-    enabled: false      # default: off (see the README threat model)
+    enabled: false      # default: off (see the threat model)
     max_entries: 4096   # LRU bound
     ttl_seconds: 1800   # entries expire after 30 minutes (swept on the next write)
 ```
@@ -285,7 +300,7 @@ its expiry, and the whole cache is cleared at engine shutdown, so only a
 process that goes completely idle holds its last (expired, unusable) entries
 longer, until that next write or shutdown. The full delta,
 including the multi-user dedup timing side channel, is spelled out in the
-[README threat model](../README.md#threat-model). Enable it if you use the
+[threat model](threat-model.md). Enable it if you use the
 [agent CLI gateway](gateway.md) or any client that resends conversation
 history; leave it off if the stricter memory posture matters more than latency.
 

@@ -33,6 +33,7 @@ SOURCES = (
     "docs/policy.md",
     "docs/api.md",
     "docs/verify.md",
+    "docs/threat-model.md",
     "docs/comparison.md",
     "docs/gateway.md",
     "docs/agent-leak-measurement.md",

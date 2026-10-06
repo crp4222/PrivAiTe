@@ -78,7 +78,7 @@ history and the scrub cost grows with the context: on a large measured session
 the per-request scrub peaked at 42 s with Claude Code and 72 s with Codex,
 against a median of 1 to 3 s with the cache on. The tradeoff (PII-derived metadata, never values, staying in process memory
 up to the TTL) is spelled out in the
-[README threat model](https://github.com/crp4222/PrivAiTe#threat-model); config
+[threat model](threat-model.md); config
 details in the
 [configuration reference](configuration.md#detection-cache-agent-sessions).
 

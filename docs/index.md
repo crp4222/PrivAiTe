@@ -1,28 +1,50 @@
 ---
 description: >-
-  Self-hosted, OpenAI-compatible proxy that redacts PII (names, emails, cards,
-  secrets) from LLM requests, including tool-call arguments and multimodal
-  content, then restores it in the reply. Zero telemetry.
+  Self-hosted, OpenAI-compatible proxy that keeps secrets and personal data
+  (API keys, passwords, names, emails, cards) out of LLM requests, including
+  tool-call arguments and tool results, then restores the personal data in the
+  reply. Zero telemetry.
 ---
 
 # PrivAiTe
 
-**Keep personal data out of your LLM calls.**
+**Your coding agent reads your `.env` files, logs and command output, and
+everything it reads goes to the LLM provider.**
 
-PrivAiTe is a local proxy that sits between your app and the model provider. It
-finds the personal data in a request, swaps it for stand-ins before anything
-leaves your machine, and puts the real values back in the reply. It works across
-message text, tool-call arguments, and multimodal content, which is where most
-tools stop looking. Nothing phones home.
+PrivAiTe is a local proxy that sits between your agent or app and the model
+provider. It replaces the secrets and personal data in every request before it
+leaves your machine, then puts the personal data back in the reply. It reads
+inside tool-call arguments and tool results, not only the chat text. Nothing
+phones home.
 
-[Get started](#install) | [See the benchmark](https://github.com/crp4222/privaite-bench) | [GitHub](https://github.com/crp4222/PrivAiTe)
+[See it work](#see-it-work-in-one-command-no-api-key) | [Get started](#install) | [See the benchmark](https://github.com/crp4222/privaite-bench) | [GitHub](https://github.com/crp4222/PrivAiTe)
 
+```text
+Your agent runs `cat .env` and sends:              The provider receives:
+OPENAI_API_KEY=sk-demo-0000-not-a-real-key    ->   OPENAI_API_KEY=[SECRET]
+DB_PASSWORD=demo-pass-4821                    ->   DB_PASSWORD=[SECRET]
+ADMIN_EMAIL=marie.dupont@example.com          ->   ADMIN_EMAIL=<EMAIL_ADDRESS_1>
 ```
-You type: "Je m'appelle Marie Dupont, email marie@acme.com"
-LLM sees: "Je m'appelle <PERSON_1>, email <EMAIL_ADDRESS_1>"
-LLM says: "Bonjour <PERSON_1>, votre email <EMAIL_ADDRESS_1> est noté."
-You  see: "Bonjour Marie Dupont, votre email marie@acme.com est noté."
+
+That is real engine output with the shipped config, not a mock-up. In the reply,
+`<EMAIL_ADDRESS_1>` becomes the real address again, streaming included.
+`[SECRET]` does not come back: the shipped configs redact secrets and mask card
+numbers for good
+([entity overrides](configuration.md#entity-overrides-per-type-methods)).
+Detection runs locally and is best-effort, not a guarantee: the
+[threat model](threat-model.md) says what it does not cover.
+
+## See it work in one command, no API key
+
+```bash
+docker run --rm ghcr.io/crp4222/privaite:0.7.1 python -m privaite verify
 ```
+
+It starts a throwaway provider on 127.0.0.1, sends the same agent-shaped request
+straight to it and then through PrivAiTe, and prints which planted values each
+request body contained. About 20 seconds on a laptop CPU once the image is
+pulled, and it exits non-zero if a value leaks.
+[What it prints and how to read it](verify.md).
 
 ---
 
@@ -159,6 +181,7 @@ full quickstart, config reference, and threat model are in the
 - [Your policy, your types](policy.md): the three mechanisms above as one deterministic, dry-runnable policy
 - [API reference](api.md): endpoints and the exact scanned/unscanned request surface
 - [See exactly what your provider receives](verify.md): audit the proxy on your own data
+- [Threat model](threat-model.md): what PrivAiTe protects against, what it does not, and what the optional detection cache keeps in memory
 - [Agent CLI gateway](gateway.md): Claude Code setup, Codex setup (beta), scanned surface, honest limits
 - [What a coding agent sends to its provider](agent-leak-measurement.md): wire-level measurement of real Claude Code and Codex sessions, 24/24 unprotected, 0/24 and 2/24 through the gateway, with the miss mechanism
 - [PrivAiTe vs Presidio, LLM Guard, LiteLLM](comparison.md): feature and benchmark comparison

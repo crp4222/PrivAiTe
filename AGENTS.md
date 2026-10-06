@@ -30,7 +30,8 @@ them as invariants, not suggestions.
    The opt-in detection cache (`privaite/pii/cache.py`) may hold only salted
    hashes and span metadata (offsets, types, scores, sources): never text,
    values, anonymized output, or mapping state. Its privacy delta is documented
-   in the README threat model; keep that section in sync if you touch it.
+   in `docs/threat-model.md` (the README threat model is the short version and
+   links to it); keep that page in sync if you touch it.
 6. **Startup fails fast on unsafe config**, it never degrades silently: `pii.enabled`
    with 0 detectors, `merge_strategy: intersection` with <2 detectors, a Presidio
    language with no spaCy model, duplicate provider `model_name` aliases, and a
@@ -161,7 +162,8 @@ carries any payload other than fully-held-back content.
   file and must stay identical.
 - Benchmark: if you touched detection, re-run `privaite-bench`
   (`python -m solutions.compare` from that repo root) and update `COMPARISON.md` +
-  the README numbers. The published numbers must match the shipped code.
+  the README table and the presets table in `docs/detection.md`. The published
+  numbers must match the shipped code.
 - Release: `gh release create vX.Y.Z` triggers `publish.yml` → PyPI (trusted
   publisher; its Environment field must stay empty). A PyPI version can never be
   reused, so verify green CI first.

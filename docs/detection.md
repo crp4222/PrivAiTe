@@ -93,6 +93,20 @@ Neither is perfect alone:
 - **Privacy Filter alone** misses some names in credit/list formats, and doesn't have regex validators for IBAN/credit card checksums.
 - **Both together** cover each other's blind spots. Presidio handles structured formats with validation, the Privacy Filter handles context-dependent PII.
 
+## Presets
+
+| Preset | What runs | Recall\* | False positives | Latency | Secrets |
+|--------|-----------|----------|-----------------|---------|---------|
+| `onnx` (default) | Presidio + Privacy Filter | **85.2%** | 2 / 14 | ~459ms | **yes** |
+| `light` | Presidio + built-in rules | 62.7% | 3 / 14 | ~81ms | structured formats |
+| `max` | onnx + GLiNER | higher OOD | more | ~0.7s | **yes** |
+
+\*Span recall on the [AI4Privacy benchmark](https://github.com/crp4222/PrivAiTe#benchmark): 120 real documents (458 PII items, labeled by 10 independent auditor agents and cross-checked against the dataset's own mask) across DE, EN, FR, IT, plus 14 clean documents for false positives. The latencies are means per corpus document from that local run, not large agent-request latency guarantees. `max` adds GLiNER (trained on data independent of AI4Privacy): on out-of-distribution corpora it raises recall by several points at the cost of more false positives and a torch dependency (`pip install 'privaite[gliner]'`); with it selected but not installed, the proxy fails at startup with an install hint rather than silently degrading.
+
+**`onnx`** combines contextual recognition with structured rules. **`light`** uses Presidio and the same structured-secret rules; it has no contextual Privacy Filter model, and needs no model download beyond the spaCy language models.
+
+> **Footgun:** do not pin `detectors.presidio.entities` to a short allowlist on the `light` path. It restricts detection to only those types and roughly halves recall (to ~36%). Leave `entities` unset; the proxy logs a warning at startup if it detects a low-recall configuration.
+
 ## What's NOT detected by default
 
 The default `onnx` preset does detect personal addresses (as `LOCATION`) and personal URLs (as `URL`) through the Privacy Filter model, and replaces them. What stays off by default are Presidio's broad recognizers for those types, because they cause heavy false positives:
