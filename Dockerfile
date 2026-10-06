@@ -7,6 +7,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# Dependencies that contact a third party on their own (ONNX Runtime telemetry,
+# Hugging Face Hub pings, LiteLLM's price table): off for every Python process
+# in the image, the build-time model prefetch included. privaite sets the same
+# defaults at import.
+ENV ORT_DISABLE_TELEMETRY=1 \
+    HF_HUB_DISABLE_TELEMETRY=1 \
+    LITELLM_LOCAL_MODEL_COST_MAP=True
+
 COPY pyproject.toml .
 COPY privaite/ privaite/
 RUN pip install --no-cache-dir .

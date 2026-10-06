@@ -48,6 +48,16 @@ them as invariants, not suggestions.
    anonymizer swaps a literal that shows up too late (`_shield_literals`), and
    the restore is single-pass. A new path that shares one mapping across several
    calls must reserve the whole body first.
+9. **Nothing phones home.** The only outbound request is the one to the
+   provider. Dependencies do not respect that by default: ONNX Runtime 1.29+
+   uploads telemetry to Microsoft, LiteLLM fetches a price table from GitHub,
+   the Hub is asked about cached files, tldextract downloads the public suffix
+   list. `privaite/__init__.py` switches the first three off before they load,
+   the ONNX and Presidio detectors handle the rest, and the Dockerfile repeats
+   the switches. `tests/test_outbound.py` pins each one, but only a packet
+   capture on the built image sees a new one: run it when a dependency floor
+   moves (a container sharing the image's network namespace, `tcpdump` on port
+   53 and on outgoing SYNs, then `privaite verify` and a proxy start).
 
 ## What is and isn't scanned (know the surface)
 

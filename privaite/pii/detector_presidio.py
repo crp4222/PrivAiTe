@@ -67,6 +67,21 @@ def builtin_recognizer_entity_types(disabled: Sequence[str] = ()) -> set[str]:
     return {t for rec in build_recognizers("en", disabled=disabled) for t in rec.supported_entities}
 
 
+def _use_bundled_suffix_list() -> None:
+    """Keep tldextract from downloading the public suffix list.
+
+    Presidio's email recognizer validates the domain with tldextract, whose
+    default extractor fetches the list from publicsuffix.org on first use. The
+    snapshot it ships with is enough to tell a real top-level domain, and
+    needs no request.
+    """
+    try:
+        from tldextract import tldextract
+    except ImportError:  # pragma: no cover - presidio depends on it
+        return
+    tldextract.TLD_EXTRACTOR.suffix_list_urls = ()
+
+
 class PresidioDetector(PIIDetector):
     def __init__(self, config: PresidioDetectorConfig, custom_patterns=None) -> None:
         self.config = config
@@ -85,6 +100,8 @@ class PresidioDetector(PIIDetector):
     async def initialize(self) -> None:
         from presidio_analyzer import AnalyzerEngine
         from presidio_analyzer.nlp_engine import NlpEngineProvider
+
+        _use_bundled_suffix_list()
 
         lang_model_map = {
             "en": "en_core_web_lg",

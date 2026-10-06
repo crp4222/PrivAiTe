@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+- Dependencies no longer contact third parties on their own. ONNX Runtime 1.29
+  and later ships with telemetry enabled and uploads runtime, hardware and model
+  metadata with a hashed device identifier to Microsoft; LiteLLM fetches its
+  price table from GitHub at import; the Hugging Face Hub is asked about model
+  files already in the cache; tldextract downloads the public suffix list. None
+  of it carries request text, and a packet capture on the 0.7.1 image showed all
+  four. PrivAiTe now sets `ORT_DISABLE_TELEMETRY`, `HF_HUB_DISABLE_TELEMETRY`
+  and `LITELLM_LOCAL_MODEL_COST_MAP` before those libraries load (the Docker
+  image sets them too), reads a pinned model and tokenizer from the cache
+  without a request, and uses tldextract's bundled list. On an earlier version,
+  export `ORT_DISABLE_TELEMETRY=1` and `LITELLM_LOCAL_MODEL_COST_MAP=True`
+  yourself. See [outbound connections](docs/configuration.md#outbound-connections).
+
 ### Fixed
 - spaCy's English date entity also fired on code (`connect(api_key`,
   `f.write(json.dumps(entry`), rewriting it with date placeholders when
