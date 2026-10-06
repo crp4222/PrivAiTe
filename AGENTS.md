@@ -155,7 +155,10 @@ carries any payload other than fully-held-back content.
   `CHANGELOG.md` section; bump the integration pins (`privaite>=X`).
 - Install instructions: every docker tag, pip floor and sentence describing a
   behaviour as not yet shipped moves with the release, or the quick start
-  installs the previous version. `tests/test_docs.py` fails on both.
+  installs the previous version. So does the tag in the README's config
+  download (`raw.githubusercontent.com/.../vX.Y.Z/config/...`): on `main` or on
+  an older tag, a pip user gets a config that is not the one of the version
+  they installed. `tests/test_docs.py` fails on all three.
 - Docs: `python scripts/gen_llms_full.py` after ANY documentation change
   (`--check` fails when stale). `llms-full.txt` is a concatenation and went
   stale for three releases once; `llms.txt` and `docs/llms.txt` are the same

@@ -34,7 +34,11 @@ in a script, and `--json` gives the machine-readable form.
 
 The `direct` column is the baseline: it is also what a text-only guardrail
 forwards for the two structured fields, since those never pass through its
-scrubber. `--preset light` skips the model download at the cost of recall.
+scrubber. `--preset light` skips the model download at the cost of recall, and
+this demo shows the cost: with the default settings `light` leaves `Marie Dupont`
+in the message text, so the command prints that line as `LEAK` and exits
+non-zero. `light` has no contextual model, and it only trusts spaCy's names for
+the first configured language, which is French by default.
 
 This output is what to paste into an issue when something leaks, and it is
 reproducible by anyone without your setup or your data.
