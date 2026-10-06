@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- spaCy's English date entity also fired on code (`connect(api_key`,
+  `f.write(json.dumps(entry`), rewriting it with date placeholders when
+  English is the first configured language. A date span that holds code (a
+  call, a snake_case identifier, brackets, an assignment) is now cut there and
+  only the pieces holding a digit are kept, so every number it covered stays
+  covered. Other spans are unchanged.
+
+### Documentation
+- The order of `languages` matters: spaCy's statistical NER is kept only for
+  the first one. Documented with its effect on the `light` preset.
+
 ## [0.7.1] - 2026-10-05
 
 ### Fixed

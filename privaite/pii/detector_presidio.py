@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Sequence
 from typing import Any
 
@@ -220,21 +221,60 @@ class PresidioDetector(PIIDetector):
                 and not _looks_like_name(span)
             ):
                 continue
+            pieces = [(result.start, result.end)]
+            if result.entity_type == "DATE_TIME" and recognizer == "SpacyRecognizer":
+                pieces = _date_pieces(text, result.start, result.end)
 
-            entity = PIIEntity(
-                entity_type=result.entity_type,
-                text=span,
-                start=result.start,
-                end=result.end,
-                score=result.score,
-                source="presidio",
-            )
-            # An explicit custom regex controls its own match/capture boundary.
-            pii_entities.append(
-                entity if recognizer == "CustomPatternRecognizer" else refine_boundary(text, entity)
-            )
+            for start, end in pieces:
+                entity = PIIEntity(
+                    entity_type=result.entity_type,
+                    text=text[start:end],
+                    start=start,
+                    end=end,
+                    score=result.score,
+                    source="presidio",
+                )
+                # An explicit custom regex controls its own match/capture boundary.
+                pii_entities.append(
+                    entity
+                    if recognizer == "CustomPatternRecognizer"
+                    else refine_boundary(text, entity)
+                )
 
         return pii_entities
+
+
+# Code inside a spaCy date span: a call, a snake_case identifier, brackets, an
+# assignment. Prose parentheses ("twenty (20) years") and line breaks are not
+# code, so a span made only of those is kept exactly as spaCy reported it.
+_DATE_CODE = re.compile(r"[\w)\]]\(|[^\W_]_[^\W_]|[{}\[\]=;`|$@]")
+# Where a span that holds code is cut.
+_DATE_BREAK = re.compile(r"[\n(){}\[\]<>=;_\\`\"|$#@]+")
+
+
+def _date_pieces(text: str, start: int, end: int) -> list[tuple[int, int]]:
+    """The parts of a spaCy date span to keep.
+
+    spaCy's English date entity also fires on code ("connect(api_key",
+    "f.write(json.dumps(entry"). A span that holds code is cut at code
+    characters and line breaks, and a piece is kept only if it has a digit, so
+    the code goes back unchanged while every number the span covered stays
+    covered. Any other span is kept as it is ("tomorrow", "October 9, 1954").
+    """
+    span = text[start:end]
+    if not _DATE_CODE.search(span):
+        return [(start, end)]
+    pieces = []
+    offset = 0
+    for cut in [*_DATE_BREAK.finditer(span), None]:
+        piece_end = cut.start() if cut else len(span)
+        piece = span[offset:piece_end]
+        if any(c.isdigit() for c in piece):
+            left = len(piece) - len(piece.lstrip())
+            right = len(piece.rstrip())
+            pieces.append((start + offset + left, start + offset + right))
+        offset = cut.end() if cut else len(span)
+    return pieces
 
 
 def _looks_like_name(text: str) -> bool:
