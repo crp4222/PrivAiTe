@@ -375,6 +375,28 @@ such as `OPENAI_API_KEY` and `DB_PASSWORD`, case-insensitively. They also
 recognize passwords in `scheme://user:password@host` and plaintext
 `Authorization: Bearer ...` headers.
 
+Three more shapes are covered, because the model missed them on some `.env`
+files:
+
+- an upper-case name ending in `TOKEN`, `SECRET` or `KEY` at the start of a
+  line (`API_TOKEN=`, `export JWT_SECRET=`, `OPENAI_KEY=`), when the value looks
+  opaque: 16 characters or more with a letter and a digit, and not a path or a
+  variable reference. Those three words are ordinary identifiers everywhere
+  else (`token=None`, `cache_key=users`, `next_page_token=...`), so the rule is
+  case-sensitive and anchored to the line. Names ending in `PASS` or `_PWD`
+  (`DB_PASS`, `MYSQL_PWD`) take any value; `PWD` alone is the shell's working
+  directory and is left alone. The line may start with what an agent's tools
+  add: the line numbers of a file read (`12:`, `12<tab>`, `00012|`), a diff
+  marker, a compose list item (`- NAME=value`), or `export`, `env`, `ENV`,
+  `ARG`;
+- a URI password with no user name, as in `redis://:password@host`;
+- the key formats providers document for themselves, wherever they appear and
+  whatever the field is called: OpenAI and Anthropic `sk-`, Stripe
+  `sk_live_`/`sk_test_`/`rk_live_`, GitHub `ghp_` and `github_pat_`, GitLab
+  `glpat-`, Slack `xox?-`, AWS access key ids (`AKIA`), Google API keys
+  (`AIza`) and Hugging Face `hf_`. Prefix and length are both required, so
+  `sk-` on its own or `hf_hub_download` is not a key.
+
 Since 0.7.1, these rules also cover credentials passed as command-line options:
 `--password`, `--passwd`, `--api-key`, `--client-secret`, the token options and
 `--mot-de-passe`, with an optional prefix (`--db-password`), and quoted or
@@ -413,6 +435,20 @@ becomes `api_key="[SECRET]"` with the shipped redaction policy. Escaped quotes
 are included in the value. Bare values extend to whitespace; punctuation may
 be part of a password and is not stripped. Use quotes when a comma or brace
 must be unambiguously preserved as syntax.
+
+On `.env` files and shell exports, the contextual model's spans do not always
+follow the values: a password runs on through the host and into the next line,
+or a fragment of a variable name is flagged by itself. Before merging, a model
+span of type `SECRET`, `URL` or `EMAIL_ADDRESS` is therefore fitted to the
+line: it is cut where the next line assigns an upper-case name (behind the same
+line numbers and markers as above), a piece that stays inside such a name is
+dropped, a span that starts in the name is cut to the value, and a password in a URI loses the `:` before it and stops at the `@`
+that closes it. With the shipped config,
+`DATABASE_URL=postgres://shop:demo-pass-4821@db.internal:5432/shop` goes out as
+`DATABASE_URL=postgres://shop:[SECRET]@db.internal:5432/shop`. Only structure is
+given back, never a character of a value, and a name that itself looks like a
+token (one long word with a digit) is not treated as a name. Lower-case names are left as the detector
+returned them: `user=tag@example.com` is also one valid address.
 
 Overlapping detections now respect policy before confidence: a blocked type
 wins over other types; a type configured with `redact` or `mask` wins over a
@@ -459,7 +495,10 @@ and the results of adding Kiji alongside the existing engines.
 - **Boundaries remain conservative.** Policy-aware merging prevents a detected
   SECRET from becoming reversible because EMAIL scored higher. It cannot
   correct a missing SECRET detection, and overlapping spans can still remove
-  useful surrounding text.
+  useful surrounding text: when the model labels a whole connection URI as a
+  URL, the union with its password is redacted as one secret and the host goes
+  with it. The model also flags harmless values on `.env` files (`DEBUG=true`,
+  a working directory): the name is kept, the value is replaced.
 - **Unscanned request fields**: see [the scanned surface](api.md#what-gets-anonymized).
 
 
@@ -628,9 +667,13 @@ also restores any extra characters mistakenly included in its original value.
 The built-in detectors now preserve matched surrounding quotes/angle brackets for
 emails, phones and URLs, common email assignment labels (including line-numbered
 tool results), and the `<path>` wrapper around a detected path. Refinement happens
-before overlapping detections are merged. Arbitrary punctuation in secrets and
-explicit custom-pattern boundaries are not trimmed. Path contents are still
-scanned, and false positives or other over-broad spans remain possible.
+before overlapping detections are merged. A model span on a `.env` line is
+fitted to the value: the upper-case variable name, the `:` and `@` around a URI
+password and the following line are given back
+([details](detection.md#structured-credentials-and-overlapping-types)).
+Punctuation inside a secret and explicit custom-pattern boundaries are not
+trimmed. Path contents are still scanned, and false positives or other
+over-broad spans remain possible.
 
 ## Entity overrides (per-type methods)
 

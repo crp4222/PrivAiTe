@@ -205,6 +205,28 @@ so removing a type from that list does not disable them: the knob is
 config load. Anything reasoning about what Presidio can emit must call
 `builtin_recognizer_entity_types()` rather than restate the list.
 
+## Span boundaries give back structure, never a value
+
+`privaite/pii/boundaries.py` fits a detected span to the value it belongs to.
+`refine_boundary` runs on Presidio results and never drops anything;
+`refine_spans` runs on the model's spans, which on `.env` files run across
+lines, start inside a variable name or cover a fragment of one. A rule there
+may only give back characters that are structure by construction: an
+upper-case name assigned at the start of a line, the `:` and the last `@` of a
+URI userinfo, a line break before another assignment. "Start of a line"
+includes what agent tools put there (`ENV_LINE_PREFIX`: the line numbers of a
+file read, a diff marker, a compose list item, `export`), and the secret rules
+share that prefix: Claude Code sends a file it read as `12<tab>NAME=value`. When the structure is
+uncertain the span stays whole: lower-case names (`user=tag@example.com` is
+also one valid address), a name that looks like a token, a URI tail with a
+query string. A new rule needs a test for what it gives back and one for what
+it must leave covered.
+
+The structured secret rules feed the propagation of known credentials, so a
+false positive there is rewritten across the whole request: `TOKEN`, `SECRET`
+and `KEY` are trusted as names only upper-case at the start of a line with an
+opaque value, and a provider key format needs its prefix and its length.
+
 ## Integrations must stay in sync with the core
 
 `integrations/litellm/privaite_guardrail.py` and

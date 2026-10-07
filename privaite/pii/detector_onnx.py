@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 
 from privaite.config.schema import OnnxDetectorConfig
-from privaite.pii.boundaries import refine_boundary
+from privaite.pii.boundaries import refine_spans
 from privaite.pii.detector_base import PIIDetector
 from privaite.pii.entity import PIIEntity
 from privaite.pii.window_cache import current_window_cache, inference_request
@@ -569,7 +569,7 @@ class OnnxPrivacyFilterDetector(PIIDetector):
                 )
             )
 
-        return [refine_boundary(text, entity) for entity in pii_entities]
+        return [piece for entity in pii_entities for piece in refine_spans(text, entity)]
 
     def _window_geometry(self) -> tuple[int, int]:
         """Effective (window, overlap) in tokens. ``max_length`` used to be a
