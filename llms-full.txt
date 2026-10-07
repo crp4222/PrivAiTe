@@ -86,7 +86,7 @@ Then run `ANTHROPIC_BASE_URL=http://localhost:8400 claude`. Also set `pii.detect
 
 - **It reads inside the JSON.** Tool-call arguments are parsed and scrubbed value by value; tool results and multimodal text parts are scanned like any message.
 - **It restores the reply, streaming included**, in content, tool calls and reasoning.
-- **It fails closed and stays local.** If detection errors, the request is blocked, not forwarded. Detection (Presidio plus OpenAI's open privacy-filter model) runs on your machine, with no telemetry.
+- **It fails closed and stays local.** If detection errors, the request is blocked, not forwarded. Detection (Presidio plus OpenAI's open privacy-filter model) runs on your machine, with no telemetry: the [outbound connections](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#outbound-connections) page lists what the dependencies tried to send and how each is turned off.
 
 ## Benchmark
 
