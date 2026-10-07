@@ -6,6 +6,8 @@ a behavior change and must show up here.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from click.testing import CliRunner
 
@@ -181,6 +183,10 @@ def test_verify_exits_non_zero_when_something_leaked(monkeypatch):
     result = CliRunner().invoke(main, ["verify", "--preset", "light"])
     assert result.exit_code == 1
     assert "FAILED" in result.output
+
+    as_json = CliRunner().invoke(main, ["verify", "--preset", "light", "--json"])
+    payload = json.loads(as_json.output)
+    assert {"elapsed_ms", "startup_ms", "request_ms"} <= payload.keys()
 
 
 def test_verify_announces_the_size_of_the_default_model_download(monkeypatch):

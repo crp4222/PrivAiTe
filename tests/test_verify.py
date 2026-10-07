@@ -8,6 +8,7 @@ an ASGI transport, and assertions on the recorded request body.
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -72,7 +73,9 @@ def _result(leak: bool, restored: bool = True) -> VerificationResult:
         through_proxy=findings,
         placeholders=["<PERSON_1>"],
         restored=restored,
-        elapsed_ms=1.0,
+        elapsed_ms=15012.0,
+        startup_ms=14200.0,
+        request_ms=812.0,
     )
 
 
@@ -96,6 +99,47 @@ def test_the_report_names_what_leaked_and_where_to_report_it():
     passed = format_report(_result(leak=False))
     assert "PASSED" in passed
     assert "FAILED" not in passed
+
+
+def test_the_report_gives_startup_and_request_time_separately():
+    """One figure called "round trip" read as the latency of a request, when
+    nearly all of it was the model loading."""
+    report = format_report(_result(leak=False))
+    assert "Startup, model load included: 14.2 s" in report
+    assert "Request through the proxy: 812 ms" in report
+    assert "Round trip" not in report
+
+
+@pytest.mark.asyncio
+async def test_the_request_time_leaves_startup_out(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    import privaite.app
+
+    @asynccontextmanager
+    async def slow_start(_app):
+        await asyncio.sleep(0.3)
+        yield
+
+    async def completions(_request):
+        return JSONResponse({"choices": [{"message": {"content": "Marie Dupont"}}]})
+
+    def fake_app(_config):
+        return Starlette(
+            routes=[Route("/v1/chat/completions", completions, methods=["POST"])],
+            lifespan=slow_start,
+        )
+
+    monkeypatch.setattr(privaite.app, "create_app", fake_app)
+    result = await run_verification(preset="light")
+
+    assert result.startup_ms >= 300
+    assert 0 < result.request_ms < 300
+    assert result.elapsed_ms >= result.startup_ms + result.request_ms
 
 
 @pytest.mark.asyncio

@@ -24,6 +24,11 @@ three places an agent puts them: message text, tool-call arguments, and tool
 output. It exits non-zero if any of them reached the wire, so it works as a gate
 in a script, and `--json` gives the machine-readable form.
 
+The report ends with two timings: the startup, which is mostly the detection
+model loading and happens once per process, and the one request sent through
+the proxy. `--json` carries them as `startup_ms` and `request_ms`, next to
+`elapsed_ms` for the whole run.
+
 ```
   value                                          where                  direct   proxied
   Marie Dupont                                   message text             LEAK     clean
