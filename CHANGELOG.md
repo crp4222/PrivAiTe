@@ -46,6 +46,10 @@ All notable changes to this project are documented here. The format follows
   call, a snake_case identifier, brackets, an assignment) is now cut there and
   only the pieces holding a digit are kept, so every number it covered stays
   covered. Other spans are unchanged.
+- `privaite verify` printed a single "Round trip" time that was mostly the
+  detection model loading, which read as the latency of a request. The report
+  now gives the startup and the request through the proxy separately, and
+  `--json` gains `startup_ms` and `request_ms`. `elapsed_ms` is unchanged.
 
 ### Documentation
 - The order of `languages` matters: spaCy's statistical NER is kept only for

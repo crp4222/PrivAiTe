@@ -161,7 +161,11 @@ class VerificationResult:
     through_proxy: list[Finding]
     placeholders: list[str]
     restored: bool
+    # The whole run, then its two parts: starting the application (loading the
+    # detection model is nearly all of it) and the one request sent through it.
     elapsed_ms: float
+    startup_ms: float = 0.0
+    request_ms: float = 0.0
 
     @property
     def leaked(self) -> list[Finding]:
@@ -233,13 +237,16 @@ async def run_verification(preset: str = "onnx", model: str = "verify-model") ->
         direct = _findings(capture.bodies[-1])
 
         # 2. The same payload through the real application.
+        starting = time.perf_counter()
         app = create_app(_verify_config(capture.base_url, preset, model))
         async with app.router.lifespan_context(app):
+            sending = time.perf_counter()
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://verify") as client:
                 response = await client.post(
                     "/v1/chat/completions", json=payload, timeout=httpx.Timeout(300)
                 )
+            answered = time.perf_counter()
         wire = capture.bodies[-1]
         reply = response.json()["choices"][0]["message"].get("content") or ""
 
@@ -252,6 +259,8 @@ async def run_verification(preset: str = "onnx", model: str = "verify-model") ->
             # reappearing here means the round trip restored it.
             restored="Marie Dupont" in reply,
             elapsed_ms=(time.perf_counter() - started) * 1000,
+            startup_ms=(sending - starting) * 1000,
+            request_ms=(answered - sending) * 1000,
         )
     finally:
         capture.stop()
@@ -277,7 +286,8 @@ def format_report(result: VerificationResult) -> str:
         "",
         f"Placeholders on the wire: {', '.join(result.placeholders) or 'none'}",
         f"Real values restored in the reply to the client: {'yes' if result.restored else 'no'}",
-        f"Round trip: {result.elapsed_ms:.0f} ms",
+        f"Startup, model load included: {result.startup_ms / 1000:.1f} s",
+        f"Request through the proxy: {result.request_ms:.0f} ms",
         "",
     ]
     if result.leaked:
