@@ -5,6 +5,7 @@ import re
 from presidio_analyzer import RecognizerResult
 from presidio_analyzer.nlp_engine import NlpArtifacts
 
+from privaite.pii.boundaries import ENV_LINE_PREFIX
 from privaite.pii.recognizer_base import RegexSpanRecognizer
 
 # Deliberately explicit field names: a generic "key" or an entropy threshold
@@ -19,6 +20,36 @@ _FIELD = (
 _ASSIGNMENT = (
     r"(?<![\w.-])(?:\"" + _FIELD + r"\"|'" + _FIELD + r"'|" + _FIELD + r")"
     r"[ \t]*[:=][ \t]*"
+)
+# .env files and shell exports declare a credential as an upper-case name at the
+# start of a line. TOKEN, SECRET and KEY are too common as plain identifiers to
+# be trusted anywhere else (token=None, cache_key=users, next_page_token=...),
+# and even here the value has to look opaque: long, with a digit and a letter,
+# and not a path. PASS means a password, so any value counts; PWD needs a prefix
+# (MYSQL_PWD), because PWD alone is the shell's working directory. The prefix is
+# the one the boundary rules use: a read tool's line numbers, a diff marker.
+_ENV_LINE = r"(?m:^)" + ENV_LINE_PREFIX
+_ENV_NAME = r"(?-i:(?:[A-Z][A-Z0-9]*_)*(?:TOKEN|SECRET|KEY))[ \t]*=[ \t]*"
+_ENV_PASSWORD = r"(?-i:(?:[A-Z][A-Z0-9]*_)*PASS|(?:[A-Z][A-Z0-9]*_)+PWD)[ \t]*=[ \t]*"
+_OPAQUE = (
+    r"(?![/~.])(?=[^\s\"'`]*[0-9])(?=[^\s\"'`]*[A-Za-z])"
+    r"[A-Za-z0-9_+/=.~-]{16,}(?![^\s\"'`])"
+)
+# Formats a provider documents for its own keys: recognizable with no field
+# name at all. Prefix and length together, so the prefix alone ("sk-", "hf_")
+# and words that merely contain it ("task-force-2026") are left alone.
+_KNOWN_KEY = (
+    r"(?<![A-Za-z0-9_-])(?-i:"
+    r"sk-(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{20,}"
+    r"|[sr]k_(?:live|test)_[A-Za-z0-9]{16,}"
+    r"|gh[pousr]_[A-Za-z0-9]{30,}"
+    r"|github_pat_[A-Za-z0-9_]{40,}"
+    r"|glpat-[A-Za-z0-9_-]{20,}"
+    r"|xox[abprs]-[A-Za-z0-9-]{10,}"
+    r"|AKIA[0-9A-Z]{16}"
+    r"|AIza[0-9A-Za-z_-]{35}"
+    r"|hf_[A-Za-z0-9]{30,}"
+    r")(?![A-Za-z0-9_-])"
 )
 # CLI option names are code identifiers and apply in every configured language.
 # They follow the assignment vocabulary, with the same kind of bounded prefix
@@ -104,9 +135,15 @@ class StructuredSecretRecognizer(RegexSpanRecognizer):
             # Do not start this alternative inside an unterminated quote.
             _ASSIGNMENT + r"(?P<value>[^\s\"'`]+)",
             # RFC-style URI userinfo. Restrict delimiters so a later email or
-            # another URL cannot be mistaken for the password's closing @.
-            r"\b[a-z][a-z0-9+.-]{0,31}://[^\s/:@?#\"'<>]+:"
+            # another URL cannot be mistaken for the password's closing @. The
+            # user name can be empty: redis://:password@host is the usual form.
+            r"\b[a-z][a-z0-9+.-]{0,31}://[^\s/:@?#\"'<>]*:"
             r"(?P<value>[^\s/@?#\"'<>]+)@",
+            _ENV_LINE + _ENV_NAME + r"[\"']?(?P<value>" + _OPAQUE + r")",
+            _ENV_LINE + _ENV_PASSWORD + r'"(?P<value>(?:[^"\\\r\n]|\\[^\r\n])+)"',
+            _ENV_LINE + _ENV_PASSWORD + r"'(?P<value>[^'\r\n]+)'",
+            _ENV_LINE + _ENV_PASSWORD + r"(?P<value>[^\s\"'`]+)",
+            r"(?P<value>" + _KNOWN_KEY + r")",
             r"\bauthorization[ \t]*:[ \t]*bearer[ \t]+"
             r"(?P<value>[a-z0-9._~+/-]+={0,2})",
         ]

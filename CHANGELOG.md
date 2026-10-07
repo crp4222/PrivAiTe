@@ -21,6 +21,25 @@ All notable changes to this project are documented here. The format follows
   yourself. See [outbound connections](docs/configuration.md#outbound-connections).
 
 ### Fixed
+- ONNX: on `.env` files and shell exports the model's spans did not follow the
+  values. A password in a connection URI ran on through the host and into the
+  next line, which removed the variable declared there; a fragment of a
+  variable name was replaced on its own, so `SUPPORT_CONTACT=<address>` could
+  come out as `SUP[SECRET]`. A span is now cut where the next line assigns an
+  upper-case name, a piece that stays inside such a name is dropped, a span
+  that starts in the name is cut to the value, and a URI password stops at the
+  `@` that closes it. Only structure is given back, never a character of a
+  value. Lower-case names (`user=...`) stay as the detector returned them.
+- Structured secrets: recognize upper-case environment names ending in
+  `TOKEN`, `SECRET` or `KEY` at the start of a line when the value looks opaque
+  (`API_TOKEN`, `JWT_SECRET`, `OPENAI_KEY`), names ending in `PASS` or `_PWD`,
+  a URI password with no user name (`redis://:password@host`), and the
+  documented key formats of common providers wherever they appear (OpenAI and
+  Anthropic `sk-`, Stripe, GitHub, GitLab, Slack, AWS access key ids, Google
+  API keys, Hugging Face). The model missed these on some files. Both sets of
+  rules also apply behind the line numbers an agent's read tool adds, a diff
+  marker or a compose list item.
+- Email addresses: a trailing `,`, `;` or `.` is no longer part of the span.
 - spaCy's English date entity also fired on code (`connect(api_key`,
   `f.write(json.dumps(entry`), rewriting it with date placeholders when
   English is the first configured language. A date span that holds code (a

@@ -167,9 +167,13 @@ also restores any extra characters mistakenly included in its original value.
 The built-in detectors now preserve matched surrounding quotes/angle brackets for
 emails, phones and URLs, common email assignment labels (including line-numbered
 tool results), and the `<path>` wrapper around a detected path. Refinement happens
-before overlapping detections are merged. Arbitrary punctuation in secrets and
-explicit custom-pattern boundaries are not trimmed. Path contents are still
-scanned, and false positives or other over-broad spans remain possible.
+before overlapping detections are merged. A model span on a `.env` line is
+fitted to the value: the upper-case variable name, the `:` and `@` around a URI
+password and the following line are given back
+([details](detection.md#structured-credentials-and-overlapping-types)).
+Punctuation inside a secret and explicit custom-pattern boundaries are not
+trimmed. Path contents are still scanned, and false positives or other
+over-broad spans remain possible.
 
 ## Entity overrides (per-type methods)
 
