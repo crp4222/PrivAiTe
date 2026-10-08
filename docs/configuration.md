@@ -482,8 +482,9 @@ Two downloads happen once, on a first run outside Docker: the detection model
 from the Hugging Face Hub (about 900 MB) and any missing spaCy language model.
 The Docker image carries both.
 
-Several dependencies contact a third party on their own, and PrivAiTe turns
-each of them off:
+Several dependencies contact a third party on their own, and since 0.7.2
+PrivAiTe turns each of them off (on an earlier version, export the variables
+below yourself):
 
 | Dependency | What it did by default | How it is turned off |
 |---|---|---|

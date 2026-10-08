@@ -21,7 +21,7 @@ That is real engine output with the shipped config, not a mock-up. In the reply,
 
 ```bash
 docker run --rm \
-  ghcr.io/crp4222/privaite:0.7.1 \
+  ghcr.io/crp4222/privaite:0.7.2 \
   python -m privaite verify
 ```
 
@@ -43,18 +43,18 @@ It starts a throwaway provider on 127.0.0.1, sends the same agent-shaped request
 docker run -d -p 8400:8400 \
   -e PRIVAITE_API_KEYS=change-me \
   -e OPENAI_API_KEY=sk-... \
-  ghcr.io/crp4222/privaite:0.7.1
+  ghcr.io/crp4222/privaite:0.7.2
 ```
 
 **pip:** the same proxy with the same shipped config, which exposes `gpt-4o-mini` and `gpt-4o`.
 ```bash
-python -m pip install --upgrade "privaite>=0.7.1"
+python -m pip install --upgrade "privaite>=0.7.2"
 python -m spacy download en_core_web_lg && python -m spacy download fr_core_news_md
-curl -fsSLO https://raw.githubusercontent.com/crp4222/PrivAiTe/v0.7.1/config/privaite.openai.yaml
+curl -fsSLO https://raw.githubusercontent.com/crp4222/PrivAiTe/v0.7.2/config/privaite.openai.yaml
 OPENAI_API_KEY=sk-... PRIVAITE_API_KEYS=change-me python -m privaite --config privaite.openai.yaml
 ```
 
-**Connect:** point any OpenAI-compatible client at `http://localhost:8400/v1` with the key `change-me` (from Open WebUI running in Docker: `http://host.docker.internal:8400/v1`). For Ollama, Azure or any other provider, [write your own config](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md) and [mount it in Docker](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#docker-with-a-custom-config). The image is also on Docker Hub as `crp4222/privaite:0.7.1`, and client snippets are in [`examples/`](https://github.com/crp4222/PrivAiTe/tree/main/examples/).
+**Connect:** point any OpenAI-compatible client at `http://localhost:8400/v1` with the key `change-me` (from Open WebUI running in Docker: `http://host.docker.internal:8400/v1`). For Ollama, Azure or any other provider, [write your own config](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md) and [mount it in Docker](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#docker-with-a-custom-config). The image is also on Docker Hub as `crp4222/privaite:0.7.2`, and client snippets are in [`examples/`](https://github.com/crp4222/PrivAiTe/tree/main/examples/).
 
 ## Claude Code and Codex
 
