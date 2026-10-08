@@ -20,10 +20,10 @@ phones home.
 [See it work](#see-it-work-in-one-command-no-api-key) | [Get started](#install) | [See the benchmark](https://github.com/crp4222/privaite-bench) | [GitHub](https://github.com/crp4222/PrivAiTe)
 
 ```text
-# your agent reads .env and sends:
-OPENAI_API_KEY=sk-demo-0000-fake-key
+# your agent reads and sends:
+OPENAI_API_KEY=sk-demo-fake000
 DB_PASSWORD=demo-pass-4821
-ADMIN_EMAIL=marie.dupont@example.com
+ADMIN_EMAIL=marie@example.com
 # the provider receives:
 OPENAI_API_KEY=[SECRET]
 DB_PASSWORD=[SECRET]
