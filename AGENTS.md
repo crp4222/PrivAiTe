@@ -220,7 +220,10 @@ share that prefix: Claude Code sends a file it read as `12<tab>NAME=value`. When
 uncertain the span stays whole: lower-case names (`user=tag@example.com` is
 also one valid address), a name that looks like a token, a URI tail with a
 query string. A new rule needs a test for what it gives back and one for what
-it must leave covered.
+it must leave covered. These rules run once per span, so a lookup never reads
+the whole line: a name is searched 512 characters back, a URI 2048 around the
+span, and beyond that the span stays whole. A minified file is one line with
+thousands of spans, and an unbounded lookup there took minutes.
 
 The structured secret rules feed the propagation of known credentials, so a
 false positive there is rewritten across the whole request: `TOKEN`, `SECRET`

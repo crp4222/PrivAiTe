@@ -487,3 +487,51 @@ def test_the_env_name_is_found_behind_a_gutter_or_a_marker(prefix):
         "demo-pass-4821",
         "demoSecretKey",
     ]
+
+
+def test_a_long_single_line_with_many_spans_stays_cheap():
+    """A minified lockfile is one line with thousands of URLs and as many
+    hashes the model labels as secrets. Looking for the URI of each span over
+    the whole line took 13 minutes on 4000 of them; it is now a bounded window."""
+    import time
+
+    parts: list[str] = []
+    spans: list[tuple[int, int]] = []
+    position = 0
+    for index in range(2000):
+        head = f'"p{index}":{{"resolved":"https://registry.example/p{index}/-/p{index}-1.0.tgz","integrity":"'
+        value = f"sha512-demoDigest{index:05d}NotARealHash0000000000000000000000000000=="
+        parts += [head, value, '"},']
+        spans.append((position + len(head), position + len(head) + len(value)))
+        position += len(head) + len(value) + 3
+    line = "".join(parts)
+
+    started = time.perf_counter()
+    for kind in ("SECRET", "URL", "EMAIL_ADDRESS"):
+        for start, end in spans:
+            entity = PIIEntity(kind, line[start:end], start, end, 0.9, "onnx")
+            assert refine_spans(line, entity) == [entity]
+    assert time.perf_counter() - started < 5
+
+
+def test_a_userinfo_too_long_to_read_whole_is_left_alone():
+    """The password stops at the LAST "@" of the authority. When the authority
+    runs past what is read, that "@" is not known, so nothing is cut."""
+    text = "postgres://shop:demo-pass-4821@" + "a" * 5000 + "@db.internal/shop"
+    assert refined(text, "demo-pass-4821@aaaa") == ["demo-pass-4821@aaaa"]
+    # Within reach, the same shape is cut as usual.
+    short = "postgres://shop:demo-pass-4821@db.internal/shop"
+    assert refined(short, "demo-pass-4821@db.internal") == ["demo-pass-4821"]
+
+
+def test_an_assignment_far_into_a_line_is_not_looked_for():
+    """A name is at the start of its line. A span thousands of characters in
+    cannot be inside one, whatever precedes it."""
+    text = "X" * 3000 + "=demo-pass-4821"
+    original = detected(text, "XXXX=demo-pass-4821", "SECRET")
+    assert refine_spans(text, original) == [original]
+
+
+def test_a_span_between_two_uris_belongs_to_neither():
+    text = "see http://a.example then pass@word1234 and ftp://b.example"
+    assert refined(text, "pass@word1234") == ["pass@word1234"]
