@@ -38,6 +38,12 @@ _ENV_ASSIGNMENT = re.compile(ENV_LINE_PREFIX + r"(?P<key>[A-Z][A-Z0-9_]+)[ \t]*=
 # (MARIE_DUPONT=admin), so those are never touched.
 _ENV_VALUE_TYPES = frozenset({"EMAIL_ADDRESS", "SECRET", "URL"})
 _URI_AUTHORITY = re.compile(r"[a-z][a-z0-9+.-]{0,31}://(?P<authority>[^\s/?#\"'<>]*)", re.I)
+_AUTHORITY_CHAR = re.compile(r"[^\s/?#\"'<>]")
+# How far a lookup reads around a span. A name sits at the start of its line and
+# a userinfo is short, and a minified file is one line with thousands of spans:
+# rereading that line for each of them took minutes.
+_NAME_REACH = 512
+_URI_REACH = 2048
 
 
 def _unescaped(text: str, index: int) -> bool:
@@ -59,8 +65,11 @@ def _env_value_start(text: str, index: int) -> int | None:
     A long single word with a digit ("AKIADEMO0000EXAMPLE=enabled") can be a
     token written before an "=": that line is not treated as an assignment.
     """
-    line_start, line_end = _line(text, index)
-    match = _ENV_ASSIGNMENT.match(text, line_start, line_end)
+    floor = max(0, index - _NAME_REACH)
+    line_start = text.rfind("\n", floor, index) + 1
+    if line_start == 0 and floor > 0:
+        return None
+    match = _ENV_ASSIGNMENT.match(text, line_start)
     if not match:
         return None
     key = match["key"]
@@ -76,14 +85,22 @@ def _password_bounds(text: str, start: int, end: int) -> tuple[int, int]:
     (":pass@db.internal:5432/app"). The password starts after the first colon
     of the userinfo and stops at the last "@" of the authority. A tail with a
     query or a fragment is kept: it can carry another credential
-    ("?sslpassword=...").
+    ("?sslpassword=..."). An authority that runs past what is read is left
+    alone, its last "@" being unknown.
     """
-    line_start, line_end = _line(text, start)
-    for uri in _URI_AUTHORITY.finditer(text, line_start, line_end):
+    low = max(0, start - _URI_REACH)
+    high = min(len(text), end + _URI_REACH)
+    if text.find("://", low, start) < 0 or text.find("@", start, high) < 0:
+        return start, end
+    for uri in _URI_AUTHORITY.finditer(text, low, high):
         first, last = uri.span("authority")
+        if first > start:
+            break
         at = text.rfind("@", first, last)
         if not first <= start <= at:
             continue
+        if last == high and _AUTHORITY_CHAR.match(text, high):
+            break
         if start == at:
             return min(start + 1, end), end
         if start == text.find(":", first, at) and start + 1 < end:
@@ -113,10 +130,12 @@ def refine_spans(text: str, entity: PIIEntity) -> list[PIIEntity]:
 
     pieces: list[tuple[int, int]] = []
     start = entity.start
-    for index in range(entity.start, entity.end - 1):
-        if text[index] == "\n" and _env_value_start(text, index + 1) is not None:
-            pieces.append((start, index))
-            start = index + 1
+    line_break = text.find("\n", start, entity.end - 1)
+    while line_break >= 0:
+        if _env_value_start(text, line_break + 1) is not None:
+            pieces.append((start, line_break))
+            start = line_break + 1
+        line_break = text.find("\n", line_break + 1, entity.end - 1)
     pieces.append((start, entity.end))
 
     refined: list[PIIEntity] = []
@@ -144,13 +163,6 @@ def refine_boundary(text: str, entity: PIIEntity) -> PIIEntity:
     if not 0 <= start < end <= len(text):
         return entity
 
-    line_start, line_end = _line(text, start)
-    if "\n" in text[start:end]:
-        line_end = text.find("\n", end)
-        if line_end < 0:
-            line_end = len(text)
-    line = text[line_start:line_end]
-
     if entity.entity_type in _ENV_VALUE_TYPES:
         value_start = _env_value_start(text, start)
         if value_start is not None and start < value_start < end:
@@ -161,6 +173,13 @@ def refine_boundary(text: str, entity: PIIEntity) -> PIIEntity:
         if start >= end or (start, end) == (entity.start, entity.end):
             return entity
         return replace(entity, start=start, end=end, text=text[start:end])
+
+    line_start, line_end = _line(text, entity.start)
+    if "\n" in text[entity.start : entity.end]:
+        line_end = text.find("\n", end)
+        if line_end < 0:
+            line_end = len(text)
+    line = text[line_start:line_end]
 
     if entity.entity_type == "EMAIL_ADDRESS":
         # An address never ends with these; the model takes them from the
