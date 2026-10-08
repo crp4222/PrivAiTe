@@ -49,6 +49,11 @@ with block rules set, rather than silently forwarding the PII.
   See the Threat model in the main README.
 - If you do not want these dependencies inside your LiteLLM proxy image, run
   PrivAiTe as a standalone proxy instead and point a LiteLLM deployment at it.
+- The LiteLLM proxy has loaded LiteLLM before the guardrail is imported, so
+  PrivAiTe cannot stop its price-table download for it: set
+  `LITELLM_LOCAL_MODEL_COST_MAP=True` on the proxy, and `ORT_DISABLE_TELEMETRY=1`
+  with `preset: "onnx"`. See
+  [outbound connections](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#outbound-connections).
 
 ## What it covers that the built-in Presidio guardrail does not
 

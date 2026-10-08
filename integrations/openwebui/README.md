@@ -45,6 +45,12 @@ older one the filter refuses the request rather than silently forwarding the PII
   (Admin, Settings, Interface, Task Model) or turning those features off also
   works, if a local model fits in memory.
 
+- **Open WebUI loads its libraries before the filter does.** PrivAiTe turns off
+  the telemetry and downloads of its dependencies when it is imported, but a
+  library Open WebUI already loaded has read its environment by then. Set
+  `ORT_DISABLE_TELEMETRY=1` on the Open WebUI container:
+  [outbound connections](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#outbound-connections).
+
 - **First use can get the container OOM-killed. Pre-install instead.** The
   filter runs Presidio and spaCy inside Open WebUI and downloads the spaCy models
   for your languages on first use (en_core_web_lg alone is ~560MB); the default
