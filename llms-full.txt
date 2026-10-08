@@ -30,7 +30,7 @@ That is real engine output with the shipped config, not a mock-up. In the reply,
 
 ```bash
 docker run --rm \
-  ghcr.io/crp4222/privaite:0.7.1 \
+  ghcr.io/crp4222/privaite:0.7.2 \
   python -m privaite verify
 ```
 
@@ -52,18 +52,18 @@ It starts a throwaway provider on 127.0.0.1, sends the same agent-shaped request
 docker run -d -p 8400:8400 \
   -e PRIVAITE_API_KEYS=change-me \
   -e OPENAI_API_KEY=sk-... \
-  ghcr.io/crp4222/privaite:0.7.1
+  ghcr.io/crp4222/privaite:0.7.2
 ```
 
 **pip:** the same proxy with the same shipped config, which exposes `gpt-4o-mini` and `gpt-4o`.
 ```bash
-python -m pip install --upgrade "privaite>=0.7.1"
+python -m pip install --upgrade "privaite>=0.7.2"
 python -m spacy download en_core_web_lg && python -m spacy download fr_core_news_md
-curl -fsSLO https://raw.githubusercontent.com/crp4222/PrivAiTe/v0.7.1/config/privaite.openai.yaml
+curl -fsSLO https://raw.githubusercontent.com/crp4222/PrivAiTe/v0.7.2/config/privaite.openai.yaml
 OPENAI_API_KEY=sk-... PRIVAITE_API_KEYS=change-me python -m privaite --config privaite.openai.yaml
 ```
 
-**Connect:** point any OpenAI-compatible client at `http://localhost:8400/v1` with the key `change-me` (from Open WebUI running in Docker: `http://host.docker.internal:8400/v1`). For Ollama, Azure or any other provider, [write your own config](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md) and [mount it in Docker](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#docker-with-a-custom-config). The image is also on Docker Hub as `crp4222/privaite:0.7.1`, and client snippets are in [`examples/`](https://github.com/crp4222/PrivAiTe/tree/main/examples/).
+**Connect:** point any OpenAI-compatible client at `http://localhost:8400/v1` with the key `change-me` (from Open WebUI running in Docker: `http://host.docker.internal:8400/v1`). For Ollama, Azure or any other provider, [write your own config](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md) and [mount it in Docker](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#docker-with-a-custom-config). The image is also on Docker Hub as `crp4222/privaite:0.7.2`, and client snippets are in [`examples/`](https://github.com/crp4222/PrivAiTe/tree/main/examples/).
 
 ## Claude Code and Codex
 
@@ -375,8 +375,8 @@ such as `OPENAI_API_KEY` and `DB_PASSWORD`, case-insensitively. They also
 recognize passwords in `scheme://user:password@host` and plaintext
 `Authorization: Bearer ...` headers.
 
-Three more shapes are covered, because the model missed them on some `.env`
-files:
+Since 0.7.2, three more shapes are covered, because the model missed them on
+some `.env` files:
 
 - an upper-case name ending in `TOKEN`, `SECRET` or `KEY` at the start of a
   line (`API_TOKEN=`, `export JWT_SECRET=`, `OPENAI_KEY=`), when the value looks
@@ -437,7 +437,7 @@ be part of a password and is not stripped. Use quotes when a comma or brace
 must be unambiguously preserved as syntax.
 
 On `.env` files and shell exports, the contextual model's spans do not always
-follow the values: a password runs on through the host and into the next line,
+follow the values (fitted to the line since 0.7.2): a password runs on through the host and into the next line,
 or a fragment of a variable name is flagged by itself. Before merging, a model
 span of type `SECRET`, `URL` or `EMAIL_ADDRESS` is therefore fitted to the
 line: it is cut where the next line assigns an upper-case name (behind the same
@@ -982,8 +982,9 @@ Two downloads happen once, on a first run outside Docker: the detection model
 from the Hugging Face Hub (about 900 MB) and any missing spaCy language model.
 The Docker image carries both.
 
-Several dependencies contact a third party on their own, and PrivAiTe turns
-each of them off:
+Several dependencies contact a third party on their own, and since 0.7.2
+PrivAiTe turns each of them off (on an earlier version, export the variables
+below yourself):
 
 | Dependency | What it did by default | How it is turned off |
 |---|---|---|
@@ -1209,7 +1210,7 @@ three places an agent puts them: message text, tool-call arguments, and tool
 output. It exits non-zero if any of them reached the wire, so it works as a gate
 in a script, and `--json` gives the machine-readable form.
 
-The report ends with two timings: the startup, which is mostly the detection
+Since 0.7.2 the report ends with two timings: the startup, which is mostly the detection
 model loading and happens once per process, and the one request sent through
 the proxy. `--json` carries them as `startup_ms` and `request_ms`, next to
 `elapsed_ms` for the whole run.

@@ -127,8 +127,8 @@ such as `OPENAI_API_KEY` and `DB_PASSWORD`, case-insensitively. They also
 recognize passwords in `scheme://user:password@host` and plaintext
 `Authorization: Bearer ...` headers.
 
-Three more shapes are covered, because the model missed them on some `.env`
-files:
+Since 0.7.2, three more shapes are covered, because the model missed them on
+some `.env` files:
 
 - an upper-case name ending in `TOKEN`, `SECRET` or `KEY` at the start of a
   line (`API_TOKEN=`, `export JWT_SECRET=`, `OPENAI_KEY=`), when the value looks
@@ -189,7 +189,7 @@ be part of a password and is not stripped. Use quotes when a comma or brace
 must be unambiguously preserved as syntax.
 
 On `.env` files and shell exports, the contextual model's spans do not always
-follow the values: a password runs on through the host and into the next line,
+follow the values (fitted to the line since 0.7.2): a password runs on through the host and into the next line,
 or a fragment of a variable name is flagged by itself. Before merging, a model
 span of type `SECRET`, `URL` or `EMAIL_ADDRESS` is therefore fitted to the
 line: it is cut where the next line assigns an upper-case name (behind the same

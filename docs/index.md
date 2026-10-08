@@ -42,7 +42,7 @@ Detection runs locally and is best-effort, not a guarantee: the
 
 ```bash
 docker run --rm \
-  ghcr.io/crp4222/privaite:0.7.1 \
+  ghcr.io/crp4222/privaite:0.7.2 \
   python -m privaite verify
 ```
 

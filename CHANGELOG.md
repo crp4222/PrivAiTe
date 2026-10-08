@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.7.2] - 2026-10-08
 
 ### Security
 - Dependencies no longer contact third parties on their own. ONNX Runtime 1.29
