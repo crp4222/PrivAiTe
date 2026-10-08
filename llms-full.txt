@@ -1343,7 +1343,7 @@ This is local pseudonymization, not anonymization, and detection is best-effort.
 | Streaming de-anonymization | Yes | n/a | n/a | n/a |
 | Secrets and passwords | Yes (ONNX preset) | No | Yes | Partial |
 | Detection engine | Presidio + local ONNX model | Presidio | Own scanners | Presidio |
-| Self-hosted, zero telemetry | Yes | Yes | Yes | Yes |
+| Self-hosted | Yes | Yes | Yes | Yes |
 
 Presidio is excellent and PrivAiTe builds on it. The point of this table is not that PrivAiTe detects better than Presidio in isolation; it is that PrivAiTe is the ready-to-run proxy around it that also covers the structured and multimodal cases, and restores the original values on the way back.
 

@@ -215,7 +215,10 @@ Honesty is part of the pitch, so here is the fine print in plain words.
 
 **Does it send my data anywhere?** No. Detection runs locally and there is no
 telemetry. The only outbound request is the one you make to your chosen model
-provider, carrying stand-ins instead of real values.
+provider, carrying stand-ins instead of real values. Outside Docker, a first
+run also downloads the detection model. Some dependencies contact their vendor
+by default and PrivAiTe turns each of them off:
+[outbound connections](configuration.md#outbound-connections) lists them.
 
 **Does this make me GDPR or HIPAA compliant?** No tool can do that for you. It
 helps reduce the personal data you expose to a third party, which can support

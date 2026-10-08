@@ -54,6 +54,10 @@ All notable changes to this project are documented here. The format follows
 ### Documentation
 - The order of `languages` matters: spaCy's statistical NER is kept only for
   the first one. Documented with its effect on the `light` preset.
+- README rewritten around coding-agent traffic and the `privaite verify` demo.
+  The full threat model now lives in `docs/threat-model.md`, the presets table
+  in `docs/detection.md`, and the comparison page lists the gateways built for
+  agent traffic from what their own docs state.
 
 ## [0.7.1] - 2026-10-05
 
