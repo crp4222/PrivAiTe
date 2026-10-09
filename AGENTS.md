@@ -173,6 +173,11 @@ carries any payload other than fully-held-back content.
   (`--check` fails when stale). `llms-full.txt` is a concatenation and went
   stale for three releases once; `llms.txt` and `docs/llms.txt` are the same
   file and must stay identical.
+- Docker base: refresh the digest of `python:3.13-slim` in the Dockerfile
+  (`docker buildx imagetools inspect python:3.13-slim`) and move the date above
+  the FROM line, or the image ships months of Debian security fixes behind.
+  Dependabot no longer does it; `tests/test_docker_base.py` fails once a dated
+  release is more than 14 days past that check.
 - Benchmark: if you touched detection, re-run `privaite-bench`
   (`python -m solutions.compare` from that repo root) and update `COMPARISON.md` +
   the README table and the presets table in `docs/detection.md`. The published

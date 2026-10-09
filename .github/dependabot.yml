@@ -1,31 +1,15 @@
-# Dependabot, deliberately tamed. This repo updates dependencies on purpose, not
-# on release day: floors are raised past CVE fixes when the weekly audit workflow
-# flags them, and majors are bumped manually with a tested build. Dependabot's job
-# here is narrow: keep the pinned dev tools, the actions, and the Docker base
-# image DIGEST current, and never propose a release younger than 7 days (a
-# compromised upstream release is usually detected and yanked within days).
+# Dependabot, kept for the GitHub Actions only. The actions that build and
+# publish the package and the image are pinned by commit, and without this they
+# would never move. Python runtime dependencies are >= floors, so pip updates
+# only ever bumped the ruff pin; the weekly audit workflow is the safety net for
+# those. The Docker base digest is refreshed by hand at each release
+# (tests/test_docker_base.py): Dependabot's docker updates closed their only
+# proposal as up to date while the pinned base was three months old. No release
+# younger than 7 days is proposed (a compromised upstream release is usually
+# detected and yanked within days).
 # Docs: https://docs.github.com/code-security/dependabot/dependabot-version-updates
 version: 2
 updates:
-  # Python dependencies declared in pyproject.toml. Runtime deps are >= floors,
-  # so in practice this only ever proposes bumps for pinned tools (ruff).
-  - package-ecosystem: "pip"
-    directory: "/"
-    schedule:
-      interval: "monthly"
-    cooldown:
-      default-days: 7
-    open-pull-requests-limit: 3
-    commit-message:
-      prefix: "chore(deps)"
-    groups:
-      python-minor-and-patch:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
-
   # GitHub Actions pinned in the CI and publish workflows.
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -40,22 +24,3 @@ updates:
       github-actions:
         patterns:
           - "*"
-
-  # Docker base image in the Dockerfile. Its ONLY job is refreshing the pinned
-  # digest of the current tag (Debian security patches); tag bumps (3.13 -> 3.14
-  # is semver-minor here, 3 -> 4 major) are deliberate, tested changes, never PRs.
-  - package-ecosystem: "docker"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    cooldown:
-      default-days: 7
-    open-pull-requests-limit: 2
-    commit-message:
-      prefix: "chore(deps)"
-    ignore:
-      - dependency-name: "*"
-        update-types:
-          - "version-update:semver-major"
-          - "version-update:semver-minor"

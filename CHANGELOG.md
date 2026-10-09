@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Security
+- The Docker image is built on the current `python:3.13-slim` base (Python
+  3.13.16, published 6 October). Images up to 0.7.2 used a base from 24 June,
+  without the Debian security fixes released since. The base digest is now
+  refreshed at every release.
+
 ## [0.7.2] - 2026-10-08
 
 ### Security
