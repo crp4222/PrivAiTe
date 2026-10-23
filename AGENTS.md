@@ -261,11 +261,15 @@ appears. If the change is deliberately one-sided, say why in the commit message.
   homogeneous list.
 - The guardrail also lives upstream in the fork `crp4222/litellm`, branch
   `feat/privaite-guardrail` (PR #31530 to BerriAI/litellm). Sync fixes there too.
-  Fork PRs target `litellm_oss_staging`, **not** `main`. The fork must pass
-  litellm's gates: ruff-strict (`UP006` lowercase `list`, `C901` complexity <=10,
-  no net-new `Any`), type-discipline (`LIT007`: no `TypeGuard`/`TypeIs`), line
-  length 120. Its tests fake the `privaite` package because it is absent in litellm
-  CI.
+  Fork PRs target BerriAI's default branch, `main` since `litellm_oss_staging` was
+  deleted (`gh api repos/BerriAI/litellm --jq .default_branch`; litellm's
+  `scripts/default_branch.py` reads `origin`, which in the fork clone is the fork).
+  The fork must pass litellm's gates: ruff-strict (`UP006` lowercase `list`, `C901`
+  complexity <=10, no net-new `Any`), type-discipline (`LIT007`: no
+  `TypeGuard`/`TypeIs`), line length 120, and `ui-api-types`: a change to the
+  guardrail's config model needs `python -m litellm.proxy._lazy_openapi_snapshot`
+  and `npm run gen:api` (in `ui/litellm-dashboard`), both files committed. Its
+  tests fake the `privaite` package because it is absent in litellm CI.
 
 ## Verify, don't assume
 
