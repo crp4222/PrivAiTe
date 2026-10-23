@@ -72,7 +72,7 @@ missing key is caught at boot rather than at the first request.
 
 ### Request parameters
 
-The OpenAI-compatible endpoints forward the OpenAI parameters of each endpoint
+Since 0.7.3, the OpenAI-compatible endpoints forward the OpenAI parameters of each endpoint
 (`temperature`, `tools`, `response_format`...) and answer anything else with a
 400 `unsupported_parameter` that names the field (a field sent as `null` is
 dropped instead). A field such as `api_base` or

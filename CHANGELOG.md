@@ -4,26 +4,31 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.7.3] - 2026-10-23
 
 ### Security
 - The OpenAI-compatible endpoints passed every request field to LiteLLM, which
   reads call settings from them. A client could send `api_base` and, when the
-  provider entry did not set one (the OpenAI entries of the shipped config),
+  provider entry did not set one (the OpenAI entries of the quick-start
+  `config/privaite.openai.yaml`),
   get the request sent to its own server with the operator's API key. With
   `extra_body.messages` (or `extra_body.input` on embeddings) it could replace
   the anonymized payload, so the provider received the raw text. Only the
   OpenAI parameters of each endpoint are forwarded now; anything else gets a
   400 `unsupported_parameter` before it is scanned or sent (a field sent as
-  `null` is dropped). A provider-specific
-  field (`top_k` for Ollama, say) is allowed per provider with
-  `providers[].forward_params`, which refuses call settings at startup. A
-  client that sent such a field gets a 400 after the upgrade: see
-  [request parameters](docs/configuration.md#request-parameters).
+  `null` is dropped). A provider-specific field (`top_k` for Ollama, say) is
+  allowed per provider with `providers[].forward_params`, which refuses call
+  settings at startup. A client that sent such a field gets a 400 after the
+  upgrade: see [request parameters](docs/configuration.md#request-parameters).
 - The Docker image is built on the current `python:3.13-slim` base (Python
-  3.13.16, published 6 October). Images up to 0.7.2 used a base from 24 June,
+  3.13.17, published 21 October). Images up to 0.7.2 used a base from 24 June,
   without the Debian security fixes released since. The base digest is now
   refreshed at every release.
+
+### Changed
+- Open WebUI filter 0.1.18 and the LiteLLM guardrail require `privaite>=0.7.3`.
+- The example config uses `glm-5.3-flash:cloud`: Ollama retired `glm-4.6:cloud`
+  on 16 June.
 
 ## [0.7.2] - 2026-10-08
 

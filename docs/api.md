@@ -38,7 +38,7 @@ Scanned before anything is forwarded to the provider:
 
 NOT scanned (know your surface): `messages[].name`, top-level fields like `user` and `metadata`, and `tools`/`functions` definitions are forwarded as-is; JSON object keys inside tool arguments are never rewritten (masking parameter names would break the tool schema); tokenized (integer-array) inputs are forwarded as-is too, since there is no text in them to inspect (`pii.strict: true` rejects them instead, see below). Keep PII out of those fields, or strip them upstream.
 
-Forwarded at all: the OpenAI parameters of each endpoint. Any other field is refused with a 400 `unsupported_parameter` before anything is scanned or sent, `api_base` and `extra_body` included (a field sent as `null` is dropped instead). An operator allows a provider-specific field with [`forward_params`](configuration.md#request-parameters).
+Forwarded at all (since 0.7.3): the OpenAI parameters of each endpoint. Any other field is refused with a 400 `unsupported_parameter` before anything is scanned or sent, `api_base` and `extra_body` included (a field sent as `null` is dropped instead). An operator allows a provider-specific field with [`forward_params`](configuration.md#request-parameters).
 
 On the way back, the original values are restored in `message.content`, the reasoning trace, `message.refusal`, the audio `transcript`, and in returned `tool_calls` (including the legacy `function_call`), in both non-streaming and streaming responses. Set `pii.passthrough.tool_calls: true` to forward tool-call arguments unchanged.
 

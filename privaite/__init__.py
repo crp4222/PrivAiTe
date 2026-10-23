@@ -1,6 +1,6 @@
 import os
 
-__version__ = "0.7.2"
+__version__ = "0.7.3"
 
 # Dependencies that contact a third party on their own. The only request that
 # may leave the machine is the one you make to your provider, so each of these
