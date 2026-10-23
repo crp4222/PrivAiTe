@@ -267,7 +267,12 @@ appears. If the change is deliberately one-sided, say why in the commit message.
   client-supplied incoming map in `inlet`.
 - LiteLLM guardrail: scan **every** Responses `input` item (role message, tool
   output, tool-call arguments, `input_text` part, bare string), not just a
-  homogeneous list.
+  homogeneous list. Scan every leaf of `extra_body` too: LiteLLM merges it over
+  the request it sends, and `extra_body.messages` replaced the scrubbed messages
+  on the wire (its keys are provider specific, so no field list covers it).
+  With `block_entities` set, a prompt or input sent as token IDs is refused.
+  Every other top-level field is NOT scanned, and LiteLLM forwards a field it
+  does not know to the provider as it is: keep that stated in the README.
 - The guardrail also lives upstream in the fork `crp4222/litellm`, branch
   `feat/privaite-guardrail` (PR #31530 to BerriAI/litellm). Sync fixes there too.
   Fork PRs target BerriAI's default branch, `main` since `litellm_oss_staging` was

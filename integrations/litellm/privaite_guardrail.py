@@ -12,17 +12,23 @@ relayed whole) and restores Responses `output_text` / function_call output. The
 auxiliary request fields LiteLLM forwards verbatim are scrubbed too, matching
 the core proxy: chat `prediction.content`, `web_search_options.user_location`
 and the completions `prompt`/`suffix` (request side only, nothing to restore;
-tokenized integer-array prompts pass through unscanned as documented). Chat
+tokenized integer-array prompts pass through unscanned as documented). Every
+string leaf of `extra_body` is scrubbed too: LiteLLM merges it over the request
+it sends, so `extra_body.messages` would replace the scrubbed messages. Other
+top-level fields are not scanned (`user`, `metadata`, tool definitions, and any
+field LiteLLM does not know, which it forwards to the provider as it is). Chat
 streaming is restored too: text content, streamed tool-call arguments, and the
 streamed function_call. (Responses API streaming restore is not yet implemented.)
 On the failure path the map is dropped from metadata as well (best-effort), so it
 is not left for a failure spend-log to persist.
 
-If `block_entities` is configured, a request containing any of those PII types is
-rejected with an HTTP 400 in the pre-call hook, before anything is forwarded to the
-model. The error names the offending type(s) only, never the underlying value. The
-gate also covers the agent's own prompt (Responses `instructions`, Anthropic
+If `block_entities` is configured, a request with any of those PII types in a scanned
+field is rejected with an HTTP 400 in the pre-call hook, before anything is forwarded
+to the model. The error names the offending type(s) only, never the underlying value.
+The gate also covers the agent's own prompt (Responses `instructions`, Anthropic
 `system`): those fields are read for the gate only and still relayed verbatim.
+With `block_entities` set, a prompt or input sent as token IDs is refused, since
+no detector reads token IDs.
 
 It reuses PrivAiTe's engine, so there is no detection or masking logic here.
 
@@ -390,6 +396,8 @@ class PrivaiteGuardrail(CustomGuardrail):
         web_search = data.get("web_search_options")
         if isinstance(web_search, dict) and "user_location" in web_search:
             return True
+        if data.get("extra_body"):
+            return True
         suffix = data.get("suffix")
         if isinstance(suffix, str) and suffix:
             return True
@@ -424,6 +432,16 @@ class PrivaiteGuardrail(CustomGuardrail):
             web_search["user_location"] = await engine.process_request_value(
                 web_search["user_location"], mapping
             )
+        # LiteLLM merges extra_body over the request it sends, so
+        # extra_body.messages would replace the scrubbed messages on the wire. Its
+        # keys are provider specific (`contents` for Gemini, say), so every leaf is
+        # scrubbed. Rewritten in place: the proxy's body snapshot aliases it.
+        extra_body = data.get("extra_body")
+        if isinstance(extra_body, dict) and extra_body:
+            scanned = True
+            scrubbed = await engine.process_request_value(extra_body, mapping)
+            extra_body.clear()
+            extra_body.update(scrubbed)
         suffix = data.get("suffix")
         if isinstance(suffix, str) and suffix:
             scanned = True
@@ -447,6 +465,25 @@ class PrivaiteGuardrail(CustomGuardrail):
             # aliases it, so the anonymized entries land in the snapshot too.
             prompt[:] = await engine.process_request_value(prompt, mapping)
         return scanned
+
+    @staticmethod
+    def _tokenized_fields(data: dict) -> list[str]:
+        """The completions `prompt` or embeddings `input` sent as token IDs: a
+        list of integers, or a batch holding one. No detector reads them."""
+
+        def is_token_list(value: Any) -> bool:
+            return (
+                isinstance(value, list) and bool(value) and all(type(item) is int for item in value)
+            )
+
+        return [
+            name
+            for name in ("prompt", "input")
+            if is_token_list(data.get(name))
+            or (
+                isinstance(data.get(name), list) and any(is_token_list(item) for item in data[name])
+            )
+        ]
 
     def _has_gated_fields(self, data: dict) -> bool:
         """True when the request carries an agent-prompt field the block gate
@@ -571,6 +608,20 @@ class PrivaiteGuardrail(CustomGuardrail):
             and not self._has_gated_fields(data)
         ):
             return data
+
+        tokenized = self._tokenized_fields(data) if self.block_entities else []
+        if tokenized:
+            # block_entities cannot check token IDs: refuse rather than forward
+            # them unchecked. Without block_entities they pass, as in the core.
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": f"block_entities cannot check a tokenized {', '.join(tokenized)}; "
+                    "send it as text"
+                },
+            )
 
         engine = await self._engine_for(self._languages())
         try:

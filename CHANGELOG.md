@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Security
+- LiteLLM guardrail: `extra_body` was not scanned, and LiteLLM merges it over
+  the request it sends, so `extra_body.messages` reached the provider raw,
+  past `block_entities` too (reproduced through a LiteLLM proxy). Every string
+  leaf of `extra_body` is now scrubbed under the request's mapping. With
+  `block_entities` set, a prompt or input sent as token IDs is refused, since
+  no detector reads them. Replace your copy of `privaite_guardrail.py`.
+
 ## [0.7.3] - 2026-10-23
 
 ### Security

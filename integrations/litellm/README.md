@@ -34,13 +34,20 @@ to the request body.
 
 By default every detected PII item is pseudonymized and the request goes through.
 To make some types a hard stop, list them under `block_entities` (a YAML list or a
-comma-separated string). A request containing any listed type is rejected with a
-`400` before anything reaches the model; the error names the type(s), never the
-value. Types not listed are still masked as usual. This needs a `privaite` build
+comma-separated string). A request with a listed type in a field the guardrail
+scans is rejected with a `400` before anything reaches the model; the error names
+the type(s), never the value. Types not listed are still masked as usual. This needs a `privaite` build
 that supports `pii.block_entities`; on an older one the guardrail refuses to start
-with block rules set, rather than silently forwarding the PII.
+with block rules set, rather than silently forwarding the PII. The gate also reads
+the caller's own prompt (Responses `instructions`, Anthropic `system`), which is
+relayed unchanged, and refuses a prompt or input sent as token IDs, since no
+detector reads them.
 
 ## Notes
+
+- Not scanned: `user`, `metadata`, tool and function definitions, and any other
+  top-level field. LiteLLM forwards a field it does not know to the provider as it
+  is, and `block_entities` does not read it either. Keep PII out of those fields.
 
 - The first request after enabling it is slow: importing `privaite` pulls in
   Presidio and spaCy (and, with `preset: "onnx"`, downloads the Privacy Filter

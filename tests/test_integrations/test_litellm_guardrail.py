@@ -1717,3 +1717,85 @@ async def test_chat_placeholder_literal_in_tools_is_never_issued():
 
     assert data["messages"][0]["content"] == "reach me at <EMAIL_ADDRESS_2>"
     assert data["tools"][0]["function"]["description"] == "<EMAIL_ADDRESS_1>"
+
+
+@pytest.mark.asyncio
+async def test_extra_body_scrubbed_in_place_including_snapshot():
+    # LiteLLM merges extra_body over the request it sends: extra_body.messages
+    # replaced the scrubbed messages on the wire (reproduced through a real
+    # LiteLLM proxy). Every leaf is scrubbed, keys and non-text values kept.
+    gr = _guardrail()
+    extra_body = {
+        "messages": [{"role": "user", "content": "Mail marie.dupont@acme.com"}],
+        "top_k": 5,
+    }
+    data = {
+        "messages": [{"role": "user", "content": "hi"}],
+        "extra_body": extra_body,
+        "proxy_server_request": {"body": {"extra_body": extra_body}},
+    }
+    data = await gr.async_pre_call_hook(None, None, data, "completion")
+
+    assert data["extra_body"] is extra_body
+    assert extra_body["top_k"] == 5
+    assert extra_body["messages"][0]["role"] == "user"
+    assert "marie.dupont@acme.com" not in json.dumps(data["proxy_server_request"]["body"])
+    assert "marie.dupont@acme.com" in data["metadata"]["privaite_map"].values()
+
+
+@pytest.mark.asyncio
+async def test_block_gate_covers_extra_body():
+    from fastapi import HTTPException
+
+    module = _load()
+    gr = module.PrivaiteGuardrail(
+        guardrail_name="privaite", preset="light", languages="en", block_entities=["EMAIL_ADDRESS"]
+    )
+    data = {
+        "messages": [{"role": "user", "content": "hi"}],
+        "extra_body": {"messages": [{"role": "user", "content": "mail bob@leak.com"}]},
+    }
+    with pytest.raises(HTTPException) as ei:
+        await gr.async_pre_call_hook(None, None, data, "completion")
+    assert ei.value.status_code == 400
+    assert "bob@leak.com" not in str(ei.value.detail)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("data", "field"),
+    [
+        ({"prompt": [9906, 1917]}, "prompt"),
+        ({"prompt": [[9906], [1917]]}, "prompt"),
+        ({"prompt": ["hi", [9906]]}, "prompt"),
+        ({"input": [9906, 1917]}, "input"),
+    ],
+)
+async def test_block_gate_refuses_token_ids(data, field):
+    # No detector reads token IDs, so the gate cannot check them.
+    from fastapi import HTTPException
+
+    module = _load()
+    gr = module.PrivaiteGuardrail(
+        guardrail_name="privaite", preset="light", languages="en", block_entities=["EMAIL_ADDRESS"]
+    )
+    with pytest.raises(HTTPException) as ei:
+        await gr.async_pre_call_hook(None, None, data, "atext_completion")
+    assert ei.value.status_code == 400
+    assert f"tokenized {field}" in ei.value.detail["error"]
+
+
+@pytest.mark.asyncio
+async def test_token_ids_pass_without_block_entities():
+    gr = _guardrail()
+    data = await gr.async_pre_call_hook(None, None, {"prompt": [9906, 1917]}, "atext_completion")
+    assert data["prompt"] == [9906, 1917]
+
+
+@pytest.mark.asyncio
+async def test_extra_body_only_request_is_not_early_returned():
+    # No top-level messages at all: the early return must not skip the scan.
+    gr = _guardrail()
+    extra_body = {"messages": [{"role": "user", "content": "Mail marie.dupont@acme.com"}]}
+    data = await gr.async_pre_call_hook(None, None, {"extra_body": extra_body}, "completion")
+    assert "marie.dupont@acme.com" not in json.dumps(data["extra_body"])
