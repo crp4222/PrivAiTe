@@ -31,6 +31,114 @@ SSE_HEADERS = {
 }
 
 
+# The request fields each endpoint forwards to the provider: the OpenAI
+# parameters, minus the ones the endpoint handles itself (model, the input,
+# stream). The rest of the body is refused. Every forwarded field becomes a
+# litellm keyword argument, and litellm also reads call settings from those: a
+# client-sent `api_base` sent the operator's API key to the client's server, and
+# `extra_body.messages` replaced the anonymized messages on the wire. An
+# operator adds provider-specific fields with providers[].forward_params.
+CHAT_PARAMS = frozenset(
+    {
+        "audio",
+        "frequency_penalty",
+        "function_call",
+        "functions",
+        "logit_bias",
+        "logprobs",
+        "max_completion_tokens",
+        "max_tokens",
+        "metadata",
+        "modalities",
+        "n",
+        "parallel_tool_calls",
+        "prediction",
+        "presence_penalty",
+        "prompt_cache_key",
+        "prompt_cache_retention",
+        "reasoning_effort",
+        "response_format",
+        "safety_identifier",
+        "seed",
+        "service_tier",
+        "stop",
+        "store",
+        "stream_options",
+        "temperature",
+        "thinking",
+        "tool_choice",
+        "tools",
+        "top_logprobs",
+        "top_p",
+        "user",
+        "verbosity",
+        "web_search_options",
+    }
+)
+COMPLETION_PARAMS = frozenset(
+    {
+        "best_of",
+        "echo",
+        "frequency_penalty",
+        "logit_bias",
+        "logprobs",
+        "max_tokens",
+        "n",
+        "presence_penalty",
+        "seed",
+        "stop",
+        "stream_options",
+        "suffix",
+        "temperature",
+        "top_p",
+        "user",
+    }
+)
+EMBEDDING_PARAMS = frozenset({"dimensions", "encoding_format", "user"})
+
+
+def forwarded_params(
+    body: dict,
+    handled: tuple[str, ...],
+    allowed: frozenset[str],
+    config: PrivAiTeConfig,
+    model: str,
+) -> tuple[dict, JSONResponse | None]:
+    """The body fields this endpoint forwards to the provider, or a 400.
+
+    `handled` are the fields the endpoint reads itself (model, the input,
+    stream). Any other field outside `allowed` and the provider's
+    forward_params is refused, unless it is null: some clients send every field
+    they know, and litellm treated a None keyword as unset, so a null is dropped
+    rather than refused. Checked before anything is scanned, so a refused
+    request touches nothing. The message names the fields (the caller's own
+    keys, never a value) and is not logged.
+    """
+    extra: set[str] = set()
+    for provider in config.providers:
+        if provider.model_name == model:
+            extra.update(provider.forward_params)
+    kwargs: dict = {}
+    unknown: list[str] = []
+    for key, value in body.items():
+        if key in handled:
+            continue
+        if key in allowed or key in extra:
+            kwargs[key] = value
+        elif value is not None:
+            unknown.append(key)
+    if not unknown:
+        return kwargs, None
+    return kwargs, openai_error(
+        f"Unsupported parameter(s): {', '.join(sorted(unknown))}. PrivAiTe forwards the "
+        "OpenAI parameters only; the operator can allow more per provider with "
+        "providers[].forward_params.",
+        "invalid_request_error",
+        400,
+        "unsupported_parameter",
+    )
+
+
 def validate_model(body: dict, provider_router: ProviderRouter) -> JSONResponse | None:
     """400 when model is missing, 404 when unknown, None when valid."""
     model = body.get("model")

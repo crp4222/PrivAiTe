@@ -70,6 +70,29 @@ providers:
 A `${VAR}` whose environment variable is unset fails startup on purpose, so a
 missing key is caught at boot rather than at the first request.
 
+### Request parameters
+
+The OpenAI-compatible endpoints forward the OpenAI parameters of each endpoint
+(`temperature`, `tools`, `response_format`...) and answer anything else with a
+400 `unsupported_parameter` that names the field (a field sent as `null` is
+dropped instead). A field such as `api_base` or
+`extra_body` is a call setting for LiteLLM, not a provider parameter: forwarded
+from the client, it could send the request and your API key to another server,
+or replace the anonymized messages. To pass a provider-specific field, list it
+on that provider:
+
+```yaml
+  - model_name: "local-llama"
+    litellm_params:
+      model: "ollama/llama3.1"
+      api_base: "http://localhost:11434"
+    forward_params: ["top_k"]
+```
+
+These fields reach the provider unscanned. Call settings (`api_base`,
+`base_url`, `api_key`, `extra_body`, `extra_headers`, the `aws_`, `azure_` and
+`vertex_` families...) are refused at startup: set them in `litellm_params`.
+
 ## Agent CLI gateway
 
 Opt-in native routes for Claude Code (Anthropic Messages, validated live) and

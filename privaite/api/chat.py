@@ -12,8 +12,10 @@ from privaite.api.dependencies import (
     record_pii_stats,
 )
 from privaite.api.pipeline import (
+    CHAT_PARAMS,
     call_provider,
     dump_response,
+    forwarded_params,
     resolve_input,
     stream_or_error,
     validate_model,
@@ -93,7 +95,11 @@ async def chat_completions(
     if error is not None:
         return error
 
-    kwargs = {k: v for k, v in body.items() if k not in ("model", "messages", "stream")}
+    kwargs, error = forwarded_params(
+        body, ("model", "messages", "stream"), CHAT_PARAMS, config, model
+    )
+    if error is not None:
+        return error
 
     async def _anonymize() -> tuple[tuple[list, dict], Any]:
         anon, mapping = await pii_engine.process_request(messages, kwargs)

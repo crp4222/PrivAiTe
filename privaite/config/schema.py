@@ -96,9 +96,53 @@ class LiteLLMParams(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+# Request fields an operator may not add to forward_params: litellm reads them
+# as call settings, not as provider parameters. A client-sent `api_base` sent
+# the operator's API key to the client's server, and `extra_body` is merged over
+# the anonymized payload (`extra_body.messages` replaced the scrubbed messages).
+_UNFORWARDABLE_PARAMS = frozenset(
+    {
+        "api_base",
+        "api_key",
+        "api_version",
+        "base_url",
+        "custom_llm_provider",
+        "default_headers",
+        "extra_body",
+        "extra_headers",
+        "headers",
+        "model_list",
+        "organization",
+        "user_config",
+    }
+)
+_UNFORWARDABLE_PREFIXES = ("aws_", "azure_", "vertex_")
+
+
+def _check_forward_params(value: list[str]) -> list[str]:
+    refused = sorted(
+        name
+        for name in value
+        if name in _UNFORWARDABLE_PARAMS or name.startswith(_UNFORWARDABLE_PREFIXES)
+    )
+    if refused:
+        raise ValueError(
+            f"forward_params cannot include {', '.join(refused)}: litellm reads it as a "
+            "call setting (endpoint, credentials, or a body merged over the anonymized "
+            "request). Set it in litellm_params instead."
+        )
+    return value
+
+
+ForwardParams = Annotated[list[str], AfterValidator(_check_forward_params)]
+
+
 class ProviderConfig(StrictModel):
     model_name: str
     litellm_params: LiteLLMParams
+    # Request fields forwarded to this provider on top of the OpenAI parameters
+    # (top_k for an Ollama model, say). They reach the provider unscanned.
+    forward_params: ForwardParams = Field(default_factory=list)
 
 
 class PresidioDetectorConfig(StrictModel):

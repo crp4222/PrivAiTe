@@ -12,8 +12,10 @@ from privaite.api.dependencies import (
     record_pii_stats,
 )
 from privaite.api.pipeline import (
+    COMPLETION_PARAMS,
     call_provider,
     dump_response,
+    forwarded_params,
     resolve_input,
     stream_or_error,
     validate_model,
@@ -42,7 +44,11 @@ async def completions(
     if error is not None:
         return error
 
-    kwargs = {k: v for k, v in body.items() if k not in ("model", "prompt", "stream")}
+    kwargs, error = forwarded_params(
+        body, ("model", "prompt", "stream"), COMPLETION_PARAMS, config, model
+    )
+    if error is not None:
+        return error
 
     async def _anonymize() -> tuple[tuple[Any, dict], Any]:
         if isinstance(prompt, list) and all(isinstance(p, str) for p in prompt):

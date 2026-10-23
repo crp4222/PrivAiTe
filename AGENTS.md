@@ -88,6 +88,15 @@ NOT scanned (documented limitation, keep it documented if you change it):
 `messages[].name`, top-level `user`/`metadata`, `tools`/`functions` definitions,
 JSON object keys, and tokenized (integer-array) inputs.
 
+Forwarded at all: only the OpenAI parameters of each endpoint
+(`CHAT_PARAMS`, `COMPLETION_PARAMS`, `EMBEDDING_PARAMS` in
+`privaite/api/pipeline.py`) plus a provider's `forward_params`; anything else
+is a 400 before the scan. Every forwarded field becomes a litellm keyword
+argument, and litellm reads call settings from those: a client `api_base` sent
+the operator's key to the client's server, `extra_body.messages` replaced the
+anonymized messages. Never forward the body wholesale, and never let
+`forward_params` take a call setting (the schema refuses them at load).
+
 `POST /v1/pii/inspect` (off by default, `pii.inspect.enabled`) is a dry run: it
 returns the caller's own detections + anonymized preview and forwards NOTHING.
 It is the one deliberate exception to "never echo values" (the caller sent the

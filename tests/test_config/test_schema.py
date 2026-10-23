@@ -1,6 +1,6 @@
 import pytest
 
-from privaite.config.schema import PIIConfig
+from privaite.config.schema import LiteLLMParams, PIIConfig, ProviderConfig
 
 
 def test_preset_light():
@@ -142,3 +142,42 @@ def test_model_loading_is_supply_chain_safe_by_default():
     assert OnnxDetectorConfig().revision == "7ffa9a043d54d1be65afb281eddf0ffbe629385b"
     assert BertNERDetectorConfig().revision == "d1a3e8f13f8c3566299d95fcfc9a8d2382a9affc"
     assert GlinerDetectorConfig().revision == "1fcf13e85f4eef5394e1fcd406cf2ca9ea82351d"
+
+
+def _provider(forward_params: list[str]) -> ProviderConfig:
+    return ProviderConfig(
+        model_name="m",
+        litellm_params=LiteLLMParams(model="ollama/m"),
+        forward_params=forward_params,
+    )
+
+
+def test_forward_params_defaults_to_empty():
+    assert (
+        ProviderConfig(model_name="m", litellm_params=LiteLLMParams(model="x")).forward_params == []
+    )
+
+
+def test_forward_params_accepts_a_provider_field():
+    assert _provider(["top_k", "num_ctx"]).forward_params == ["top_k", "num_ctx"]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "api_base",
+        "base_url",
+        "api_key",
+        "extra_body",
+        "extra_headers",
+        "aws_region_name",
+        "vertex_credentials",
+        "azure_ad_token",
+    ],
+)
+def test_forward_params_refuses_a_call_setting_at_load(name):
+    # litellm reads these as call settings: the endpoint, the credentials, or a
+    # body merged over the anonymized request. Forwarding one from the client
+    # undoes the allowlist, so the config refuses to load.
+    with pytest.raises(ValueError, match=f"forward_params cannot include {name}"):
+        _provider(["top_k", name])

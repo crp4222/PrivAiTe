@@ -13,9 +13,11 @@ from privaite.api.dependencies import (
     record_pii_stats,
 )
 from privaite.api.pipeline import (
+    EMBEDDING_PARAMS,
     anonymize_or_error,
     call_provider,
     dump_response,
+    forwarded_params,
     validate_model,
 )
 from privaite.config.schema import PrivAiTeConfig
@@ -38,6 +40,10 @@ async def embeddings(
     input_text = body.get("input", "")
 
     error = validate_model(body, provider_router)
+    if error is not None:
+        return error
+
+    kwargs, error = forwarded_params(body, ("model", "input"), EMBEDDING_PARAMS, config, model)
     if error is not None:
         return error
 
@@ -71,8 +77,6 @@ async def embeddings(
             return error
         if result is not None:
             input_text = result
-
-    kwargs = {k: v for k, v in body.items() if k not in ("model", "input")}
 
     response, error = await call_provider(
         lambda: provider_router.embedding(model_alias=model, input_text=input_text, **kwargs),
