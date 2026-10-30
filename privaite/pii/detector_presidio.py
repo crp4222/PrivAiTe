@@ -67,6 +67,43 @@ def builtin_recognizer_entity_types(disabled: Sequence[str] = ()) -> set[str]:
     return {t for rec in build_recognizers("en", disabled=disabled) for t in rec.supported_entities}
 
 
+def blank_nlp_engine(languages: Sequence[str]) -> Any:
+    """A Presidio spaCy engine on blank pipelines (`nlp_engine: blank`).
+
+    Presidio reads tokens, lemmas and named entities from spaCy. A blank
+    pipeline gives the tokens with no model to install and no network to run;
+    the lemma of each token is its lower-cased form, so the context words of the
+    pattern recognizers still match. There are no named entities: spaCy's
+    PERSON, LOCATION and the other NER types are left to an ML detector.
+    """
+    import spacy
+    from presidio_analyzer.nlp_engine import SpacyNlpEngine
+    from spacy.language import Language
+
+    if "privaite_lower_lemma" not in Language.factories:
+
+        @Language.component("privaite_lower_lemma")
+        def _lower_lemma(doc: Any) -> Any:
+            for token in doc:
+                token.lemma_ = token.lower_
+            return doc
+
+    class BlankSpacyNlpEngine(SpacyNlpEngine):  # type: ignore[misc]
+        def load(self) -> None:
+            pipelines: dict[str, Any] = {}
+            for model in self.models:
+                nlp = spacy.blank(model["lang_code"])
+                nlp.add_pipe("privaite_lower_lemma")
+                pipelines[model["lang_code"]] = nlp
+            self.nlp = pipelines  # type: ignore[assignment]
+
+    engine = BlankSpacyNlpEngine(
+        models=[{"lang_code": lang, "model_name": f"blank:{lang}"} for lang in languages]
+    )
+    engine.load()
+    return engine
+
+
 def _use_bundled_suffix_list() -> None:
     """Keep tldextract from downloading the public suffix list.
 
@@ -134,8 +171,11 @@ class PresidioDetector(PIIDetector):
         if not nlp_config["models"]:
             nlp_config["models"].append({"lang_code": "en", "model_name": "en_core_web_lg"})
 
-        provider = NlpEngineProvider(nlp_configuration=nlp_config)
-        nlp_engine = provider.create_engine()
+        if self.config.nlp_engine == "blank":
+            nlp_engine = blank_nlp_engine([m["lang_code"] for m in nlp_config["models"]])
+        else:
+            provider = NlpEngineProvider(nlp_configuration=nlp_config)
+            nlp_engine = provider.create_engine()
 
         self._analyzer = AnalyzerEngine(
             nlp_engine=nlp_engine,

@@ -5,7 +5,7 @@ import logging
 import os
 import re
 import shutil
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -92,8 +92,18 @@ def _check_window_coverage(ranges: list[tuple[int, int]], token_count: int) -> N
         raise RuntimeError("Incomplete ONNX token coverage")
 
 
-def _check_text_coverage(offsets: Sequence[tuple[int, int]], text: str) -> None:
-    """Reject missing text, allowing whitespace gaps and overlapping Unicode offsets."""
+def _check_text_coverage(
+    offsets: Sequence[tuple[int, int]],
+    text: str,
+    ignorable: Callable[[str], bool] = str.isspace,
+) -> None:
+    """Reject missing text, allowing gaps of ``ignorable`` characters (whitespace
+    by default; a tokenizer that drops other characters passes its own test) and
+    overlapping Unicode offsets."""
+
+    def gap_ok(gap: str) -> bool:
+        return all(ignorable(char) for char in gap)
+
     previous_start = 0
     covered_end = 0
     for start, end in offsets:
@@ -103,10 +113,10 @@ def _check_text_coverage(offsets: Sequence[tuple[int, int]], text: str) -> None:
             continue
         if start < previous_start or end < covered_end:
             raise RuntimeError("Incomplete ONNX text coverage")
-        if start > covered_end and not text[covered_end:start].isspace():
+        if start > covered_end and not gap_ok(text[covered_end:start]):
             raise RuntimeError("Incomplete ONNX text coverage")
         previous_start, covered_end = start, end
-    if covered_end < len(text) and not text[covered_end:].isspace():
+    if covered_end < len(text) and not gap_ok(text[covered_end:]):
         raise RuntimeError("Incomplete ONNX text coverage")
 
 
@@ -190,6 +200,7 @@ def _append_span(
     start: int,
     end: int,
     score: float,
+    separator_bearing: frozenset[str] = _SEPARATOR_BEARING_LABELS,
 ) -> None:
     """Append one span, snapped to the value it is supposed to cover.
 
@@ -219,7 +230,7 @@ def _append_span(
     Both only apply to a type whose value cannot itself begin with a separator
     (see `_SEPARATOR_BEARING_LABELS`), and neither may ever empty a span: a
     secret that IS a run of slashes would otherwise be dropped here and reach
-    the provider in clear.
+    the provider in clear. A model with other label names passes its own set.
     """
     while start < end and text[start].isspace():
         start += 1
@@ -228,7 +239,7 @@ def _append_span(
     if start >= end:
         # Whitespace only, which is never PII whatever the type.
         return
-    if entity_type not in _SEPARATOR_BEARING_LABELS:
+    if entity_type not in separator_bearing:
         trimmed = start
         while trimmed < end and text[trimmed] in "/\\":
             trimmed += 1
@@ -253,6 +264,7 @@ def decode_bioes_spans(
     scores: Sequence[float],
     offsets: Sequence[tuple[int, int]],
     text: str,
+    separator_bearing: frozenset[str] = _SEPARATOR_BEARING_LABELS,
 ) -> list[dict]:
     spans: list[dict] = []
     current_tokens: list[int] = []
@@ -266,7 +278,7 @@ def decode_bioes_spans(
         start = offsets[current_tokens[0]][0]
         end = offsets[current_tokens[-1]][1]
         avg_score = float(np.mean([scores[i] for i in current_tokens]))
-        _append_span(spans, text, current_type, start, end, avg_score)
+        _append_span(spans, text, current_type, start, end, avg_score, separator_bearing)
         current_tokens, current_type = [], None
 
     for idx, label in enumerate(labels):
@@ -275,7 +287,7 @@ def decode_bioes_spans(
         if prefix == "S":
             _flush()
             s, e = offsets[idx][0], offsets[idx][1]
-            _append_span(spans, text, etype, s, e, float(scores[idx]))
+            _append_span(spans, text, etype, s, e, float(scores[idx]), separator_bearing)
 
         elif prefix == "B":
             _flush()

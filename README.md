@@ -110,7 +110,7 @@ For GDPR or HIPAA, treat this as pseudonymization plus transfer minimization; yo
 
 ## Docs
 
-- **Presets:** `onnx` is the default. `light` is faster and needs no model download, but it misses names the default finds: the demo above fails with `--preset light`. [Presets](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md#presets)
+- **Presets:** `onnx` is the default. `light` is faster and needs no model download, but it misses names the default finds: the demo above fails with `--preset light`. `minilm` and `ultrafast` are opt-in: they run PrivAiTe's own model in place of the Privacy Filter, `ultrafast` on the Apple Neural Engine for agent CLIs on a Mac. Nothing changes unless you set one. [Presets](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md#presets)
 - **Your own types and hard blocks:** regex `custom_patterns`, a per-type fate, and `block_entities` for what must never leave. [Your policy, your types](https://github.com/crp4222/PrivAiTe/blob/main/docs/policy.md)
 - **What is scanned and what is not:** the exact request fields. [API reference](https://github.com/crp4222/PrivAiTe/blob/main/docs/api.md#what-gets-anonymized)
 - **Everything else:** [detection](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md), [configuration](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md), [redacting PII before an LLM call](https://github.com/crp4222/PrivAiTe/blob/main/docs/redact-pii-before-llm.md), [changelog](https://github.com/crp4222/PrivAiTe/blob/main/CHANGELOG.md), and the same pages as a site: [crp4222.github.io/PrivAiTe](https://crp4222.github.io/PrivAiTe/). To develop: clone, `pip install -e ".[dev]"`, download the two spaCy models above, then `python -m pytest tests/`.

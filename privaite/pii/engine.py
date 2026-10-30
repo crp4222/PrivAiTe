@@ -124,6 +124,7 @@ class PIIEngine:
                 detectors.bert_ner,
                 detectors.mlmodel,
                 detectors.onnx,
+                detectors.minilm,
                 detectors.gliner,
             )
             if cfg.enabled
@@ -209,6 +210,14 @@ class PIIEngine:
             await detector.initialize()
             self.detectors.append(detector)
             logger.info("ONNX privacy-filter detector initialized")
+
+        if self.config.detectors.minilm.enabled:
+            from privaite.pii.detector_minilm import MiniLMDetector
+
+            detector = MiniLMDetector(self.config.detectors.minilm)
+            await detector.initialize()
+            self.detectors.append(detector)
+            logger.info("PrivAiTe MiniLM detector initialized")
 
         if self.config.detectors.gliner.enabled:
             from privaite.pii.detector_gliner import GlinerDetector

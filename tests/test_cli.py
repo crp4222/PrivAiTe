@@ -208,3 +208,24 @@ def test_verify_announces_the_size_of_the_default_model_download(monkeypatch):
     monkeypatch.setattr(verify_module, "verify", fake_verify)
     result = CliRunner().invoke(main, ["verify"])
     assert "Using preset onnx; the detection model downloads once (~900 MB)." in result.output
+
+
+@pytest.mark.parametrize(("preset", "size"), [("minilm", "~490 MB"), ("ultrafast", "~250 MB")])
+def test_verify_announces_the_minilm_download(monkeypatch, preset, size):
+    """onnx/model.onnx or the Core ML package, plus the tokenizer (17 MB)."""
+    from privaite import verify as verify_module
+    from privaite.verify import PLANTED, Finding, VerificationResult
+
+    def fake_verify(preset: str = "onnx") -> VerificationResult:
+        return VerificationResult(
+            preset=preset,
+            direct=[Finding(v, t, w, on_the_wire=True) for v, t, w in PLANTED],
+            through_proxy=[Finding(v, t, w, on_the_wire=False) for v, t, w in PLANTED],
+            placeholders=[],
+            restored=True,
+            elapsed_ms=1.0,
+        )
+
+    monkeypatch.setattr(verify_module, "verify", fake_verify)
+    result = CliRunner().invoke(main, ["verify", "--preset", preset])
+    assert f"Using preset {preset}; the detection model downloads once ({size})." in result.output

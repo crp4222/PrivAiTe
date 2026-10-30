@@ -156,6 +156,13 @@ class PresidioDetectorConfig(StrictModel):
     # them: this is the knob that does. Empty by default, so the secret and
     # contextual recognizers keep protecting by default.
     disabled_recognizers: DisabledRecognizers = Field(default_factory=list)
+    # "spacy" loads one spaCy model per language and adds its named entities
+    # (PERSON, LOCATION, ...) to the pattern recognizers. "blank" keeps the
+    # pattern and PrivAiTe recognizers but tokenizes with a blank spaCy pipeline:
+    # no model to install, several times faster on long agent requests, and no
+    # spaCy NER, so names then come from an ML detector only. The ultrafast
+    # preset selects "blank" unless this is set explicitly.
+    nlp_engine: Literal["spacy", "blank"] = "spacy"
 
 
 # The openai/privacy-filter model's label set, shared by its ONNX and torch backends.
@@ -177,6 +184,27 @@ _PRIVACY_FILTER_LABELS = {
 _PRIVACY_FILTER_REVISION = "7ffa9a043d54d1be65afb281eddf0ffbe629385b"
 _BERT_NER_REVISION = "d1a3e8f13f8c3566299d95fcfc9a8d2382a9affc"
 _GLINER_PII_REVISION = "1fcf13e85f4eef5394e1fcd406cf2ca9ea82351d"
+_MINILM_REVISION = "e7ea9dd38cd6d03198aeba57174a1d6d3a95618d"
+
+# The PrivAiTe MiniLM model's types under PrivAiTe's names where it has one; the
+# others keep the model's name (the placeholder anonymizer accepts any type).
+_MINILM_LABELS = {
+    "PERSON": "PERSON",
+    "CONTACT": "CONTACT",
+    "ADDRESS": "LOCATION",
+    "LOCATION": "LOCATION",
+    "ORGANIZATION": "ORGANIZATION",
+    "DATE": "DATE_TIME",
+    "DATE_OF_BIRTH": "DATE_TIME",
+    "AGE": "AGE",
+    "DEMOGRAPHIC": "DEMOGRAPHIC",
+    "GOV_ID": "GOV_ID",
+    "FINANCIAL": "FINANCIAL",
+    "NETWORK_ID": "NETWORK_ID",
+    "RECORD_ID": "RECORD_ID",
+    "SECRET": "SECRET",
+    "OTHER": "OTHER",
+}
 
 
 class _PrivacyFilterDetectorConfig(StrictModel):
@@ -213,6 +241,32 @@ class OnnxDetectorConfig(_PrivacyFilterDetectorConfig):
     cache_dir: str | None = None
     # Reuse identical ONNX input windows during one scrub call only. Unlike the
     # opt-in detection_cache, nothing survives the request (including on error).
+    deduplicate_windows: bool = True
+
+
+class MiniLMDetectorConfig(StrictModel):
+    """PrivAiTe's own multilingual PII model (MiniLM L12, 117M parameters, 15
+    types), trained for this proxy. Off by default; the minilm and ultrafast
+    presets turn it on. Its model card lists the data, licenses and scores."""
+
+    enabled: bool = False
+    model_name: str = "crp4222/privaite-pii-minilm"
+    # The built-in model is pinned to an immutable commit; None follows main.
+    revision: str | None = _MINILM_REVISION
+    # "onnx" is the fp32 export, span-identical to the trained model; "onnx_int8"
+    # is 4x smaller and about twice as fast on CPU for a point of recall or less;
+    # "coreml" runs on the Apple Neural Engine (macOS, pip install
+    # 'privaite[ane]'), about 4x faster again. The ultrafast preset selects
+    # "coreml" unless this is set explicitly.
+    backend: Literal["onnx", "onnx_int8", "coreml"] = "onnx"
+    # The model was trained and evaluated with argmax decoding, no threshold.
+    # Raise it to trade recall for precision.
+    score_threshold: float = 0.0
+    # Map each model type to the entity type it is masked as. A type left out of
+    # the mapping is not masked by this detector.
+    label_mapping: dict[str, str] = Field(default_factory=lambda: dict(_MINILM_LABELS))
+    cache_dir: str | None = None
+    # Reuse identical input windows during one scrub call only (same as onnx).
     deduplicate_windows: bool = True
 
 
@@ -287,6 +341,7 @@ class DetectorsConfig(StrictModel):
     presidio: PresidioDetectorConfig = Field(default_factory=PresidioDetectorConfig)
     mlmodel: MLModelDetectorConfig = Field(default_factory=MLModelDetectorConfig)
     onnx: OnnxDetectorConfig = Field(default_factory=OnnxDetectorConfig)
+    minilm: MiniLMDetectorConfig = Field(default_factory=MiniLMDetectorConfig)
     bert_ner: BertNERDetectorConfig = Field(default_factory=BertNERDetectorConfig)
     gliner: GlinerDetectorConfig = Field(default_factory=GlinerDetectorConfig)
 
@@ -435,10 +490,28 @@ class PIIConfig(StrictModel):
             self.detectors.mlmodel.enabled = False
             self.detectors.onnx.enabled = True
             self.detectors.gliner.enabled = True
+        elif self.preset in ("minilm", "ultrafast"):
+            # Opt-in: the onnx suite with PrivAiTe's own MiniLM model in place of
+            # openai/privacy-filter. ultrafast also runs the model on the Apple
+            # Neural Engine and Presidio without spaCy models, for agent CLIs
+            # that resend long conversations every turn. An explicit backend or
+            # nlp_engine in the config wins over the preset.
+            self.detectors.presidio.enabled = True
+            if not self.detectors.presidio.entities:
+                self.detectors.presidio.entities = list(_ONNX_PRESIDIO_ENTITIES)
+            self.detectors.bert_ner.enabled = False
+            self.detectors.mlmodel.enabled = False
+            self.detectors.onnx.enabled = False
+            self.detectors.minilm.enabled = True
+            if self.preset == "ultrafast":
+                if "backend" not in self.detectors.minilm.model_fields_set:
+                    self.detectors.minilm.backend = "coreml"
+                if "nlp_engine" not in self.detectors.presidio.model_fields_set:
+                    self.detectors.presidio.nlp_engine = "blank"
         else:
             raise ValueError(
                 f"Unknown PII preset '{self.preset}'. "
-                "Valid presets: light, standard, full, onnx, max"
+                "Valid presets: light, standard, full, onnx, max, minilm, ultrafast"
             )
 
 

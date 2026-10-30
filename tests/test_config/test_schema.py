@@ -54,6 +54,69 @@ def test_default_preset_is_onnx():
     assert config.detectors.gliner.enabled is False
 
 
+def test_default_preset_leaves_the_minilm_detector_and_spacy_as_they_were():
+    """The minilm presets are opt-in: an existing config keeps privacy-filter
+    and spaCy unless the operator chooses otherwise."""
+    config = PIIConfig()
+    assert config.detectors.minilm.enabled is False
+    assert config.detectors.presidio.nlp_engine == "spacy"
+    for preset in ("light", "standard", "full", "onnx", "max"):
+        assert PIIConfig(preset=preset).detectors.minilm.enabled is False
+
+
+def test_preset_minilm_puts_the_minilm_model_in_place_of_privacy_filter():
+    config = PIIConfig(preset="minilm")
+    detectors = config.detectors
+    assert detectors.minilm.enabled is True
+    assert detectors.minilm.backend == "onnx"
+    assert detectors.onnx.enabled is False
+    assert detectors.presidio.enabled is True
+    assert detectors.presidio.nlp_engine == "spacy"
+    assert detectors.presidio.entities == PIIConfig(preset="onnx").detectors.presidio.entities
+    assert detectors.bert_ner.enabled is False
+    assert detectors.mlmodel.enabled is False
+    assert detectors.gliner.enabled is False
+
+
+def test_preset_ultrafast_runs_the_model_on_the_neural_engine_and_presidio_without_spacy():
+    detectors = PIIConfig(preset="ultrafast").detectors
+    assert detectors.minilm.enabled is True
+    assert detectors.minilm.backend == "coreml"
+    assert detectors.presidio.nlp_engine == "blank"
+    assert detectors.onnx.enabled is False
+
+
+def test_ultrafast_keeps_an_explicit_backend_and_nlp_engine():
+    config = PIIConfig.model_validate(
+        {
+            "preset": "ultrafast",
+            "detectors": {
+                "minilm": {"backend": "onnx_int8"},
+                "presidio": {"nlp_engine": "spacy"},
+            },
+        }
+    )
+    assert config.detectors.minilm.backend == "onnx_int8"
+    assert config.detectors.presidio.nlp_engine == "spacy"
+
+
+def test_minilm_preset_keeps_an_explicit_backend():
+    config = PIIConfig.model_validate(
+        {"preset": "minilm", "detectors": {"minilm": {"backend": "coreml"}}}
+    )
+    assert config.detectors.minilm.backend == "coreml"
+
+
+def test_unknown_nlp_engine_is_refused_at_load():
+    with pytest.raises(ValueError):
+        PIIConfig.model_validate({"detectors": {"presidio": {"nlp_engine": "stanza"}}})
+
+
+def test_unknown_preset_error_lists_the_new_presets():
+    with pytest.raises(ValueError, match="minilm, ultrafast"):
+        PIIConfig(preset="turbo")
+
+
 def test_preset_none_uses_defaults():
     config = PIIConfig(preset=None)
     assert config.detectors.presidio.enabled is True

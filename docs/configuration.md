@@ -447,6 +447,7 @@ branch:
 - [`openai/privacy-filter`](https://huggingface.co/openai/privacy-filter/commit/7ffa9a043d54d1be65afb281eddf0ffbe629385b): `7ffa9a043d54d1be65afb281eddf0ffbe629385b` (the default ONNX detector and the optional torch detector)
 - [`dslim/bert-base-NER`](https://huggingface.co/dslim/bert-base-NER/commit/d1a3e8f13f8c3566299d95fcfc9a8d2382a9affc): `d1a3e8f13f8c3566299d95fcfc9a8d2382a9affc`
 - [`urchade/gliner_multi_pii-v1`](https://huggingface.co/urchade/gliner_multi_pii-v1/commit/1fcf13e85f4eef5394e1fcd406cf2ca9ea82351d): `1fcf13e85f4eef5394e1fcd406cf2ca9ea82351d`
+- [`crp4222/privaite-pii-minilm`](https://huggingface.co/crp4222/privaite-pii-minilm/commit/e7ea9dd38cd6d03198aeba57174a1d6d3a95618d): `e7ea9dd38cd6d03198aeba57174a1d6d3a95618d` (the opt-in `minilm` and `ultrafast` presets)
 
 When changing a detector's `model_name`, also set `revision` to a commit SHA
 from that model's repository. A default SHA from a different repository fails to
@@ -480,6 +481,65 @@ detector. The Docker image bakes the default. To bake the other one,
 build with `--build-arg ONNX_VARIANT=q4f16` and set the same `onnx_variant` in
 the mounted config, otherwise the first start downloads the default.
 
+## PrivAiTe MiniLM model (opt-in)
+
+Two presets swap the Privacy Filter for PrivAiTe's own model,
+[`crp4222/privaite-pii-minilm`](https://huggingface.co/crp4222/privaite-pii-minilm):
+a multilingual MiniLM trained for this proxy, half the Privacy Filter's
+download (a quarter under `ultrafast`) and several times faster, on CPU and more
+so on the Apple Neural Engine. Nothing changes unless you set one of them: the default stays
+`onnx`. What they detect and how they score is in
+[detection](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md#privaite-minilm-opt-in).
+
+```yaml
+pii:
+  preset: minilm      # Presidio (spaCy) + the MiniLM model on CPU, any platform
+  # preset: ultrafast # the MiniLM model on the Neural Engine + Presidio without spaCy (macOS)
+```
+
+| Preset | Presidio | Model | Extra install |
+|---|---|---|---|
+| `minilm` | with its spaCy models, as under `onnx` | ONNX fp32 on CPU | none |
+| `ultrafast` | blank spaCy pipelines (`nlp_engine: blank`) | Core ML on the Neural Engine | `pip install 'privaite[ane]'`, macOS only |
+
+Both keep the Presidio allowlist, the structured-secret rules and every other
+setting of `onnx`. `ultrafast` is meant for agent CLIs on a Mac (Claude Code,
+Codex through the [gateway](#agent-cli-gateway)), which resend the whole
+conversation every turn. Off macOS, or without `coremltools`, it refuses to
+start and names the fix.
+
+Each part can also be chosen on its own, and an explicit value wins over the
+preset:
+
+```yaml
+pii:
+  preset: ultrafast
+  detectors:
+    minilm:
+      backend: onnx_int8     # onnx (default), onnx_int8, coreml
+      score_threshold: 0.0   # the evaluated argmax decoding; raise to mask less
+      # label_mapping: drop a type to stop masking it, rename one to change its placeholder
+    presidio:
+      nlp_engine: spacy      # spacy (default), blank
+```
+
+`backend`: `onnx` is the fp32 export and gives exactly the trained model's
+spans; `onnx_int8` is 4 times smaller and about twice as fast on CPU, for a
+point of recall or less; `coreml` runs on the Neural Engine.
+`nlp_engine: blank` loads no spaCy model: the pattern recognizers and
+PrivAiTe's own recognizers still run, but spaCy's named entities are gone, so a
+name with no cue around it is left to the model. It is the faster choice on
+long requests, and the one to avoid with `preset: light`, which has no model to
+fall back on.
+
+The model's types are `PERSON`, `CONTACT` (emails, phones, URLs, user names),
+`LOCATION` (addresses and places), `ORGANIZATION`, `DATE_TIME`, `AGE`,
+`DEMOGRAPHIC`, `GOV_ID`, `FINANCIAL`, `NETWORK_ID`, `RECORD_ID`, `SECRET` and
+`OTHER`. Presidio still emits its own types for the same values (an email is
+`EMAIL_ADDRESS` there), and a type listed in `block_entities` wins any overlap,
+so blocking `EMAIL_ADDRESS` keeps working; list the model's types (`GOV_ID`,
+`CONTACT`...) to block what only the model finds.
+
 ## Detector device
 
 `device` selects the accelerator per detector. An unknown value is refused at
@@ -492,6 +552,7 @@ is unavailable.
 | Detector | Accepted values |
 |---|---|
 | `onnx` | `auto`, `cpu`, `cuda`, `coreml`, `mps` (execution provider names, no index) |
+| `minilm` | no `device`: `backend` picks the runtime (`onnx` and `onnx_int8` on CPU, `coreml` on the Neural Engine) |
 | `mlmodel`, `bert_ner`, `gliner` | `auto`, `cpu`, `cuda`, `mps`, with an optional index such as `cuda:1` |
 
 `auto` never selects CoreML for the ONNX detector: it is slower than CPU at every
@@ -502,8 +563,9 @@ is killed. `device: "coreml"` stays available as an explicit opt-in.
 
 The only request PrivAiTe makes on your behalf is the one to your provider.
 Two downloads happen once, on a first run outside Docker: the detection model
-from the Hugging Face Hub (about 900 MB) and any missing spaCy language model.
-The Docker image carries both.
+from the Hugging Face Hub (about 900 MB; about 490 MB under `minilm` and 250 MB
+under `ultrafast`) and any missing spaCy language model. The Docker image
+carries the default model and spaCy models; it does not carry the MiniLM model.
 
 Several dependencies contact a third party on their own, and since 0.7.2
 PrivAiTe turns each of them off (on an earlier version, export the variables

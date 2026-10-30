@@ -63,6 +63,11 @@ gliner = [
     "gliner>=0.2.13",
     "torch>=2.6",
 ]
+# Core ML backend of the minilm detector (the `ultrafast` preset): runs the model
+# on the Apple Neural Engine. macOS only; the `minilm` preset needs nothing extra.
+ane = [
+    "coremltools>=9.0; sys_platform == 'darwin'",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",

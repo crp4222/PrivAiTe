@@ -1,8 +1,8 @@
 ---
 description: >-
-  How PrivAiTe detects PII: Microsoft Presidio (regex + spaCy NER) and the
-  openai/privacy-filter ONNX model, what each engine catches, presets and known
-  limitations.
+  How PrivAiTe detects PII: Microsoft Presidio (regex + spaCy NER), the
+  openai/privacy-filter ONNX model and the opt-in PrivAiTe MiniLM model, what
+  each engine catches, presets and known limitations.
 ---
 
 # How PrivAiTe detects PII locally, with Presidio and OpenAI's privacy-filter model
@@ -100,12 +100,61 @@ Neither is perfect alone:
 | `onnx` (default) | Presidio + Privacy Filter | **85.2%** | 2 / 14 | ~459ms | **yes** |
 | `light` | Presidio + built-in rules | 62.7% | 3 / 14 | ~81ms | structured formats |
 | `max` | onnx + GLiNER | higher OOD | more | ~0.7s | **yes** |
+| `minilm` (opt-in) | Presidio + PrivAiTe MiniLM on CPU | measured on another benchmark, [below](#privaite-minilm-opt-in) | | [below](#privaite-minilm-opt-in) | **yes** |
+| `ultrafast` (opt-in) | Presidio without spaCy + PrivAiTe MiniLM on the Neural Engine (macOS) | measured on another benchmark, [below](#privaite-minilm-opt-in) | | [below](#privaite-minilm-opt-in) | **yes** |
 
 \*Span recall on the [AI4Privacy benchmark](https://github.com/crp4222/PrivAiTe#benchmark): 120 real documents (458 PII items, labeled by 10 independent auditor agents and cross-checked against the dataset's own mask) across DE, EN, FR, IT, plus 14 clean documents for false positives. The latencies are means per corpus document from that local run, not large agent-request latency guarantees. `max` adds GLiNER (trained on data independent of AI4Privacy): on out-of-distribution corpora it raises recall by several points at the cost of more false positives and a torch dependency (`pip install 'privaite[gliner]'`); with it selected but not installed, the proxy fails at startup with an install hint rather than silently degrading.
 
 **`onnx`** combines contextual recognition with structured rules. **`light`** uses Presidio and the same structured-secret rules; it has no contextual Privacy Filter model, and needs no model download beyond the spaCy language models. It misses names that no cue introduces when the text is not in the first configured language: `privaite verify --preset light` reports the English name of its own demo as leaked.
 
 > **Footgun:** do not pin `detectors.presidio.entities` to a short allowlist on the `light` path. It restricts detection to only those types and roughly halves recall (to ~36%). Leave `entities` unset; the proxy logs a warning at startup if it detects a low-recall configuration.
+
+## PrivAiTe MiniLM (opt-in)
+
+The `minilm` and `ultrafast` presets replace the Privacy Filter with
+[`crp4222/privaite-pii-minilm`](https://huggingface.co/crp4222/privaite-pii-minilm),
+a multilingual MiniLM (117M parameters, 15 types) trained for this proxy on 17
+public datasets whose licenses allow commercial use. Presidio, the
+structured-secret rules and the entity allowlist stay as under `onnx`. Nothing
+changes unless you set one of them; how to is in the
+[configuration reference](configuration.md#privaite-minilm-model-opt-in).
+
+Measured through PrivAiTe's engine on [privaite-bench](https://github.com/crp4222/privaite-bench)
+(8 corpora, 1,607 documents, each in its own language, CPU threads 8, Apple M1 Pro):
+
+| Preset | Persons fully masked | Precision | F2 | Never-trained corpora\* | Median per document | Per 1,000 characters |
+|---|---|---|---|---|---|---|
+| `onnx` (default) | 72.3% | 75.3% | 66.3 | 72.7% | 121 ms | 168 ms |
+| `minilm` | **90.2%** | 86.6% | **89.8** | **82.7%** | 37 ms | 48 ms |
+| `ultrafast` | 90.0% | **90.0%** | **89.8** | 82.5% | **9.5 ms** | **14 ms** |
+
+\*Persons fully masked on TAB, PIILO and Privy, which the model never trained
+on. It did train on the train splits of Nemotron-PII, OpenPII, Gretel and MAPA,
+whose test splits the benchmark scores, so the gain there (MAPA: 27.5% to
+93.6%) is partly in-distribution. The `onnx` latency is its published run on an
+idle machine; `minilm` and `ultrafast` ran with other work on the machine, so
+theirs are if anything high. The model card gives its scores on nine test sets
+from sources it never saw, against five other open PII models.
+
+What changes in practice:
+
+- **Types.** The model adds `ORGANIZATION`, `AGE`, `DEMOGRAPHIC`, `GOV_ID`,
+  `NETWORK_ID`, `RECORD_ID` and `CONTACT` (emails, phones, URLs, user names) to
+  what is masked. Remove a type from `detectors.minilm.label_mapping` to keep it
+  in clear.
+- **Names.** A full name is often masked word by word (`<PERSON_2> <PERSON_1>`).
+  Short lower-case requests that name someone with no context ("call maria")
+  are its weak spot; GLiNER PII finds 1 to 5 more of those names in 100.
+- **`ultrafast` without spaCy.** Presidio runs on blank spaCy pipelines: its
+  patterns and PrivAiTe's recognizers still fire, spaCy's named entities do
+  not, so a name with no cue around it is the model's alone. On this benchmark
+  that costs nothing (90.0% against 90.2% of persons) and raises precision
+  (90.0% against 86.6%).
+- **Characters.** The model's tokenizer skips combining accents, zero-width
+  characters and the byte-order mark. They are accepted as unscanned (none
+  carries a value alone), and a span keeps the accents of a decomposed name
+  (`José` as macOS writes it). Any other unscanned character still blocks the
+  request.
 
 ## What's NOT detected by default
 

@@ -151,6 +151,10 @@ The benchmark is public and reproducible. Run it yourself.
   covers common structured-secret formats. No Privacy Filter model is loaded;
   spaCy language models are still required. It misses names the default finds:
   `privaite verify --preset light` reports the name in its own demo as leaked.
+- **minilm and ultrafast (opt-in).** PrivAiTe's own multilingual model in place
+  of the Privacy Filter: `minilm` on CPU anywhere, `ultrafast` on the Apple
+  Neural Engine with Presidio running without spaCy, for agent CLIs on a Mac.
+  Nothing changes unless you set one. [Details](detection.md#privaite-minilm-opt-in)
 
 ---
 

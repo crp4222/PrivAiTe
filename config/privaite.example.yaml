@@ -63,6 +63,10 @@ pii:
   # Presidio-only path (~62% recall, ~63 ms per document on the same corpus). Do
   # NOT pin detectors.presidio.entities below on the light path: it restricts
   # detection to only those types and drops recall to ~35%.
+  # Opt-in, PrivAiTe's own model in place of the Privacy Filter (see the minilm
+  # block below): "minilm" (any platform, CPU) or "ultrafast" (macOS, Apple
+  # Neural Engine, pip install 'privaite[ane]'). Leave "onnx" to keep today's
+  # behavior.
   preset: "onnx"
 
   detectors:
@@ -73,6 +77,9 @@ pii:
       # entities: leave unset. The onnx preset automatically scopes Presidio to
       # the types it is precise at (the ONNX model covers the rest). Only pin an
       # allowlist for advanced tuning, and never on preset: "light".
+      # nlp_engine: "spacy"  # "blank": no spaCy model, faster, no spaCy NER
+      #                      # (the ultrafast preset's choice; names then come
+      #                      # from the model only)
 
     # ONNX privacy-filter detector. This is what preset: "onnx" turns on (the
     # default). The preset enables it automatically; uncomment to tune it.
@@ -83,6 +90,16 @@ pii:
     #   onnx_variant: "q4"        # or "q4f16" (fp16 compute, for GPU sessions)
     #   device: "auto"            # auto, cpu, cuda, coreml/mps
     #   score_threshold: 0.5
+
+    # PrivAiTe's own model. The minilm and ultrafast presets enable it; an
+    # explicit backend wins over the preset.
+    # minilm:
+    #   enabled: true
+    #   model_name: "crp4222/privaite-pii-minilm"
+    #   revision: "e7ea9dd38cd6d03198aeba57174a1d6d3a95618d" # immutable HF commit
+    #   backend: "onnx"           # onnx (fp32, CPU), onnx_int8 (CPU, 2x faster), coreml (Neural Engine)
+    #   score_threshold: 0.0
+    #   label_mapping: {...}      # drop a type to stop masking it
 
     bert_ner:
       enabled: false

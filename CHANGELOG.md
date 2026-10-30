@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Two opt-in presets run PrivAiTe's own PII model,
+  [`crp4222/privaite-pii-minilm`](https://huggingface.co/crp4222/privaite-pii-minilm)
+  (multilingual MiniLM, 15 types), in place of the Privacy Filter: `minilm`
+  (ONNX on CPU, any platform) and `ultrafast` (Core ML on the Apple Neural
+  Engine, with Presidio on blank spaCy pipelines; macOS,
+  `pip install 'privaite[ane]'`). The default stays `onnx`: nothing changes
+  unless you set one. The detector is also available on its own
+  (`detectors.minilm`, `backend: onnx | onnx_int8 | coreml`), and Presidio
+  can run without spaCy models (`detectors.presidio.nlp_engine: blank`).
+
 ### Security
 - LiteLLM guardrail: `extra_body` was not scanned, and LiteLLM merges it over
   the request it sends, so `extra_body.messages` reached the provider raw,
