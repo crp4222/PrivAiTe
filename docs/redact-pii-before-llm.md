@@ -92,11 +92,12 @@ Pick this if several clients talk to the model, or if any of them is an agent.
 
 ## None of this is a guarantee
 
-Detection is statistical. Published recall for PrivAiTe's default preset is
-85.2% span-level on a public corpus, with the
-[harness and labels open so the number can be rerun](https://github.com/crp4222/privaite-bench).
-Per type it ranges from 100% on emails, cards, IBANs, phones and IPs down to
-42% on URLs and 61% on organisation names. Any tool that tells you nothing gets
+Detection is statistical. PrivAiTe's default preset fully masks 72.7% of
+direct identifiers on the 3 public corpora of privaite-bench that PrivAiTe's own
+model never trained on, with the [harness open so the number can be rerun](https://github.com/crp4222/privaite-bench).
+Per type it ranges from 88% to 92% on person names, government and network IDs
+down to 64% on contacts, 62% on bank and card numbers and 9% on record numbers;
+the opt-in `minilm` preset reaches 82.9% on the same corpora. Any tool that tells you nothing gets
 through is either not measuring or not telling you.
 
 Treat the result as pseudonymisation and transfer minimisation, not

@@ -31,17 +31,18 @@ Presidio is excellent and PrivAiTe builds on it. The point of this table is not 
 
 ## The tool-call gap, measured
 
-The [reproducible benchmark](https://github.com/crp4222/privaite-bench) runs the REAL competitor integrations, configured at their genuine best, and places the same PII inside a tool-call argument and a multimodal text part. Measured results on 120 real documents labeled by independent auditors:
+The [reproducible benchmark](https://github.com/crp4222/privaite-bench) runs the real competitor integrations and sends the same public record in each part of an OpenAI-style request. On the 40 records of Privy, the one corpus of that suite PrivAiTe's model never trained on (37 direct identifiers: names, contacts, IDs, secrets, addresses), share of direct identifiers that still reach the provider, lower is better:
 
-| | Recall (flat text) | Tool-call leak | Multimodal leak |
-|---|---|---|---|
-| PrivAiTe `onnx` (default) | **85.2%** | **14.8%** | **14.8%** |
-| LLM Guard (Anonymize) | 76.9% | 100% | 100% |
-| LiteLLM Presidio guardrail | 70.3% | 100% | 29.7% |
+| | User message | Multimodal part | Tool-call arguments | Tool result |
+|---|---|---|---|---|
+| PrivAiTe `minilm` (opt-in) | **0.0%** | **0.0%** | **8.1%** | **0.0%** |
+| PrivAiTe `onnx` (default) | 5.4% | 5.4% | 13.5% | 5.4% |
+| LiteLLM Presidio guardrail | 16.2% | 16.2% | 100% | 16.2% |
+| Kiji Privacy Proxy 1.6.4 | 24.3% | 100% | 100% | 24.3% |
 
-LiteLLM's guardrail does scrub multimodal text parts (hence its low multimodal leak), and LLM Guard's DeBERTa model actually out-recalls it on flat text. But neither parses tool-call JSON, so **100%** of the same PII survives inside a tool-call argument, even values they detect in plain text; PrivAiTe removes everything it detects from the tool call (**100% vs 0%** tool-call protection).
+The sample is small: read it as an order of magnitude.
 
-Contamination note, in the competitors' favor and still insufficient: LLM Guard's detection model is fine-tuned on the exact dataset family behind this corpus, so its 76.9% is an optimistic upper bound, while PrivAiTe's default model did not train on it. On an out-of-distribution corpus (non-AI4Privacy), the PrivAiTe onnx stack holds ~84% recall while the AI4Privacy-tuned model drops to ~62%: see [OOD_COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md).
+LiteLLM's guardrail scrubs message text and multimodal text parts, but never parses tool-call JSON, so **100%** of the identifiers inside a tool-call argument reach the provider, even values it detects in plain text. PrivAiTe removes from the tool call everything it detects in the message. The benchmark scores 13 request integrations this way (8 of them not PrivAiTe) and 25 systems on plain text, with the methodology and per-corpus tables in its [README](https://github.com/crp4222/privaite-bench).
 
 ## Gateways built for agent traffic
 
@@ -113,8 +114,6 @@ deciding what leaves for the provider.
 
 ## Reproduce it
 
-```bash
-pip install privaite
-python solutions/ai4privacy_loader.py   # in the privaite-bench repo
-python -m solutions.compare
-```
+The commands are in the [privaite-bench README](https://github.com/crp4222/privaite-bench#reproduce):
+each system runs in its own pinned environment, on corpora downloaded at pinned
+revisions.

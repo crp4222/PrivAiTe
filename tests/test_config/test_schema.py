@@ -130,8 +130,8 @@ def test_preset_invalid_raises():
 
 
 def test_preset_light_does_not_pin_entities():
-    # the light path must run full Presidio (~62% recall), not a crippled
-    # allowlist (~35%); a pinned entities list is the documented footgun.
+    # the light path must run full Presidio, not a crippled allowlist; a
+    # pinned entities list is the documented footgun.
     config = PIIConfig(preset="light")
     assert config.detectors.presidio.entities is None
 

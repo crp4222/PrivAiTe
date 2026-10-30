@@ -38,8 +38,9 @@ them as invariants, not suggestions.
    `block_entities` type no enabled detector can emit (conservative check: skipped
    when a detector's producible set is unknown) all raise at boot.
 7. **Config defaults are the safety posture, do not flip them casually.**
-   `preset: onnx` (~85.2% recall), `on_error: block`, `deanonymization.fuzzy_matching: false`
-   (fuzzy can mis-substitute), detector `trust_remote_code: false`, `block_entities: []`.
+   `preset: onnx` (72.7% of direct identifiers on the README benchmark), `on_error: block`,
+   `deanonymization.fuzzy_matching: false` (fuzzy can mis-substitute), detector
+   `trust_remote_code: false`, `block_entities: []`.
 8. **An issued placeholder never equals a string already in the request.** The
    restore replaces every occurrence, so a pre-existing `<PERSON_1>` (a fixture,
    a template, a planted `?to=<EMAIL_ADDRESS_1>`) would receive a real value.
@@ -188,9 +189,10 @@ carries any payload other than fully-held-back content.
   Dependabot no longer does it; `tests/test_docker_base.py` fails once a dated
   release is more than 14 days past that check.
 - Benchmark: if you touched detection, re-run `privaite-bench`
-  (`python -m solutions.compare` from that repo root) and update `COMPARISON.md` +
-  the README table and the presets table in `docs/detection.md`. The published
-  numbers must match the shipped code.
+  (`python -m pbench.run` then `python -m pbench.report` from that repo root) and
+  update the README table (`tests/test_startup_warnings.py` reads the `onnx` and
+  `light` figures the light-preset warning quotes from it) and the presets table
+  in `docs/detection.md`. The published numbers must match the shipped code.
 - Release: `gh release create vX.Y.Z` triggers `publish.yml` → PyPI (trusted
   publisher; its Environment field must stay empty). A PyPI version can never be
   reused, so verify green CI first.

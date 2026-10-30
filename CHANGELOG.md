@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- The published benchmark is now the 3 privaite-bench corpora PrivAiTe's model
+  never trained on (627 documents labeled by their authors) instead of 120
+  AI4Privacy documents labeled by agents. The README table, the presets table
+  and the `light` preset's startup warning quote it: `light` ~45%, `onnx` ~73%
+  of direct identifiers fully masked.
+
 ## [0.8.0] - 2026-10-30
 
 ### Added

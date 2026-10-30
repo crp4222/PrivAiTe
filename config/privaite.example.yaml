@@ -55,14 +55,14 @@ providers:
 
 pii:
   enabled: true
-  # Full ONNX suite (default): ~85.2% recall on the benchmark, at ~459 ms average
-  # in-process detection time per benchmark document (privaite-bench
-  # COMPARISON.md; that is detection time on one document, not end-to-end request
-  # latency, and it is hardware-dependent). Detects everything including secrets
-  # and passwords; downloads the ONNX model on first run. Use "light" for the fast
-  # Presidio-only path (~62% recall, ~63 ms per document on the same corpus). Do
-  # NOT pin detectors.presidio.entities below on the light path: it restricts
-  # detection to only those types and drops recall to ~35%.
+  # Full ONNX suite (default): 72.7% of direct identifiers fully masked on
+  # privaite-bench, at a median 196 ms of in-process detection per benchmark
+  # document (README benchmark; that is detection time on one document, not
+  # end-to-end request latency, and it is hardware-dependent). Detects everything
+  # including secrets and passwords; downloads the ONNX model on first run. Use
+  # "light" for the fast Presidio-only path (44.8%, 60 ms per document on the same
+  # corpora). Do NOT pin detectors.presidio.entities below on the light path: it
+  # restricts detection to only those types.
   # Opt-in, PrivAiTe's own model in place of the Privacy Filter (see the minilm
   # block below): "minilm" (any platform, CPU) or "ultrafast" (macOS, Apple
   # Neural Engine, pip install 'privaite[ane]'). Leave "onnx" to keep today's

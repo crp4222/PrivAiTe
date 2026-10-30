@@ -1,9 +1,9 @@
 """Startup warnings that quote benchmark figures.
 
-The light preset warns the operator at boot and points to the onnx preset with
-its recall. That figure is read by people choosing a preset, so it follows the
-one the README publishes instead of drifting behind it (it said ~84% for a
-release after the published number had moved to 85.2%).
+The light preset warns the operator at boot with its own recall and points to
+the onnx preset with its recall. Those figures are read by people choosing a
+preset, so they follow the ones the README publishes instead of drifting behind
+them (it said ~84% for a release after the published number had moved to 85.2%).
 """
 
 from __future__ import annotations
@@ -25,9 +25,9 @@ from privaite.config.schema import (
 README = Path(__file__).resolve().parents[1] / "README.md"
 
 
-def _published_onnx_recall() -> int:
-    match = re.search(r"\| `onnx` \(default\) \| \*\*(\d+(?:\.\d+)?)%\*\*", README.read_text())
-    assert match, "README benchmark table no longer lists the onnx recall"
+def _published_recall(row: str) -> int:
+    match = re.search(rf"\| {re.escape(row)} \| (?:\*\*)?(\d+(?:\.\d+)?)%", README.read_text())
+    assert match, f"README benchmark table no longer lists the recall of {row}"
     return round(float(match.group(1)))
 
 
@@ -50,11 +50,18 @@ class _FakeEngine:
 @pytest.mark.parametrize(
     "entities, sentence",
     [
-        (None, "Use preset 'onnx' for ~{recall}% if recall matters."),
-        (["PERSON"], "or use preset 'onnx' for ~{recall}%."),
+        (
+            None,
+            "Presidio-only path (~{light}% recall on the benchmark). "
+            "Use preset 'onnx' for ~{onnx}% if recall matters.",
+        ),
+        (
+            ["PERSON"],
+            "light recall (~{light}% on the benchmark), or use preset 'onnx' for ~{onnx}%.",
+        ),
     ],
 )
-async def test_light_preset_warning_quotes_the_published_onnx_recall(
+async def test_light_preset_warning_quotes_the_published_recalls(
     monkeypatch, entities, sentence
 ) -> None:
     from privaite.pii import engine as engine_module
@@ -83,5 +90,7 @@ async def test_light_preset_warning_quotes_the_published_onnx_recall(
     finally:
         logging.getLogger("privaite").removeHandler(handler)
 
-    expected = sentence.format(recall=_published_onnx_recall())
+    expected = sentence.format(
+        light=_published_recall("`light`"), onnx=_published_recall("`onnx` (default)")
+    )
     assert any(expected in message for message in records), records

@@ -26,6 +26,8 @@ ADMIN_EMAIL=<EMAIL_ADDRESS_1>
 
 That is real engine output with the shipped config, not a mock-up. In the reply, `<EMAIL_ADDRESS_1>` becomes the real address again, streaming included. `[SECRET]` does not come back: the shipped configs redact secrets and mask card numbers for good, a [per-type setting](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#entity-overrides-per-type-methods). Detection runs locally and is best-effort, not a guarantee: the [threat model](https://github.com/crp4222/PrivAiTe#threat-model) says what it does not cover.
 
+Since 0.8.0, PrivAiTe also ships its own detection model, [`crp4222/privaite-pii-minilm`](https://huggingface.co/crp4222/privaite-pii-minilm), behind two opt-in presets: `ultrafast` runs it on the Apple Neural Engine at a median 17 ms per document, for coding agents on a Mac, and `minilm` runs it on CPU anywhere. On the public corpora the model never trained on, both mask more direct identifiers than the default ([benchmark](https://github.com/crp4222/PrivAiTe#benchmark): 82.9% and 82.7% against 72.7%). The default does not change unless you pick one.
+
 ## See it work in one command, no API key
 
 ```bash
@@ -90,16 +92,18 @@ Then run `ANTHROPIC_BASE_URL=http://localhost:8400 claude`. Also set `pii.detect
 
 ## Benchmark
 
-| Solution | Recall (span) | Recall (strict) | False positives | Tool-call protection |
+| Solution | Direct identifiers fully masked | Precision | Latency (median) | Left in tool-call arguments |
 |---|---|---|---|---|
-| `onnx` (default) | **85.2%** | **81.7%** | 2 / 14 | **100%** |
-| `light` (full Presidio) | 62.7% | 58.1% | 3 / 14 | **100%** |
-| LiteLLM Presidio guardrail | 70.3% | 65.3% | 3 / 14 | 0.0% |
-| LLM Guard (Anonymize) | 76.9% | 74.9% | 5 / 14 | 0.0% |
+| `minilm` (opt-in) | **82.9%** | 83.5% | 88 ms | **8.1%** |
+| `ultrafast` (opt-in, Neural Engine) | 82.7% | **85.4%** | **17 ms** | 10.8% |
+| `onnx` (default) | 72.7% | 66.5% | 196 ms | 13.5% |
+| `light` | 44.8% | 64.1% | 60 ms | 56.8% |
+| LiteLLM Presidio guardrail\* | 65.5% | 73.6% | 60 ms | 100% |
+| LLM Guard (Anonymize) | 46.4% | 51.9% | 256 ms | n/a, library |
 
-Measured on 120 real documents from the open [AI4Privacy `pii-masking-200k`](https://huggingface.co/datasets/ai4privacy/pii-masking-200k) dataset (458 PII items in DE, EN, FR, IT), plus 14 clean documents for false positives. Read the 100% precisely, it is structural: of the PII PrivAiTe detects in plain text, all of it is also removed from tool-call JSON, so its tool-call leak equals its detection misses (14.8% on this corpus). The two guardrails measured here do not look inside tool-call arguments; other gateways do, and the [comparison](https://github.com/crp4222/PrivAiTe/blob/main/docs/comparison.md) lists what each project states and when to pick it instead. LLM Guard's model is fine-tuned on this exact dataset, so its recall here is optimistic. Methodology, per-language tables, out-of-distribution checks and reproduction: [privaite-bench](https://github.com/crp4222/privaite-bench).
+Macro average over the 3 corpora of [privaite-bench](https://github.com/crp4222/privaite-bench) that PrivAiTe's model never trained on, 627 English documents labeled by their authors: TAB (127 court judgments labeled by law students), PIILO (200 student essays labeled by humans) and Privy (300 synthetic API payloads). The benchmark's 5 other corpora are left out of this table because the model trained on their train splits; none of the other systems lists these 3 in its training data. **Direct identifiers** are names, emails, phone numbers, ID, card and account numbers, secrets and addresses; one counts only when every character of it is masked. **Precision** is the share of masked characters that belong to a labeled entity, on TAB and Privy (PIILO labels only part of its personal data). **Latency** is per document on an Apple M1 Pro, on CPU except `ultrafast`. **Left in tool-call arguments** is the share of the 37 direct identifiers in Privy's 40 JSON records that still reach the provider when the record is sent inside a tool-call argument, a small sample: LiteLLM's guardrail does not parse tool-call JSON, and LLM Guard is a library with no notion of a request. \*Its detection is Presidio's: the first three columns are Presidio 2.2.364 alone, in-process, without the guardrail's HTTP hop.
 
-The opt-in `minilm` and `ultrafast` presets (0.8.0) run PrivAiTe's own model, [`crp4222/privaite-pii-minilm`](https://huggingface.co/crp4222/privaite-pii-minilm), in place of the Privacy Filter. On privaite-bench's 1,607 documents they fully mask 90.6% and 90.3% of direct identifiers (names, contacts, IDs, secrets...) against 72.3% for `onnx`, at a median 39 ms and 10 ms per document against 121 ms; on the corpora the model never trained on, 82.9% and 82.7% against 72.7%. In a live Claude Code session through the gateway, `ultrafast` leaked 0 of 24 planted values and scrubbed each request in 3.4 s against 23.8 s. Details, false positives on code included: [detection](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md#privaite-minilm-opt-in).
+`onnx` and `light` were measured on 0.7.2, and 0.8.0 leaves their detection unchanged. All 8 corpora, 25 systems, per-type tables and how to rerun them: [RESULTS.md](https://github.com/crp4222/privaite-bench/blob/main/RESULTS.md). Details on the model, false positives on code included: [detection](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md#privaite-minilm-opt-in).
 
 ## Integrations
 
@@ -220,11 +224,12 @@ Pick this if several clients talk to the model, or if any of them is an agent.
 
 ## None of this is a guarantee
 
-Detection is statistical. Published recall for PrivAiTe's default preset is
-85.2% span-level on a public corpus, with the
-[harness and labels open so the number can be rerun](https://github.com/crp4222/privaite-bench).
-Per type it ranges from 100% on emails, cards, IBANs, phones and IPs down to
-42% on URLs and 61% on organisation names. Any tool that tells you nothing gets
+Detection is statistical. PrivAiTe's default preset fully masks 72.7% of
+direct identifiers on the 3 public corpora of privaite-bench that PrivAiTe's own
+model never trained on, with the [harness open so the number can be rerun](https://github.com/crp4222/privaite-bench).
+Per type it ranges from 88% to 92% on person names, government and network IDs
+down to 64% on contacts, 62% on bank and card numbers and 9% on record numbers;
+the opt-in `minilm` preset reaches 82.9% on the same corpora. Any tool that tells you nothing gets
 through is either not measuring or not telling you.
 
 Treat the result as pseudonymisation and transfer minimisation, not
@@ -310,7 +315,8 @@ the model from the cache deletes that folder with it.
 Two exports of the model are supported, selected with `onnx_variant`
 ([configuration](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#onnx-variant)).
 They hold the same 4-bit weights; `q4` computes in fp32 and `q4f16` in fp16. On
-the comparative benchmark, CPU execution provider:
+the earlier comparative benchmark (120 AI4Privacy documents, since replaced by
+the 8-corpus one), CPU execution provider:
 
 | Variant | Recall | Recall (strict) | False positives | Gretel recall | One 1,024-token window | Peak memory |
 |---|---|---|---|---|---|---|
@@ -322,7 +328,7 @@ the whole benchmark finished faster with it in every run. The window figures
 come from one process that alternates the variants, so machine load cannot favour
 one of them; the full benchmark time also includes Presidio and moves with the
 load, so the seconds are in the
-[full report](https://github.com/crp4222/privaite-bench/blob/main/ONNX_VARIANTS.md)
+[full report](https://github.com/crp4222/privaite-bench/blob/a56a91c/ONNX_VARIANTS.md)
 and the ratio is what to read.
 
 246 of the 256 anonymized outputs (benchmark, clean documents, Gretel finance
@@ -345,19 +351,19 @@ Neither is perfect alone:
 
 ## Presets
 
-| Preset | What runs | Recall\* | False positives | Latency | Secrets |
+| Preset | What runs | Direct identifiers\* | Precision | Latency | Secrets |
 |--------|-----------|----------|-----------------|---------|---------|
-| `onnx` (default) | Presidio + Privacy Filter | **85.2%** | 2 / 14 | ~459ms | **yes** |
-| `light` | Presidio + built-in rules | 62.7% | 3 / 14 | ~81ms | structured formats |
-| `max` | onnx + GLiNER | higher OOD | more | ~0.7s | **yes** |
-| `minilm` (opt-in) | Presidio + PrivAiTe MiniLM on CPU | measured on another benchmark, [below](#privaite-minilm-opt-in) | | [below](#privaite-minilm-opt-in) | **yes** |
-| `ultrafast` (opt-in) | Presidio without spaCy + PrivAiTe MiniLM on the Neural Engine (macOS) | measured on another benchmark, [below](#privaite-minilm-opt-in) | | [below](#privaite-minilm-opt-in) | **yes** |
+| `onnx` (default) | Presidio + Privacy Filter | 72.7% | 66.5% | 196 ms | **yes** |
+| `light` | Presidio + built-in rules | 44.8% | 64.1% | 60 ms | structured formats |
+| `max` | onnx + GLiNER | 82.0% | 49.7% | 447 ms | **yes** |
+| `minilm` (opt-in) | Presidio + PrivAiTe MiniLM on CPU | **82.9%** | 83.5% | 88 ms | **yes** |
+| `ultrafast` (opt-in) | Presidio without spaCy + PrivAiTe MiniLM on the Neural Engine (macOS) | 82.7% | **85.4%** | **17 ms** | **yes** |
 
-\*Span recall on the [AI4Privacy benchmark](https://github.com/crp4222/PrivAiTe#benchmark): 120 real documents (458 PII items, labeled by 10 independent auditor agents and cross-checked against the dataset's own mask) across DE, EN, FR, IT, plus 14 clean documents for false positives. The latencies are means per corpus document from that local run, not large agent-request latency guarantees. `max` adds GLiNER (trained on data independent of AI4Privacy): on out-of-distribution corpora it raises recall by several points at the cost of more false positives and a torch dependency (`pip install 'privaite[gliner]'`); with it selected but not installed, the proxy fails at startup with an install hint rather than silently degrading.
+\*Share of direct identifiers fully masked, macro average over the 3 public corpora of privaite-bench that PrivAiTe's model never trained on (627 English documents, [benchmark](https://github.com/crp4222/PrivAiTe#benchmark)); precision is the share of masked characters that belong to a labeled entity. Latencies are medians per document on an Apple M1 Pro, on CPU except `ultrafast`, not large agent-request latency guarantees. `onnx`, `light` and `max` were measured on 0.7.2, and 0.8.0 leaves their detection unchanged. `max` adds GLiNER: more identifiers masked than `onnx`, at lower precision, more than twice the latency and a torch dependency (`pip install 'privaite[gliner]'`); with it selected but not installed, the proxy fails at startup with an install hint rather than silently degrading.
 
 **`onnx`** combines contextual recognition with structured rules. **`light`** uses Presidio and the same structured-secret rules; it has no contextual Privacy Filter model, and needs no model download beyond the spaCy language models. It misses names that no cue introduces when the text is not in the first configured language: `privaite verify --preset light` reports the English name of its own demo as leaked.
 
-> **Footgun:** do not pin `detectors.presidio.entities` to a short allowlist on the `light` path. It restricts detection to only those types and roughly halves recall (to ~36%). Leave `entities` unset; the proxy logs a warning at startup if it detects a low-recall configuration.
+> **Footgun:** do not pin `detectors.presidio.entities` to a short allowlist on the `light` path. It restricts detection to only those types and cuts recall sharply. Leave `entities` unset; the proxy logs a warning at startup if it detects a low-recall configuration.
 
 ## PrivAiTe MiniLM (opt-in)
 
@@ -369,23 +375,23 @@ structured-secret rules and the entity allowlist stay as under `onnx`. Nothing
 changes unless you set one of them; how to is in the
 [configuration reference](configuration.md#privaite-minilm-model-opt-in).
 
-Measured through PrivAiTe's engine on [privaite-bench](https://github.com/crp4222/privaite-bench)
-(8 corpora, 1,607 documents, each in its own language, CPU threads 8, Apple M1 Pro):
+Measured through PrivAiTe's engine on the 3 corpora of
+[privaite-bench](https://github.com/crp4222/privaite-bench) the model never
+trained on: TAB, PIILO and Privy, 627 English documents (CPU threads 8, Apple
+M1 Pro):
 
-| Preset | Direct identifiers fully masked | Precision | F2 | Never-trained corpora\* | Median per document | Per 1,000 characters |
-|---|---|---|---|---|---|---|
-| `onnx` (default) | 72.3% | 75.3% | 66.3 | 72.7% | 121 ms | 168 ms |
-| `minilm` | **90.6%** | 86.0% | **89.8** | **82.9%** | 39 ms | 53 ms |
-| `ultrafast` | 90.3% | **89.4%** | **89.8** | 82.7% | **10 ms** | **15 ms** |
+| Preset | Direct identifiers fully masked | Precision | Median per document | Per 1,000 characters |
+|---|---|---|---|---|
+| `onnx` (default) | 72.7% | 66.5% | 196 ms | 128 ms |
+| `minilm` | **82.9%** | 83.5% | 88 ms | 49 ms |
+| `ultrafast` | 82.7% | **85.4%** | **17 ms** | **11 ms** |
 
 Direct identifiers are names, emails, phone numbers, IDs, card and account
-numbers, secrets and addresses. \*The same measure on TAB, PIILO and Privy,
-which the model never trained on. It did train on the train splits of Nemotron-PII, OpenPII, Gretel and MAPA,
-whose test splits the benchmark scores, so the gain there (MAPA: 27.5% to
-94.1%) is partly in-distribution. The `onnx` latency is its published run on an
-idle machine; `minilm` and `ultrafast` ran with other work on the machine, so
-theirs are if anything high. The model card gives its scores on nine test sets
-from sources it never saw, against five other open PII models.
+numbers, secrets and addresses. The model trained on the train splits of the
+benchmark's 5 other corpora (Nemotron-PII, OpenPII, both Gretel sets and MAPA),
+so its scores there are left out. The latencies are the published
+privaite-bench runs. The model card gives its scores on nine test sets from
+sources it never saw, in several languages, against five other open PII models.
 
 What changes in practice:
 
@@ -401,16 +407,16 @@ What changes in practice:
   `ORGANIZATION` (21, such as `ConfigParser`), documentation links as `CONTACT`,
   issue numbers as `RECORD_ID`, and a few code fragments as `PERSON`, which
   Presidio's name cues also produce. Unmasking `ORGANIZATION` removes the class
-  names but costs 0.7 points of direct identifiers on the benchmark (the model
-  sometimes calls a person an organization), so it stays masked by default.
+  names but leaves some persons in clear (the model sometimes calls a person an
+  organization), so it stays masked by default.
 - **Names.** A full name is often masked word by word (`<PERSON_2> <PERSON_1>`).
   Short lower-case requests that name someone with no context ("call maria")
   are its weak spot; GLiNER PII finds 1 to 5 more of those names in 100.
 - **`ultrafast` without spaCy.** Presidio runs on blank spaCy pipelines: its
   patterns and PrivAiTe's recognizers still fire, spaCy's named entities do
   not, so a name with no cue around it is the model's alone. On this benchmark
-  that costs little (90.3% against 90.6% of direct identifiers) and raises precision
-  (89.4% against 86.0%).
+  that costs little (82.7% against 82.9% of direct identifiers) and raises precision
+  (85.4% against 83.5%).
 - **Whole words.** The model labels pieces of words and sometimes starts a name
   on the second piece (`H` + `ello Marie`) or stops one piece short; the span
   then takes the whole word, so no fragment of a name reaches the provider.
@@ -532,7 +538,7 @@ contains the before/after counts, individual timings and reproduction commands.
 
 ## Experimental model evaluation
 
-The [Privy and Kiji benchmark](https://github.com/crp4222/privaite-bench/blob/main/KIJI_PRIVY.md)
+The [Privy and Kiji benchmark](https://github.com/crp4222/privaite-bench/blob/a56a91c/KIJI_PRIVY.md)
 checks the 0.5.0 source on 300 synthetic protocol traces, the existing
 120-document multilingual corpus, clean inputs, and long-log regressions.
 Kiji is an adapter in the benchmark repository, not a supported PrivAiTe preset.
@@ -1505,17 +1511,18 @@ Presidio is excellent and PrivAiTe builds on it. The point of this table is not 
 
 ## The tool-call gap, measured
 
-The [reproducible benchmark](https://github.com/crp4222/privaite-bench) runs the REAL competitor integrations, configured at their genuine best, and places the same PII inside a tool-call argument and a multimodal text part. Measured results on 120 real documents labeled by independent auditors:
+The [reproducible benchmark](https://github.com/crp4222/privaite-bench) runs the real competitor integrations and sends the same public record in each part of an OpenAI-style request. On the 40 records of Privy, the one corpus of that suite PrivAiTe's model never trained on (37 direct identifiers: names, contacts, IDs, secrets, addresses), share of direct identifiers that still reach the provider, lower is better:
 
-| | Recall (flat text) | Tool-call leak | Multimodal leak |
-|---|---|---|---|
-| PrivAiTe `onnx` (default) | **85.2%** | **14.8%** | **14.8%** |
-| LLM Guard (Anonymize) | 76.9% | 100% | 100% |
-| LiteLLM Presidio guardrail | 70.3% | 100% | 29.7% |
+| | User message | Multimodal part | Tool-call arguments | Tool result |
+|---|---|---|---|---|
+| PrivAiTe `minilm` (opt-in) | **0.0%** | **0.0%** | **8.1%** | **0.0%** |
+| PrivAiTe `onnx` (default) | 5.4% | 5.4% | 13.5% | 5.4% |
+| LiteLLM Presidio guardrail | 16.2% | 16.2% | 100% | 16.2% |
+| Kiji Privacy Proxy 1.6.4 | 24.3% | 100% | 100% | 24.3% |
 
-LiteLLM's guardrail does scrub multimodal text parts (hence its low multimodal leak), and LLM Guard's DeBERTa model actually out-recalls it on flat text. But neither parses tool-call JSON, so **100%** of the same PII survives inside a tool-call argument, even values they detect in plain text; PrivAiTe removes everything it detects from the tool call (**100% vs 0%** tool-call protection).
+The sample is small: read it as an order of magnitude.
 
-Contamination note, in the competitors' favor and still insufficient: LLM Guard's detection model is fine-tuned on the exact dataset family behind this corpus, so its 76.9% is an optimistic upper bound, while PrivAiTe's default model did not train on it. On an out-of-distribution corpus (non-AI4Privacy), the PrivAiTe onnx stack holds ~84% recall while the AI4Privacy-tuned model drops to ~62%: see [OOD_COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md).
+LiteLLM's guardrail scrubs message text and multimodal text parts, but never parses tool-call JSON, so **100%** of the identifiers inside a tool-call argument reach the provider, even values it detects in plain text. PrivAiTe removes from the tool call everything it detects in the message. The benchmark scores 13 request integrations this way (8 of them not PrivAiTe) and 25 systems on plain text, with the methodology and per-corpus tables in its [README](https://github.com/crp4222/privaite-bench).
 
 ## Gateways built for agent traffic
 
@@ -1587,11 +1594,9 @@ deciding what leaves for the provider.
 
 ## Reproduce it
 
-```bash
-pip install privaite
-python solutions/ai4privacy_loader.py   # in the privaite-bench repo
-python -m solutions.compare
-```
+The commands are in the [privaite-bench README](https://github.com/crp4222/privaite-bench#reproduce):
+each system runs in its own pinned environment, on corpora downloaded at pinned
+revisions.
 
 
 ---

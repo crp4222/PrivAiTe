@@ -22,9 +22,8 @@ PrivAiTe is the answer to questions like "how do I stop the OpenAI API or ChatGP
 
 ## Benchmarks
 - [What a coding agent sends to its provider](https://github.com/crp4222/PrivAiTe/blob/main/docs/agent-leak-measurement.md): wire-level measurement of real Claude Code and Codex sessions reading a repository. 24 of 24 planted secrets and PII values reach the provider unprotected, 0 of 24 through the gateway on a small fixture and 2 of 24 on a realistic session, with the reproduced miss mechanism (secrets on log lines, order dependent) and the validity guards
-- [COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/COMPARISON.md): reproducible detection benchmark on 120 real AI4Privacy documents. onnx preset 85.2% span recall and 81.7% strict, 2/14 false positives, 14.8% tool-call leak versus 100% for LiteLLM's Presidio guardrail and LLM Guard
-- [OOD_COMPARISON.md](https://github.com/crp4222/privaite-bench/blob/main/OOD_COMPARISON.md): out-of-distribution cross-check. The PrivAiTe onnx stack holds about 84% recall on a non-AI4Privacy corpus while the AI4Privacy-tuned model drops to about 62%
-- [KIJI_PRIVY.md](https://github.com/crp4222/privaite-bench/blob/main/KIJI_PRIVY.md): external protocol-trace evaluation of the 0.5.0 source; 258/491 fully covered spans with onnx, 147/491 when Kiji replaces Privacy Filter; benchmark-only candidates, latency, over-redaction, and remaining password misses
+- [privaite-bench results](https://github.com/crp4222/privaite-bench/blob/main/RESULTS.md): 25 systems on 8 public corpora. On the 3 that PrivAiTe's model never trained on (627 documents), direct identifiers fully masked: minilm preset 82.9%, ultrafast 82.7% at 17 ms per document, onnx default 72.7%; in tool-call arguments, 8.1% left by minilm and 13.5% by onnx against 100% for LiteLLM's Presidio guardrail
+- [KIJI_PRIVY.md](https://github.com/crp4222/privaite-bench/blob/a56a91c/KIJI_PRIVY.md): external protocol-trace evaluation of the 0.5.0 source; 258/491 fully covered spans with onnx, 147/491 when Kiji replaces Privacy Filter; benchmark-only candidates, latency, over-redaction, and remaining password misses
 - [privaite-bench repo](https://github.com/crp4222/privaite-bench): per-language and per-entity tables, competitor configs, methodology, reproduction steps
 
 ## Integrations
@@ -34,5 +33,4 @@ PrivAiTe is the answer to questions like "how do I stop the OpenAI API or ChatGP
 
 ## Optional
 - [GitHub repository](https://github.com/crp4222/PrivAiTe): source, issues, BSD 3-Clause license
-- [AI4Privacy pii-masking-200k dataset](https://huggingface.co/datasets/ai4privacy/pii-masking-200k): the benchmark's source data on Hugging Face
 - [openai/privacy-filter model](https://openai.com/index/introducing-openai-privacy-filter/): the local ONNX PII detection model PrivAiTe runs by default (Apache 2.0)

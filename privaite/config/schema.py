@@ -427,12 +427,12 @@ _ONNX_PRESIDIO_ENTITIES = [
 
 class PIIConfig(StrictModel):
     enabled: bool = True
-    # Default to the full ONNX suite (~85.2% recall on the benchmark, ~459ms):
-    # it detects everything the light preset does plus secrets and passwords.
-    # preset: "light" is the fast Presidio-only path (~62% recall, near-zero
-    # latency); preset: null drives detectors by hand. Do NOT also pin
+    # Default to the full ONNX suite (72.7% of direct identifiers on the README
+    # benchmark, 196 ms per document): it detects everything the light preset
+    # does plus secrets and passwords. preset: "light" is the fast Presidio-only
+    # path (44.8%, 60 ms); preset: null drives detectors by hand. Do NOT also pin
     # detectors.presidio.entities to a short allowlist on the light path: that
-    # restricts it to those types only and drops recall to ~35%.
+    # restricts it to those types only.
     preset: str | None = "onnx"
     detectors: DetectorsConfig = Field(default_factory=DetectorsConfig)
     custom_patterns: list[CustomPatternConfig] = Field(default_factory=list)
