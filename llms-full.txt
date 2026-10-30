@@ -30,7 +30,7 @@ That is real engine output with the shipped config, not a mock-up. In the reply,
 
 ```bash
 docker run --rm \
-  ghcr.io/crp4222/privaite:0.7.3 \
+  ghcr.io/crp4222/privaite:0.8.0 \
   python -m privaite verify
 ```
 
@@ -52,18 +52,18 @@ It starts a throwaway provider on 127.0.0.1, sends the same agent-shaped request
 docker run -d -p 8400:8400 \
   -e PRIVAITE_API_KEYS=change-me \
   -e OPENAI_API_KEY=sk-... \
-  ghcr.io/crp4222/privaite:0.7.3
+  ghcr.io/crp4222/privaite:0.8.0
 ```
 
 **pip:** the same proxy with the same shipped config, which exposes `gpt-4o-mini` and `gpt-4o`.
 ```bash
-python -m pip install --upgrade "privaite>=0.7.3"
+python -m pip install --upgrade "privaite>=0.8.0"
 python -m spacy download en_core_web_lg && python -m spacy download fr_core_news_md
-curl -fsSLO https://raw.githubusercontent.com/crp4222/PrivAiTe/v0.7.3/config/privaite.openai.yaml
+curl -fsSLO https://raw.githubusercontent.com/crp4222/PrivAiTe/v0.8.0/config/privaite.openai.yaml
 OPENAI_API_KEY=sk-... PRIVAITE_API_KEYS=change-me python -m privaite --config privaite.openai.yaml
 ```
 
-**Connect:** point any OpenAI-compatible client at `http://localhost:8400/v1` with the key `change-me` (from Open WebUI running in Docker: `http://host.docker.internal:8400/v1`). For Ollama, Azure or any other provider, [write your own config](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md) and [mount it in Docker](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#docker-with-a-custom-config). The image is also on Docker Hub as `crp4222/privaite:0.7.3`, and client snippets are in [`examples/`](https://github.com/crp4222/PrivAiTe/tree/main/examples/).
+**Connect:** point any OpenAI-compatible client at `http://localhost:8400/v1` with the key `change-me` (from Open WebUI running in Docker: `http://host.docker.internal:8400/v1`). For Ollama, Azure or any other provider, [write your own config](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md) and [mount it in Docker](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#docker-with-a-custom-config). The image is also on Docker Hub as `crp4222/privaite:0.8.0`, and client snippets are in [`examples/`](https://github.com/crp4222/PrivAiTe/tree/main/examples/).
 
 ## Claude Code and Codex
 
@@ -98,6 +98,8 @@ Then run `ANTHROPIC_BASE_URL=http://localhost:8400 claude`. Also set `pii.detect
 | LLM Guard (Anonymize) | 76.9% | 74.9% | 5 / 14 | 0.0% |
 
 Measured on 120 real documents from the open [AI4Privacy `pii-masking-200k`](https://huggingface.co/datasets/ai4privacy/pii-masking-200k) dataset (458 PII items in DE, EN, FR, IT), plus 14 clean documents for false positives. Read the 100% precisely, it is structural: of the PII PrivAiTe detects in plain text, all of it is also removed from tool-call JSON, so its tool-call leak equals its detection misses (14.8% on this corpus). The two guardrails measured here do not look inside tool-call arguments; other gateways do, and the [comparison](https://github.com/crp4222/PrivAiTe/blob/main/docs/comparison.md) lists what each project states and when to pick it instead. LLM Guard's model is fine-tuned on this exact dataset, so its recall here is optimistic. Methodology, per-language tables, out-of-distribution checks and reproduction: [privaite-bench](https://github.com/crp4222/privaite-bench).
+
+The opt-in `minilm` and `ultrafast` presets (0.8.0) run PrivAiTe's own model, [`crp4222/privaite-pii-minilm`](https://huggingface.co/crp4222/privaite-pii-minilm), in place of the Privacy Filter. On privaite-bench's 1,607 documents they mask 90.6% and 90.3% of persons against 72.3% for `onnx`, at a median 39 ms and 10 ms per document against 121 ms; on the corpora the model never trained on, 82.9% and 82.7% against 72.7%. In a live Claude Code session through the gateway, `ultrafast` leaked 0 of 24 planted values and scrubbed each request in 3.4 s against 23.8 s. Details, false positives on code included: [detection](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md#privaite-minilm-opt-in).
 
 ## Integrations
 

@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-30
+
 ### Added
 - Two opt-in presets run PrivAiTe's own PII model,
   [`crp4222/privaite-pii-minilm`](https://huggingface.co/crp4222/privaite-pii-minilm)
@@ -16,6 +18,9 @@ All notable changes to this project are documented here. The format follows
   unless you set one. The detector is also available on its own
   (`detectors.minilm`, `backend: onnx | onnx_int8 | coreml`), and Presidio
   can run without spaCy models (`detectors.presidio.nlp_engine: blank`).
+  The Open WebUI filter (0.1.19) and the LiteLLM guardrail offer both presets
+  and require `privaite>=0.8.0`; the Docker image can bake the model with
+  `--build-arg MINILM=onnx`.
 
 ### Security
 - LiteLLM guardrail: `extra_body` was not scanned, and LiteLLM merges it over

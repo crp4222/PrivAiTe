@@ -1,7 +1,7 @@
 # Digest-pinned base image, refreshed by hand at every release (Debian security
 # fixes): docker buildx imagetools inspect python:3.13-slim, then move the date.
-# Base image checked on 2026-10-23
-FROM python:3.13-slim@sha256:57b29a7c050c4e679e4bea572e14b3965cf4b5839de2da49d55e49ffc4024f39
+# Base image checked on 2026-10-30
+FROM python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential curl \
