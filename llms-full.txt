@@ -390,6 +390,16 @@ What changes in practice:
   `NETWORK_ID`, `RECORD_ID` and `CONTACT` (emails, phones, URLs, user names) to
   what is masked. Remove a type from `detectors.minilm.label_mapping` to keep it
   in clear.
+- **False positives on code.** On 789,000 characters of the Python standard
+  library (code and comments, almost no personal data besides author names),
+  `ultrafast` masks 189 spans, `onnx` 475 and `minilm` 551. Most of what `onnx`
+  and `minilm` mask there are dates found by spaCy (years, "January 1"), which
+  `ultrafast` does not run. The model adds its own: class names as
+  `ORGANIZATION` (21, such as `ConfigParser`), documentation links as `CONTACT`,
+  issue numbers as `RECORD_ID`, and a few code fragments as `PERSON`, which
+  Presidio's name cues also produce. Unmasking `ORGANIZATION` removes the class
+  names but costs 0.7 points of persons on the benchmark (the model sometimes
+  calls a person an organization), so it stays masked by default.
 - **Names.** A full name is often masked word by word (`<PERSON_2> <PERSON_1>`).
   Short lower-case requests that name someone with no context ("call maria")
   are its weak spot; GLiNER PII finds 1 to 5 more of those names in 100.
