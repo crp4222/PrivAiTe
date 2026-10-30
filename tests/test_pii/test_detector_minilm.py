@@ -758,3 +758,90 @@ async def test_shutdown_releases_the_model():
 
     with pytest.raises(RuntimeError, match="not initialized"):
         await detector.detect("NameA")
+
+
+# ---------------------------------------------------------------------------
+# Whole words
+# ---------------------------------------------------------------------------
+
+
+def _span(text: str, piece: str, kind: str = "PERSON") -> dict:
+    start = text.index(piece)
+    return {
+        "entity_type": kind,
+        "text": piece,
+        "start": start,
+        "end": start + len(piece),
+        "score": 1.0,
+    }
+
+
+@pytest.mark.parametrize(
+    ("text", "piece", "expected"),
+    [
+        ("say 'Hello Marie' now", "ello Marie", "Hello Marie"),  # started on a word's 2nd piece
+        ("Sąd Okręgowy w Warszawie", "ąd Okręgowy", "Sąd Okręgowy"),  # accented first letter
+        ("call Dupo nt", "Dupo", "Dupo"),  # ends at a space: nothing to extend
+        ("call Dupont today", "Dupo", "Dupont"),  # stopped one piece short
+        ("id 41540575 here", "154", "41540575"),
+    ],
+)
+def test_a_span_cut_inside_a_word_takes_the_whole_word(text, piece, expected):
+    (span,) = detector_minilm._to_whole_words([_span(text, piece)], text)
+    assert span["text"] == expected == text[span["start"] : span["end"]]
+
+
+@pytest.mark.parametrize(
+    ("text", "piece"),
+    [
+        ("SMTP_HOST=mail.example.com", "HOST"),  # never grows into an identifier
+        ("given__name__nonbinary", "nonbinary"),
+        ("x" * 80 + "Marie", "Marie"),  # a word longer than any name: left as drawn
+        ("/home/marie", "marie"),
+    ],
+)
+def test_identifiers_and_overlong_words_are_left_as_drawn(text, piece):
+    (span,) = detector_minilm._to_whole_words([_span(text, piece)], text)
+    assert span["text"] == piece
+
+
+@pytest.mark.asyncio
+async def test_the_detector_masks_the_whole_word():
+    detector, _ = _detector()
+
+    class Splitting(_WordTokenizer):
+        """Splits "xNameA" into "x" + "NameA", as XLM-R splits a first letter."""
+
+        def __call__(self, text, **kwargs):
+            encoding = super().__call__(text, **kwargs)
+            ids, offsets = [], []
+            for token, (start, end) in zip(
+                encoding["input_ids"], encoding["offset_mapping"], strict=True
+            ):
+                word = text[start:end]
+                if word.startswith("xName"):
+                    head = self.vocab.setdefault("x", len(self.vocab) + 1)
+                    tail = self.vocab.setdefault(word[1:], len(self.vocab) + 1)
+                    self.words[head], self.words[tail] = "x", word[1:]
+                    ids += [head, tail]
+                    offsets += [(start, start + 1), (start + 1, end)]
+                else:
+                    ids.append(token)
+                    offsets.append((start, end))
+            return {"input_ids": ids, "offset_mapping": offsets}
+
+    detector._tokenizer = Splitting()
+    detector._logits = _RuleLogits(detector._tokenizer)
+
+    assert [e.text for e in await detector.detect("hi xNameA there")] == ["xNameA"]
+
+
+def test_the_docker_image_bakes_the_model_only_on_request():
+    """The default preset does not use the model: the image stays the same size
+    unless built with --build-arg MINILM=<backend>, which fetches exactly what
+    that backend loads at the pinned revision."""
+    dockerfile = (Path(__file__).resolve().parents[2] / "Dockerfile").read_text()
+    assert 'ARG MINILM=""' in dockerfile
+    assert 'if [ -n "$MINILM" ]' in dockerfile
+    assert "BACKEND_FILES[os.environ['MINILM']]" in dockerfile
+    assert "revision=config.revision" in dockerfile.split("ARG MINILM")[1]

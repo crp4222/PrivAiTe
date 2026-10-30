@@ -71,9 +71,30 @@ _LANG_MODELS = {
 }
 
 
+def _require_preset(config_cls: Any, preset: str) -> None:
+    """Fail with the fix, not a validation error, when the installed privaite
+    predates the preset (the minilm presets came after the onnx/light pair)."""
+    try:
+        config_cls(preset=preset)
+    except ValueError as exc:
+        if "Unknown PII preset" in str(exc):
+            raise RuntimeError(
+                f"preset {preset!r} is not known to the installed privaite; upgrade privaite"
+            ) from None
+        raise
+
+
+# The presets this filter offers; an unknown valve value falls back to "light".
+_PRESETS = ("light", "onnx", "minilm", "ultrafast")
+
+
 class Filter:
     class Valves(BaseModel):
-        preset: str = Field(default="onnx", description="'onnx' (full, secrets) or 'light' (fast)")
+        preset: str = Field(
+            default="onnx",
+            description="'onnx' (full, secrets), 'light' (fast), 'minilm' (PrivAiTe's own model, "
+            "CPU) or 'ultrafast' (that model on the Apple Neural Engine, macOS only)",
+        )
         languages: str = Field(default="en,fr", description="Comma-separated spaCy languages.")
         deanonymize: bool = Field(default=True, description="Restore PII in the response.")
         block_entities: str = Field(
@@ -106,7 +127,7 @@ class Filter:
         )
         from privaite.pii.engine import PIIEngine
 
-        preset = self.valves.preset if self.valves.preset in ("light", "onnx") else "light"
+        preset = self.valves.preset if self.valves.preset in _PRESETS else "light"
         block_entities = self._block_entities()
         key = (preset, tuple(languages), self.valves.deanonymize, tuple(block_entities))
         if self._engine is not None and self._engine_key == key:
@@ -130,6 +151,8 @@ class Filter:
                     "pii.block_entities"
                 )
 
+            if preset not in ("light", "onnx"):
+                _require_preset(PIIConfig, preset)
             config = PIIConfig(
                 enabled=True,
                 preset=preset,

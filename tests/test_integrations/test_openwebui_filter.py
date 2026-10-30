@@ -440,3 +440,37 @@ async def test_inlet_never_issues_a_placeholder_literal_from_the_body():
 
     assert out["messages"][0]["content"] == "reach me at <EMAIL_ADDRESS_2>"
     assert meta["privaite_map"] == {"<EMAIL_ADDRESS_2>": "carol.smith@example.net"}
+
+
+@pytest.mark.parametrize(
+    ("valve", "expected"),
+    [("minilm", "minilm"), ("ultrafast", "ultrafast"), ("onnx", "onnx"), ("turbo", "light")],
+)
+@pytest.mark.asyncio
+async def test_the_preset_valve_offers_the_minilm_presets(monkeypatch, valve, expected):
+    from privaite.pii.engine import PIIEngine
+
+    built: list[str] = []
+
+    async def fake_initialize(self):
+        built.append(self.config.preset)
+
+    monkeypatch.setattr(PIIEngine, "initialize", fake_initialize)
+    module = _load_filter()
+    flt = module.Filter()
+    flt.valves.preset = valve
+
+    await flt._engine_for(["en"])
+
+    assert built == [expected]
+
+
+def test_a_preset_the_installed_privaite_predates_names_the_upgrade():
+    module = _load_filter()
+
+    class OldConfig:
+        def __init__(self, preset):
+            raise ValueError(f"Unknown PII preset '{preset}'. Valid presets: light, onnx")
+
+    with pytest.raises(RuntimeError, match="upgrade privaite"):
+        module._require_preset(OldConfig, "minilm")

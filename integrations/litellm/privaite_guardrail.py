@@ -260,10 +260,27 @@ async def _restore_arguments(engine: Any, arguments: str, mapping: Any) -> str:
     return json.dumps(await _restore_json_tree(engine, parsed, mapping), ensure_ascii=False)
 
 
+# The presets this guardrail offers; an unknown value falls back to "onnx".
+_PRESETS = ("light", "onnx", "minilm", "ultrafast")
+
+
+def _require_preset(config_cls: Any, preset: str) -> None:
+    """Fail with the fix, not a validation error, when the installed privaite
+    predates the preset (the minilm presets came after the onnx/light pair)."""
+    try:
+        config_cls(preset=preset)
+    except ValueError as exc:
+        if "Unknown PII preset" in str(exc):
+            raise RuntimeError(
+                f"preset {preset!r} is not known to the installed privaite; upgrade privaite"
+            ) from None
+        raise
+
+
 class PrivaiteGuardrail(CustomGuardrail):
     def __init__(self, **kwargs: Any) -> None:
         self.preset = kwargs.pop("preset", None) or "onnx"
-        if self.preset not in ("light", "onnx"):
+        if self.preset not in _PRESETS:
             self.preset = "onnx"
         self.languages = kwargs.pop("languages", None) or "en,fr"
         deanon = kwargs.pop("deanonymize", True)
@@ -342,6 +359,8 @@ class PrivaiteGuardrail(CustomGuardrail):
                     "pii.block_entities"
                 )
 
+            if self.preset not in ("light", "onnx"):
+                _require_preset(PIIConfig, self.preset)
             config = PIIConfig(
                 enabled=True,
                 preset=self.preset,

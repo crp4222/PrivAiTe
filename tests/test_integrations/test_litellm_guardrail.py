@@ -1799,3 +1799,24 @@ async def test_extra_body_only_request_is_not_early_returned():
     extra_body = {"messages": [{"role": "user", "content": "Mail marie.dupont@acme.com"}]}
     data = await gr.async_pre_call_hook(None, None, {"extra_body": extra_body}, "completion")
     assert "marie.dupont@acme.com" not in json.dumps(data["extra_body"])
+
+
+@pytest.mark.parametrize(
+    ("preset", "expected"),
+    [("minilm", "minilm"), ("ultrafast", "ultrafast"), ("light", "light"), ("turbo", "onnx")],
+)
+def test_the_guardrail_offers_the_minilm_presets(preset, expected):
+    module = _load()
+    guardrail = module.PrivaiteGuardrail(guardrail_name="privaite", preset=preset, languages="en")
+    assert guardrail.preset == expected
+
+
+def test_a_preset_the_installed_privaite_predates_names_the_upgrade():
+    module = _load()
+
+    class OldConfig:
+        def __init__(self, preset):
+            raise ValueError(f"Unknown PII preset '{preset}'. Valid presets: light, onnx")
+
+    with pytest.raises(RuntimeError, match="upgrade privaite"):
+        module._require_preset(OldConfig, "ultrafast")

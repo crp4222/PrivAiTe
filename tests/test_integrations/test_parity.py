@@ -22,7 +22,7 @@ FILTER = REPO_ROOT / "integrations" / "openwebui" / "privaite_filter.py"
 
 # Module-level helpers that exist, by design, as a copy in each integration.
 # Adding a shared helper means adding it here, so its copies are held together.
-SHARED_HELPERS = ("_restore_json_tree", "_restore_arguments")
+SHARED_HELPERS = ("_restore_json_tree", "_restore_arguments", "_require_preset")
 
 
 def _logic(path: Path, name: str) -> str:

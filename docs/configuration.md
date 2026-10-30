@@ -500,7 +500,7 @@ pii:
 | Preset | Presidio | Model | Extra install |
 |---|---|---|---|
 | `minilm` | with its spaCy models, as under `onnx` | ONNX fp32 on CPU | none |
-| `ultrafast` | blank spaCy pipelines (`nlp_engine: blank`) | Core ML on the Neural Engine | `pip install 'privaite[ane]'`, macOS only |
+| `ultrafast` | blank spaCy pipelines (`nlp_engine: blank`) | Core ML on the Neural Engine | `pip install 'privaite[ane]'`, macOS only; no spaCy model to download |
 
 Both keep the Presidio allowlist, the structured-secret rules and every other
 setting of `onnx`. `ultrafast` is meant for agent CLIs on a Mac (Claude Code,
@@ -565,7 +565,8 @@ The only request PrivAiTe makes on your behalf is the one to your provider.
 Two downloads happen once, on a first run outside Docker: the detection model
 from the Hugging Face Hub (about 900 MB; about 490 MB under `minilm` and 250 MB
 under `ultrafast`) and any missing spaCy language model. The Docker image
-carries the default model and spaCy models; it does not carry the MiniLM model.
+carries the default model and spaCy models; it carries the MiniLM model only
+when built with `--build-arg MINILM=onnx` (or `onnx_int8`).
 
 Several dependencies contact a third party on their own, and since 0.7.2
 PrivAiTe turns each of them off (on an earlier version, export the variables

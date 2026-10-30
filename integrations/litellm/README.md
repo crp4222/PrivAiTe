@@ -21,7 +21,9 @@ guardrails:
       guardrail: privaite_guardrail.PrivaiteGuardrail
       mode: [pre_call, post_call]   # pre_call anonymizes input, post_call restores output
       default_on: true              # run on every request; or false to opt in per request
-      preset: "onnx"                # "onnx" (full, detects secrets) or "light" (fast)
+      preset: "onnx"                # "onnx" (full, detects secrets), "light" (fast),
+                                    # "minilm" (PrivAiTe's own model, CPU) or
+                                    # "ultrafast" (that model on the Apple Neural Engine, macOS)
       languages: "en,fr"            # comma-separated spaCy languages
       deanonymize: true             # restore the real values in the response
       # block_entities: ["US_SSN", "CREDIT_CARD"]  # reject these types outright (see below)
@@ -51,7 +53,9 @@ detector reads them.
 
 - The first request after enabling it is slow: importing `privaite` pulls in
   Presidio and spaCy (and, with `preset: "onnx"`, downloads the Privacy Filter
-  model). Use `preset: "light"` to skip the ONNX model.
+  model). Use `preset: "light"` to skip the ONNX model, or `preset: "minilm"`
+  for PrivAiTe's smaller model (both minilm presets need a privaite release
+  that ships them).
 - This is local pseudonymization, not anonymization, and detection is best-effort.
   See the Threat model in the main README.
 - If you do not want these dependencies inside your LiteLLM proxy image, run

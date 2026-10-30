@@ -18,7 +18,11 @@ text.
    `privaite_filter.py`, save, then enable it.
 3. Open the function's valves to pick the preset and the languages. The default
    `onnx` preset detects everything including secrets; switch to `light` for the
-   fast, zero false-positive path.
+   fast, zero false-positive path. `minilm` runs PrivAiTe's own model on CPU
+   instead of the Privacy Filter (a smaller download, several times faster);
+   `ultrafast` runs it on the Apple Neural Engine and only applies to an Open
+   WebUI installed natively on a Mac with `privaite[ane]`, not to the Docker
+   image. Both need a privaite release that ships them.
 
 ## Blocking specific PII types
 

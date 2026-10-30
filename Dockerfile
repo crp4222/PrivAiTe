@@ -40,6 +40,16 @@ ARG ONNX_VARIANT=""
 RUN python -c "import os; from privaite.config.schema import OnnxDetectorConfig; from privaite.pii.detector_onnx import download_onnx_model; config = OnnxDetectorConfig(); download_onnx_model(repo_id=config.model_name, variant=os.environ.get('ONNX_VARIANT') or config.onnx_variant, revision=config.revision)" && \
     python -c "from privaite.config.schema import OnnxDetectorConfig; from transformers import AutoTokenizer; config = OnnxDetectorConfig(); AutoTokenizer.from_pretrained(config.model_name, revision=config.revision, trust_remote_code=config.trust_remote_code)"
 
+# --build-arg MINILM=onnx (or onnx_int8) also bakes PrivAiTe's MiniLM model for
+# preset: minilm, so that preset starts offline too. Off by default: the
+# default preset does not use it, and it adds about 490 MB (120 MB for
+# onnx_int8). The mounted config then needs the same pii.detectors.minilm.backend.
+ARG MINILM=""
+RUN if [ -n "$MINILM" ]; then \
+      python -c "import os; from privaite.config.schema import MiniLMDetectorConfig; from privaite.pii.detector_minilm import BACKEND_FILES, download_minilm_files; config = MiniLMDetectorConfig(); download_minilm_files(config.model_name, ('config.json',) + BACKEND_FILES[os.environ['MINILM']], revision=config.revision)" && \
+      python -c "from privaite.config.schema import MiniLMDetectorConfig; from transformers import AutoTokenizer; config = MiniLMDetectorConfig(); AutoTokenizer.from_pretrained(config.model_name, revision=config.revision)"; \
+    fi
+
 COPY config/ config/
 
 EXPOSE 8400

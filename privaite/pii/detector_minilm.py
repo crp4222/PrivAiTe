@@ -81,6 +81,44 @@ def _with_trailing_marks(spans: list[dict], text: str) -> list[dict]:
     return spans
 
 
+# A word longer than this is not a name or a place: a span inside one (a hash,
+# a minified identifier) is left as the model drew it.
+_WORD_REACH = 64
+
+
+def _is_word_char(char: str) -> bool:
+    # Not the underscore: a span must never grow into a snake_case or
+    # upper-case identifier (`SMTP_HOST`), which agents need to read in clear.
+    return char.isalnum() or unicodedata.category(char) in ("Mn", "Me")
+
+
+def _to_whole_words(spans: list[dict], text: str) -> list[dict]:
+    """Extend a span that starts or ends inside a word to that word's edges.
+
+    The model labels sub-word tokens and sometimes starts a name on the second
+    piece of a word (`'Hello Marie'` came back as `H` + a span from `ello`), or
+    stops one piece short. A cut inside a word hands the provider the rest of
+    it, so the span takes the whole word: masking more is the safe direction.
+    """
+    for span in spans:
+        start, end = span["start"], span["end"]
+        if 0 < start < len(text) and _is_word_char(text[start - 1]) and _is_word_char(text[start]):
+            word_start = start
+            while word_start > 0 and _is_word_char(text[word_start - 1]):
+                word_start -= 1
+            if start - word_start <= _WORD_REACH:
+                start = word_start
+        if 0 < end < len(text) and _is_word_char(text[end - 1]) and _is_word_char(text[end]):
+            word_end = end
+            while word_end < len(text) and _is_word_char(text[word_end]):
+                word_end += 1
+            if word_end - end <= _WORD_REACH:
+                end = word_end
+        if (start, end) != (span["start"], span["end"]):
+            span["start"], span["end"], span["text"] = start, end, text[start:end]
+    return spans
+
+
 _COREML_PACKAGE = "coreml/pilot_ane_256.mlpackage"
 BACKEND_FILES: dict[str, tuple[str, ...]] = {
     "onnx": ("onnx/model.onnx",),
@@ -312,7 +350,7 @@ class MiniLMDetector(PIIDetector):
         rows = [self._run_window(ids[start:end], offsets[start:end]) for start, end in ranges]
         labels, scores, kept = _stitch_windows(rows, WINDOW_OVERLAP)
         spans = decode_bioes_spans(labels, scores, kept, text, _SEPARATOR_BEARING)
-        return _with_trailing_marks(spans, text)
+        return _to_whole_words(_with_trailing_marks(spans, text), text)
 
     def _run_window(self, ids: list[int], offsets: list[tuple[int, int]]) -> _WindowTokens:
         framed = [self._tokenizer.cls_token_id, *ids, self._tokenizer.sep_token_id]
