@@ -122,14 +122,15 @@ changes unless you set one of them; how to is in the
 Measured through PrivAiTe's engine on [privaite-bench](https://github.com/crp4222/privaite-bench)
 (8 corpora, 1,607 documents, each in its own language, CPU threads 8, Apple M1 Pro):
 
-| Preset | Persons fully masked | Precision | F2 | Never-trained corpora\* | Median per document | Per 1,000 characters |
+| Preset | Direct identifiers fully masked | Precision | F2 | Never-trained corpora\* | Median per document | Per 1,000 characters |
 |---|---|---|---|---|---|---|
 | `onnx` (default) | 72.3% | 75.3% | 66.3 | 72.7% | 121 ms | 168 ms |
 | `minilm` | **90.6%** | 86.0% | **89.8** | **82.9%** | 39 ms | 53 ms |
 | `ultrafast` | 90.3% | **89.4%** | **89.8** | 82.7% | **10 ms** | **15 ms** |
 
-\*Persons fully masked on TAB, PIILO and Privy, which the model never trained
-on. It did train on the train splits of Nemotron-PII, OpenPII, Gretel and MAPA,
+Direct identifiers are names, emails, phone numbers, IDs, card and account
+numbers, secrets and addresses. \*The same measure on TAB, PIILO and Privy,
+which the model never trained on. It did train on the train splits of Nemotron-PII, OpenPII, Gretel and MAPA,
 whose test splits the benchmark scores, so the gain there (MAPA: 27.5% to
 94.1%) is partly in-distribution. The `onnx` latency is its published run on an
 idle machine; `minilm` and `ultrafast` ran with other work on the machine, so
@@ -150,15 +151,15 @@ What changes in practice:
   `ORGANIZATION` (21, such as `ConfigParser`), documentation links as `CONTACT`,
   issue numbers as `RECORD_ID`, and a few code fragments as `PERSON`, which
   Presidio's name cues also produce. Unmasking `ORGANIZATION` removes the class
-  names but costs 0.7 points of persons on the benchmark (the model sometimes
-  calls a person an organization), so it stays masked by default.
+  names but costs 0.7 points of direct identifiers on the benchmark (the model
+  sometimes calls a person an organization), so it stays masked by default.
 - **Names.** A full name is often masked word by word (`<PERSON_2> <PERSON_1>`).
   Short lower-case requests that name someone with no context ("call maria")
   are its weak spot; GLiNER PII finds 1 to 5 more of those names in 100.
 - **`ultrafast` without spaCy.** Presidio runs on blank spaCy pipelines: its
   patterns and PrivAiTe's recognizers still fire, spaCy's named entities do
   not, so a name with no cue around it is the model's alone. On this benchmark
-  that costs little (90.3% against 90.6% of persons) and raises precision
+  that costs little (90.3% against 90.6% of direct identifiers) and raises precision
   (89.4% against 86.0%).
 - **Whole words.** The model labels pieces of words and sometimes starts a name
   on the second piece (`H` + `ello Marie`) or stops one piece short; the span
