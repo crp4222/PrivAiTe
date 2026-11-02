@@ -17,7 +17,7 @@ ADMIN_EMAIL=<EMAIL_ADDRESS_1>
 
 That is real engine output with the shipped config, not a mock-up. In the reply, `<EMAIL_ADDRESS_1>` becomes the real address again, streaming included. `[SECRET]` does not come back: the shipped configs redact secrets and mask card numbers for good, a [per-type setting](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#entity-overrides-per-type-methods). Detection runs locally and is best-effort, not a guarantee: the [threat model](https://github.com/crp4222/PrivAiTe#threat-model) says what it does not cover.
 
-Since 0.8.0, PrivAiTe also ships its own detection model, [`crp4222/privaite-pii-minilm`](https://huggingface.co/crp4222/privaite-pii-minilm), behind two opt-in presets: `ultrafast` runs it on the Apple Neural Engine at a median 17 ms per document, for coding agents on a Mac, and `minilm` runs it on CPU anywhere. On the public corpora the model never trained on, both mask more direct identifiers than the default ([benchmark](https://github.com/crp4222/PrivAiTe#benchmark): 82.9% and 82.7% against 72.7%). The default does not change unless you pick one.
+Since 0.8.0, PrivAiTe also ships its own detection model, [`crp4222/privaite-pii-minilm`](https://huggingface.co/crp4222/privaite-pii-minilm), behind two opt-in presets: `ultrafast` runs it on the Apple Neural Engine at a median 17 ms per document, and `minilm` runs it on CPU anywhere. On the public corpora the model never trained on, both mask more direct identifiers than the default ([benchmark](https://github.com/crp4222/PrivAiTe#benchmark): 82.9% and 82.7% against 72.7%). The default does not change unless you pick one.
 
 ## See it work in one command, no API key
 

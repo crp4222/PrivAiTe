@@ -101,12 +101,14 @@ Neither is perfect alone:
 | `onnx` (default) | Presidio + Privacy Filter | 72.7% | 66.5% | 196 ms | **yes** |
 | `light` | Presidio + built-in rules | 44.8% | 64.1% | 60 ms | structured formats |
 | `max` | onnx + GLiNER | 82.0% | 49.7% | 447 ms | **yes** |
-| `minilm` (opt-in) | Presidio + PrivAiTe MiniLM on CPU | **82.9%** | 83.5% | 88 ms | **yes** |
-| `ultrafast` (opt-in) | Presidio without spaCy + PrivAiTe MiniLM on the Neural Engine (macOS) | 82.7% | **85.4%** | **17 ms** | **yes** |
+| `minilm` (opt-in) | Presidio + PrivAiTe MiniLM on CPU | **82.9%** | 83.5% | 88 ms | yes, weaker in code (below) |
+| `ultrafast` (opt-in) | Presidio without spaCy + PrivAiTe MiniLM on the Neural Engine (macOS) | 82.7% | **85.4%** | **17 ms** | yes, weaker in code (below) |
 
 \*Share of direct identifiers fully masked, macro average over the 3 public corpora of privaite-bench that PrivAiTe's model never trained on (627 English documents, [benchmark](https://github.com/crp4222/PrivAiTe#benchmark)); precision is the share of masked characters that belong to a labeled entity. Latencies are medians per document on an Apple M1 Pro, on CPU except `ultrafast`, not large agent-request latency guarantees. `onnx`, `light` and `max` were measured on 0.7.2, and 0.8.0 leaves their detection unchanged. `max` adds GLiNER: more identifiers masked than `onnx`, at lower precision, more than twice the latency and a torch dependency (`pip install 'privaite[gliner]'`); with it selected but not installed, the proxy fails at startup with an install hint rather than silently degrading.
 
 **`onnx`** combines contextual recognition with structured rules. **`light`** uses Presidio and the same structured-secret rules; it has no contextual Privacy Filter model, and needs no model download beyond the spaCy language models. It misses names that no cue introduces when the text is not in the first configured language: `privaite verify --preset light` reports the English name of its own demo as leaked.
+
+**Secrets in code.** Measured on Samsung's [CredData](https://github.com/Samsung/CredData) (real code from 154 public repositories PrivAiTe's model never trained on, credentials reviewed by hand), `onnx` fully masks 60% of the credentials and `minilm` 35% with the 0.8.1 rules (22% for the model alone). Both catch private keys, JWTs, Basic headers, URL credentials and most passwords; what separates them is the generic keys and secrets assigned under arbitrary names, which the Privacy Filter model finds far more often (generic secrets 86% against 13%). For an agent working in code full of keys, keep the default `onnx`; `minilm` and `ultrafast` are the better choice where names dominate, in conversations and documents.
 
 > **Footgun:** do not pin `detectors.presidio.entities` to a short allowlist on the `light` path. It restricts detection to only those types and cuts recall sharply. Leave `entities` unset; the proxy logs a warning at startup if it detects a low-recall configuration.
 
@@ -214,6 +216,19 @@ some `.env` files:
   `glpat-`, Slack `xox?-`, AWS access key ids (`AKIA`), Google API keys
   (`AIza`) and Hugging Face `hf_`. Prefix and length are both required, so
   `sk-` on its own or `hf_hub_download` is not a key.
+
+Since 0.8.1, three formats are recognized by their shape alone, after a run on
+real code showed the presets without the Privacy Filter missing them entirely:
+
+- a private key block, from `-----BEGIN ... PRIVATE KEY-----` to its `END`
+  line, armor and encryption headers included, also when its line breaks are
+  JSON-escaped or when a tool's output limit cut it short; public keys and
+  certificates are left alone;
+- a JSON Web Token, by its two base64url JSON segments (`eyJ...eyJ...`),
+  wherever it sits;
+- HTTP Basic credentials after an `Authorization` header, and Bearer or Basic
+  values inside a header map (`{"Authorization": "Bearer ..."}`,
+  `headers['authorization'] = 'Basic ...'`).
 
 Since 0.7.1, these rules also cover credentials passed as command-line options:
 `--password`, `--passwd`, `--api-key`, `--client-secret`, the token options and

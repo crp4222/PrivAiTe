@@ -17,8 +17,18 @@ All notable changes to this project are documented here. The format follows
   startup. `/v1/pii/inspect` lists what the list let through under `allowed`
   and what kept a listed value redacted under `not_allowed`. See
   [configuration](docs/configuration.md#allowing-known-non-pii-values).
+- Private key blocks (armor included, also JSON-escaped or cut short), JSON
+  Web Tokens and HTTP Basic credentials are recognized as secrets by their
+  shape, in every preset that enables Presidio; Bearer and Basic values
+  inside a header map too. On the test side of Samsung's CredData (154
+  repositories), the `minilm` preset goes from 28% to 35% of credentials
+  fully masked; `onnx` stays at 60%.
 
 ### Changed
+- The docs no longer present `ultrafast` as the preset for coding agents: on
+  secrets in code, the Privacy Filter model of the default `onnx` preset finds
+  far more generic keys and secrets than PrivAiTe's model (see
+  [presets](docs/detection.md#presets)).
 - The published benchmark is now the 3 privaite-bench corpora PrivAiTe's model
   never trained on (627 documents labeled by their authors) instead of 120
   AI4Privacy documents labeled by agents. The README table, the presets table
