@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.8.1] - 2026-11-02
 
 ### Added
 - `pii.allow_list`: exact values or regexes that a detection must match in
