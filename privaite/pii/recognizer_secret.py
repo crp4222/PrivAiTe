@@ -51,6 +51,32 @@ _KNOWN_KEY = (
     r"|hf_[A-Za-z0-9]{30,}"
     r")(?![A-Za-z0-9_-])"
 )
+# A private key travels as an armored block. The whole block is the value, armor
+# included: the armor alone tells the provider nothing it would miss, and CredData,
+# the corpus these rules were measured on, labels the block that way. In a JSON or
+# YAML string the line breaks are escaped. A block cut short (a file read in
+# pages) is covered up to its last base64 line. Public keys and certificates have
+# other labels and are left alone.
+_PRIVATE_KEY_LABEL = r"(?-i:[A-Z0-9 ]{0,32}PRIVATE KEY(?: BLOCK)?)"
+_PEM_BLOCK = (
+    r"-----BEGIN " + _PRIVATE_KEY_LABEL + r"-----[\s\S]{16,16384}?"
+    r"-----END " + _PRIVATE_KEY_LABEL + r"-----"
+)
+_PEM_TRUNCATED = (
+    r"-----BEGIN " + _PRIVATE_KEY_LABEL + r"-----"
+    r"(?:(?:[ \t\r\n]|\\[rn])+(?:[A-Za-z0-9+/=]{16,}|(?-i:Proc-Type|DEK-Info|Comment):[^\r\n\\]*))+"
+)
+# A JSON Web Token: base64url JSON header and payload ("eyJ" encodes '{"'), then
+# the signature, empty when the token is unsigned. Segments of 8+ characters, so
+# "eyJ" in prose or a header alone is left alone.
+_JWT = (
+    r"(?<![A-Za-z0-9_-])(?-i:eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*)"
+    r"(?![A-Za-z0-9_-])"
+)
+# The Authorization header as an HTTP line, a curl -H argument or a header map in
+# code ("Authorization": "Basic ...", headers['Authorization'] = ...). Basic
+# carries base64 of "user:password".
+_AUTH_HEADER = r"\bauthorization[\"']?\]?[ \t]*[:=,][ \t]*[\"']?"
 # CLI option names are code identifiers and apply in every configured language.
 # They follow the assignment vocabulary, with the same kind of bounded prefix
 # (--db-password), so an agent echoing a restored credential is covered whatever
@@ -144,8 +170,11 @@ class StructuredSecretRecognizer(RegexSpanRecognizer):
             _ENV_LINE + _ENV_PASSWORD + r"'(?P<value>[^'\r\n]+)'",
             _ENV_LINE + _ENV_PASSWORD + r"(?P<value>[^\s\"'`]+)",
             r"(?P<value>" + _KNOWN_KEY + r")",
-            r"\bauthorization[ \t]*:[ \t]*bearer[ \t]+"
-            r"(?P<value>[a-z0-9._~+/-]+={0,2})",
+            _AUTH_HEADER + r"bearer[ \t]+(?P<value>[a-z0-9._~+/-]+={0,2})",
+            _AUTH_HEADER + r"basic[ \t]+(?P<value>[a-z0-9+/]{8,}={0,2})(?![a-z0-9+/=])",
+            r"(?P<value>" + _PEM_BLOCK + r")",
+            r"(?P<value>" + _PEM_TRUNCATED + r")",
+            r"(?P<value>" + _JWT + r")",
         ]
         self._specs = [
             (re.compile(pattern, re.IGNORECASE), "SECRET", 0.85, "value") for pattern in patterns
