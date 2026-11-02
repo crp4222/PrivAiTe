@@ -19,6 +19,7 @@ deterministically, without retraining anything or waiting for a release.
 | The question | The mechanism |
 |---|---|
 | What counts as sensitive here, beyond the built-in types? | [`custom_patterns`](configuration.md#custom-regex-patterns) |
+| What only looks like PII and must stay readable? | [`allow_list`](configuration.md#allowing-known-non-pii-values) |
 | What happens to each type on the way out? | [`entity_overrides`](configuration.md#entity-overrides-per-type-methods) |
 | What must never leave at all, even as a stand-in? | [`block_entities`](configuration.md#blocking-specific-pii-types-hard-policy-gate) |
 

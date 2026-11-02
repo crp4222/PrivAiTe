@@ -90,12 +90,17 @@ curl -s localhost:8400/v1/pii/inspect -H 'Content-Type: application/json' \
     {"type": "EMAIL_ADDRESS", "text": "marie@acme.com", "start": 24, "end": 38,
      "score": 1.0, "source": "presidio", "replacement": "<EMAIL_ADDRESS_1>"}
   ],
+  "allowed": [],
+  "not_allowed": [],
   "anonymized": "Contact <PERSON_1> at <EMAIL_ADDRESS_1>",
   "would_block": []
 }
 ```
 
 `anonymized` is the exact string the provider would have seen, and `would_block`
-lists any types your `block_entities` policy would have rejected outright. There
+lists any types your `block_entities` policy would have rejected outright. With
+a [`pii.allow_list`](configuration.md#allowing-known-non-pii-values), `allowed`
+lists the detections it let through and `not_allowed` the ones that kept a
+listed value redacted (a hostname seen inside an address, say). There
 is deliberately no admin view of live traffic: the reversible map is per-request
 and in-memory only, never logged or persisted.

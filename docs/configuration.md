@@ -1,8 +1,8 @@
 ---
 description: >-
   PrivAiTe configuration reference: providers, presets, anonymization methods,
-  block_entities, custom regex patterns, languages, Docker with a custom
-  config, pinned model revisions.
+  block_entities, custom regex patterns, an allow list for strings that only
+  look like PII, languages, Docker with a custom config, pinned model revisions.
 ---
 
 # Configuration reference
@@ -310,7 +310,8 @@ What it stores and what it never stores:
 
 - Stored: salted BLAKE2b hashes of scanned text leaves (the salt is random per
   process and never leaves it), plus span metadata (start, end, entity type,
-  score, detector source) for each hash.
+  score, detector source) for each hash, including the spans an
+  [`allow_list`](#allowing-known-non-pii-values) entry let through.
 - Never stored: the text itself, the matched PII values, the anonymized output,
   or any placeholder mapping. Placeholder numbering stays per-request.
 
@@ -362,6 +363,55 @@ pattern without a named group keeps anonymizing the whole match.
 
 Custom patterns are an explicit opt-in: their entity types are never filtered
 out by a preset's Presidio entity allowlist.
+
+## Allowing known non-PII values
+
+Some strings have the shape of PII and are nothing of the kind. OpenSSH names
+its algorithms `chacha20-poly1305@openssh.com`, so every detector reads an
+`sshd_config` as a list of e-mail addresses, and an agent editing it through
+the proxy no longer sees which algorithms are set. Turning `EMAIL_ADDRESS` off
+would let real addresses through; `allow_list` exempts values instead:
+
+```yaml
+pii:
+  allow_list:
+    - pattern: "[A-Za-z0-9.+_-]+@(openssh\\.com|libssh\\.org)"   # regex, matched in full
+    - pattern: "(openssh\\.com|libssh\\.org)"                     # the hostnames seen inside them
+    - value: "KexAlgorithms"                                     # exact string
+      entity_types: ["ORGANIZATION"]   # optional: only when detected as one of these
+```
+
+An entry is either a `value` (compared exactly, case included) or a `pattern`
+(a regex the detected text must match in full). What the list does, and what
+it can never do:
+
+- Detection and merging run exactly as without the list. A merged span is then
+  let through only when every detection under it is listed, each on its own
+  type and text. A span that merely contains a listed value stays redacted,
+  and a listed e-mail address never unmasks a name another detector found
+  inside it, with `merge_strategy: union` or `intersection` alike. That is why
+  the recipe above lists the hostnames too: Presidio's URL pattern sees
+  `openssh.com` inside each name, and that detection has to be listed as well.
+- Without `entity_types`, an entry never applies to `SECRET` nor to a type in
+  `block_entities`. Name the type to exempt one of those on purpose; the proxy
+  says so at startup.
+- A value the list lets through is never remembered as a known credential, so
+  it is not propagated to its other copies in the request.
+- Refused at startup: an entry with both or neither of `value` and `pattern`,
+  a regex that does not compile, one that matches the empty string, and one
+  that matches a sample e-mail, name, phone, card, IBAN, SSN, IP address, date
+  or URL in full (`.+@.+` is a type switch, not a value exemption). A detection
+  over 1,024 characters is never exempted.
+- Prefer `value` for a finite list of names. A pattern lets through everything
+  it matches: with the SSH pattern above, a real mailbox at `openssh.com` would
+  pass too.
+
+[`/v1/pii/inspect`](verify.md) returns what the list let through under
+`allowed`, and under `not_allowed` the detections that kept a listed value
+redacted, so an entry can be checked against your own files before you trust
+it. The list applies wherever the engine scans: message content, tool-call
+arguments, the agent CLI gateway and the detection cache (its key changes with
+the list). The LiteLLM guardrail and the Open WebUI filter do not expose it yet.
 
 ## Languages
 

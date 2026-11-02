@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 # Accelerator selection. An unknown value used to degrade silently: onnxruntime
 # does not fail when an execution provider is missing, it emits a Python
@@ -405,6 +405,25 @@ class CustomPatternConfig(StrictModel):
     score: float = 0.9
 
 
+class AllowListEntry(StrictModel):
+    """One value-level exemption (pii.allow_list): a detection whose whole text
+    is `value`, or matches `pattern` in full, is forwarded unredacted.
+    `entity_types` limits the entry to those types; without it the entry never
+    applies to SECRET or to a type in block_entities. The checks live in
+    privaite/pii/allow_list.py next to the rule they protect."""
+
+    value: str | None = None
+    pattern: str | None = None
+    entity_types: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _check(self) -> AllowListEntry:
+        from privaite.pii.allow_list import check_entry
+
+        check_entry(self.value, self.pattern, self.entity_types)
+        return self
+
+
 class PassthroughConfig(StrictModel):
     system_messages: bool = False
     tool_calls: bool = False
@@ -436,6 +455,9 @@ class PIIConfig(StrictModel):
     preset: str | None = "onnx"
     detectors: DetectorsConfig = Field(default_factory=DetectorsConfig)
     custom_patterns: list[CustomPatternConfig] = Field(default_factory=list)
+    # Strings that only look like PII (OpenSSH algorithm names read as e-mail
+    # addresses). Empty by default: nothing is let through unless listed.
+    allow_list: list[AllowListEntry] = Field(default_factory=list)
     merge_strategy: str = "union"
     overlap_resolution: str = "highest_score"
     # Fail closed by default: if anonymization raises, block the request rather

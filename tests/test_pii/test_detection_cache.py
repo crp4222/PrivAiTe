@@ -215,7 +215,8 @@ async def test_no_pii_value_and_no_anonymized_text_anywhere_in_cache():
     assert "keep this quiet" not in joined
     assert "<EMAIL_ADDRESS_" not in joined
     # Every stored string is an entity type or a detector source.
-    for _ts, spans in engine._cache._entries.values():
+    for _ts, (spans, allowed, not_allowed) in engine._cache._entries.values():
+        assert allowed == () and not_allowed == ()  # nothing to report without pii.allow_list
         for start, end, etype, score, source in spans:
             assert isinstance(start, int) and isinstance(end, int)
             assert etype == "EMAIL_ADDRESS"
@@ -360,7 +361,7 @@ def test_cache_object_is_thread_safe_under_contention():
         try:
             for i in range(500):
                 key = cache.key(f"text-{worker}-{i % 16}", "en", fp)
-                cache.put(key, ((0, 4, "EMAIL_ADDRESS", 0.9, "stub"),))
+                cache.put(key, (((0, 4, "EMAIL_ADDRESS", 0.9, "stub"),), (), ()))
                 cache.get(key)
         except BaseException as exc:  # pragma: no cover, only on a real race
             errors.append(exc)
@@ -394,7 +395,7 @@ def test_expired_entries_swept_by_the_next_write_not_just_on_lookup():
     clock = {"now": 0.0}
     cache = DetectionCache(max_entries=64, ttl_seconds=60, time_fn=lambda: clock["now"])
     fp = b"fp"
-    span = ((0, 3, "EMAIL_ADDRESS", 0.9, "stub"),)
+    span = (((0, 3, "EMAIL_ADDRESS", 0.9, "stub"),), (), ())
 
     k1 = cache.key("one", "en", fp)
     cache.put(k1, span)

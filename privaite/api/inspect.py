@@ -20,6 +20,17 @@ from privaite.utils.errors import openai_error
 router = APIRouter(prefix="/v1")
 
 
+def _span(e: Any) -> dict[str, Any]:
+    return {
+        "type": e.entity_type,
+        "text": e.text,
+        "start": e.start,
+        "end": e.end,
+        "score": round(e.score, 3),
+        "source": e.source,
+    }
+
+
 @router.post("/pii/inspect", response_model=None)
 async def pii_inspect(
     request: Request,
@@ -46,7 +57,7 @@ async def pii_inspect(
         return openai_error("'text' (non-empty string) is required", "invalid_request_error", 400)
 
     try:
-        entities = await pii_engine.inspect_text(text)
+        report = await pii_engine.inspect_text_detailed(text)
     except PIIProcessingError:
         return openai_error(
             "PII inspection failed. Nothing was forwarded.",
@@ -55,6 +66,7 @@ async def pii_inspect(
             "pii_error",
         )
 
+    entities = report.entities
     blocked = set(config.pii.block_entities or [])
     would_block = sorted({e.entity_type for e in entities} & blocked)
 
@@ -94,6 +106,11 @@ async def pii_inspect(
             }
             for e in entities
         ],
+        # What pii.allow_list let through (detected, then forwarded as it is),
+        # and the detections that kept a listed value redacted. Both apart from
+        # `entities`, which stays what would be replaced.
+        "allowed": [_span(e) for e in report.allowed],
+        "not_allowed": [_span(e) for e in report.not_allowed],
         "anonymized": anonymized,
         "would_block": would_block,
     }

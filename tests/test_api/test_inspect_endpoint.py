@@ -60,6 +60,7 @@ def _make_app(
     inspect_enabled: bool = True,
     pii_enabled: bool = True,
     block_entities: list[str] | None = None,
+    allow_list: list[dict] | None = None,
 ) -> tuple[object, FakeProviderRouter]:
     config = PrivAiTeConfig(
         server=ServerConfig(host="127.0.0.1", port=8400),
@@ -71,6 +72,7 @@ def _make_app(
             anonymization=AnonymizationConfig(method="placeholder"),
             deanonymization=DeanonymizationConfig(enabled=True),
             block_entities=block_entities or [],
+            allow_list=allow_list or [],
             inspect=InspectConfig(enabled=inspect_enabled),
         ),
         logging=LoggingConfig(format="text", level="debug"),
@@ -128,9 +130,53 @@ async def test_inspect_returns_entities_spans_and_anonymized_preview():
     assert "Marie Dupont" not in data["anonymized"]
     assert "marie@acme.com" not in data["anonymized"]
     assert data["would_block"] == []
+    assert data["allowed"] == [] and data["not_allowed"] == []
 
     # Dry run: no provider was called, nothing was forwarded.
     assert router.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_inspect_lists_what_the_allow_list_let_through():
+    app, router = _make_app(
+        allow_list=[{"value": "marie@acme.com", "entity_types": ["EMAIL_ADDRESS"]}]
+    )
+    text = "Contact Marie Dupont at marie@acme.com please"
+    resp = await _post(app, {"text": text})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    # `entities` stays what would be replaced; the exemption is reported apart.
+    assert [e["type"] for e in data["entities"]] == ["PERSON"]
+    assert [(a["type"], a["text"], a["source"]) for a in data["allowed"]] == [
+        ("EMAIL_ADDRESS", "marie@acme.com", "fake")
+    ]
+    allowed = data["allowed"][0]
+    assert text[allowed["start"] : allowed["end"]] == "marie@acme.com"
+    assert data["not_allowed"] == []
+    assert "marie@acme.com" in data["anonymized"]
+    assert "Marie Dupont" not in data["anonymized"]
+    assert router.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_inspect_names_the_detection_that_keeps_a_listed_value_redacted():
+    app, _router = _make_app(allow_list=[{"value": "marie@acme.com"}])
+    engine = app.state.pii_engine  # type: ignore[attr-defined]
+    engine.detectors = [FakeDetector({"marie@acme.com": "EMAIL_ADDRESS", "acme.com": "URL"})]
+    text = "Contact marie@acme.com please"
+    data = (await _post(app, {"text": text})).json()
+
+    # The hostname seen inside the address is not listed, so the address stays
+    # redacted, and the response says which detection stood in the way.
+    assert [(e["type"], e["text"]) for e in data["entities"]] == [
+        ("EMAIL_ADDRESS", "marie@acme.com")
+    ]
+    assert data["allowed"] == []
+    assert [(e["type"], e["text"], e["source"]) for e in data["not_allowed"]] == [
+        ("URL", "acme.com", "fake")
+    ]
+    assert "marie@acme.com" not in data["anonymized"]
 
 
 @pytest.mark.asyncio

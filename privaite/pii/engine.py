@@ -4,9 +4,10 @@ import asyncio
 import hashlib
 import json
 import logging
-from typing import Any
+from typing import Any, NamedTuple
 
 from privaite.config.schema import PIIConfig
+from privaite.pii.allow_list import ALWAYS_PROTECTED, apply_allow_list, compile_rules
 from privaite.pii.anonymizer import Anonymizer
 from privaite.pii.cache import DetectionCache, entities_from_spans, spans_from_entities
 from privaite.pii.deanonymizer import DeAnonymizer
@@ -79,6 +80,16 @@ class PIIBlockedError(Exception):
         )
 
 
+class DetectionReport(NamedTuple):
+    """One text's merged detections (what gets replaced), plus what
+    pii.allow_list let through and the detections that kept a listed value
+    redacted. The last two are empty without the list."""
+
+    entities: list[PIIEntity]
+    allowed: list[PIIEntity]
+    not_allowed: list[PIIEntity]
+
+
 class PIIEngine:
     def __init__(self, config: PIIConfig) -> None:
         self.config = config
@@ -87,6 +98,11 @@ class PIIEngine:
         self.deanonymizer = DeAnonymizer(config.deanonymization)
         # Types that cause a hard reject (empty = default: mask everything).
         self._blocked: set[str] = set(config.block_entities or [])
+        # Operator exemptions (pii.allow_list): compiled once, applied in
+        # _detect_all. Entries without entity_types never touch a credential or
+        # a blocked type.
+        self._allow_rules = compile_rules(config.allow_list)
+        self._allow_protected = ALWAYS_PROTECTED | frozenset(self._blocked)
         # Opt-in detection cache (spans only, never values); None when disabled
         # so the disabled path is byte-for-byte the pre-cache code path.
         self._cache: DetectionCache | None = (
@@ -171,10 +187,30 @@ class PIIEngine:
                 "custom_patterns entity_type)."
             )
 
+    def _warn_allow_list_on_blocked_types(self) -> None:
+        """An entry that names a blocked type is a deliberate hole in the hard
+        policy gate: a value it matches is forwarded instead of rejected. Say so
+        at startup, naming the types, never a value."""
+        named = sorted(
+            {
+                entity_type
+                for entry in self.config.allow_list
+                for entity_type in entry.entity_types or ()
+                if entity_type in self._blocked
+            }
+        )
+        if named:
+            logger.warning(
+                "allow_list entries name blocked type(s) %s: a value they match is "
+                "forwarded instead of rejected",
+                ", ".join(named),
+            )
+
     async def initialize(self) -> None:
         # Config-only validation first: it must fail before any model download
         # or load is paid for.
         self._validate_block_entities()
+        self._warn_allow_list_on_blocked_types()
 
         if self.config.detectors.presidio.enabled:
             from privaite.pii.detector_presidio import PresidioDetector
@@ -632,10 +668,16 @@ class PIIEngine:
         created, the block gate is not raised (callers report would-block types
         instead). Powers the dry-run /v1/pii/inspect endpoint.
         """
+        return (await self.inspect_text_detailed(text)).entities
+
+    async def inspect_text_detailed(self, text: str) -> DetectionReport:
+        """`inspect_text`, plus what `pii.allow_list` let through and what kept
+        a listed value redacted, so an operator can check an entry before
+        trusting it."""
         if not text or not isinstance(text, str):
-            return []
+            return DetectionReport([], [], [])
         try:
-            return await self._detect_all(text, self._language())
+            return await self._detect_all_detailed(text, self._language())
         except PIIProcessingError:
             raise
         except Exception:
@@ -727,6 +769,7 @@ class PIIEngine:
             (
                 cfg.detectors.model_dump_json(),
                 json.dumps([p.model_dump() for p in cfg.custom_patterns], sort_keys=True),
+                json.dumps([e.model_dump() for e in cfg.allow_list], sort_keys=True),
                 cfg.merge_strategy,
                 cfg.overlap_resolution,
                 self.anonymizer.config.model_dump_json(),
@@ -736,8 +779,15 @@ class PIIEngine:
         return hashlib.blake2b(payload.encode("utf-8"), digest_size=16).digest()
 
     async def _detect_all(self, text: str, language: str = "en") -> list[PIIEntity]:
+        return (await self._detect_all_detailed(text, language)).entities
+
+    async def _detect_all_detailed(self, text: str, language: str = "en") -> DetectionReport:
+        """The merged detections to redact, with what pii.allow_list let
+        through. Every scanned surface and the inspect endpoint come through
+        here, so the list applies once, the same way, before the cache, the
+        propagation of known credentials, the block gate and the anonymizer."""
         if not self.detectors:
-            return []
+            return DetectionReport([], [], [])
 
         cache = self._cache
         cache_key: bytes | None = None
@@ -749,7 +799,7 @@ class PIIEngine:
                 # metadata only, never values. The block_entities gate and the
                 # anonymizer both run downstream on every request, cached or
                 # not, so a hit changes latency and nothing else.
-                return entities_from_spans(cached, text)
+                return DetectionReport(*(entities_from_spans(spans, text) for spans in cached))
 
         tasks = [detector.detect(text, language) for detector in self.detectors]
         try:
@@ -776,6 +826,12 @@ class PIIEngine:
                 source_text=text,
                 type_priorities=self._type_priorities(all_entities),
             )
+            # Operator exemptions, on the merged result and against every raw
+            # detection under it (see privaite/pii/allow_list.py). A span with
+            # a detection the list does not cover stays whole.
+            verdict = apply_allow_list(
+                text, merged, all_entities, self._allow_rules, self._allow_protected
+            )
         except Exception:
             # merge_entities receives source_text for overlap resolution; keep
             # its errors safe for the same reason as detector errors.
@@ -784,6 +840,14 @@ class PIIEngine:
 
         # Only a fully successful merge is cached: any failure above raised, so
         # an error can never be replayed as an empty (fail-open) result.
+        report = DetectionReport(verdict.redacted, verdict.allowed, verdict.not_allowed)
         if cache is not None and cache_key is not None:
-            cache.put(cache_key, spans_from_entities(merged))
-        return merged
+            cache.put(
+                cache_key,
+                (
+                    spans_from_entities(report.entities),
+                    spans_from_entities(report.allowed),
+                    spans_from_entities(report.not_allowed),
+                ),
+            )
+        return report

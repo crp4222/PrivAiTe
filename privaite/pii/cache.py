@@ -15,6 +15,11 @@ from privaite.pii.entity import PIIEntity
 # structure that outlives the request is the point of this shape, not an
 # optimization (see the threat model section of the README).
 CachedSpan = tuple[int, int, str, float, str]
+# What the engine stores per text: the spans to redact, the spans an allow_list
+# entry let through, and the detections that kept a listed value redacted (both
+# empty without pii.allow_list). All value-free; the last two exist so that
+# /v1/pii/inspect stays exact on a cache hit.
+CachedDetection = tuple[tuple[CachedSpan, ...], tuple[CachedSpan, ...], tuple[CachedSpan, ...]]
 
 
 def spans_from_entities(entities: Iterable[PIIEntity]) -> tuple[CachedSpan, ...]:
@@ -79,7 +84,7 @@ class DetectionCache:
         self._time = time_fn
         self._salt = os.urandom(16)
         self._lock = threading.Lock()
-        self._entries: OrderedDict[bytes, tuple[float, tuple[CachedSpan, ...]]] = OrderedDict()
+        self._entries: OrderedDict[bytes, tuple[float, CachedDetection]] = OrderedDict()
         self.hits = 0
         self.misses = 0
 
@@ -96,27 +101,27 @@ class DetectionCache:
         digest.update(text.encode("utf-8"))
         return digest.digest()
 
-    def get(self, key: bytes) -> tuple[CachedSpan, ...] | None:
+    def get(self, key: bytes) -> CachedDetection | None:
         now = self._time()
         with self._lock:
             entry = self._entries.get(key)
             if entry is None:
                 self.misses += 1
                 return None
-            stored_at, spans = entry
+            stored_at, detection = entry
             if now - stored_at > self._ttl:
                 del self._entries[key]
                 self.misses += 1
                 return None
             self._entries.move_to_end(key)
             self.hits += 1
-            return spans
+            return detection
 
-    def put(self, key: bytes, spans: tuple[CachedSpan, ...]) -> None:
+    def put(self, key: bytes, detection: CachedDetection) -> None:
         now = self._time()
         with self._lock:
             self._purge_expired(now)
-            self._entries[key] = (now, spans)
+            self._entries[key] = (now, detection)
             self._entries.move_to_end(key)
             while len(self._entries) > self._max_entries:
                 self._entries.popitem(last=False)

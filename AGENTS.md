@@ -246,6 +246,22 @@ false positive there is rewritten across the whole request: `TOKEN`, `SECRET`
 and `KEY` are trusted as names only upper-case at the start of a line with an
 opaque value, and a provider key format needs its prefix and its length.
 
+## The allow list is the one place a detection is given back
+
+`pii.allow_list` (`privaite/pii/allow_list.py`) is operator config, never
+request data: nothing in a message, header or tool output may widen it. It runs
+once, in `_detect_all_detailed`, after merging and before the cache, the
+propagation of known credentials, the block gate and the anonymizer, so every
+scanned surface sees the same result. A merged span is let through only when
+EVERY raw detection under it is listed on its own type and text, in full: a
+span that contains a listed value, or that another detector saw as something
+else, stays whole (the detections that stood in the way are reported as
+`not_allowed`, never acted on). Entries without `entity_types` never touch
+SECRET or a blocked type. The cache stores the let-through spans next to the
+redacted ones so `/v1/pii/inspect` stays exact on a hit; all of it value-free.
+A change here needs a test for what it lets through and one for what must stay
+covered, and the check that an empty list changes nothing.
+
 ## Integrations must stay in sync with the core
 
 `integrations/litellm/privaite_guardrail.py` and

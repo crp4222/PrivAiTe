@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `pii.allow_list`: exact values or regexes that a detection must match in
+  full to be forwarded unredacted, optionally per entity type, for strings
+  that only look like PII (OpenSSH algorithm names such as
+  `chacha20-poly1305@openssh.com` read as e-mail addresses, #40). A span is
+  let through only when every detection under it is listed; entries without
+  `entity_types` never apply to `SECRET` or a blocked type; a pattern that
+  matches the empty string or a sample PII shape in full is refused at
+  startup. `/v1/pii/inspect` lists what the list let through under `allowed`
+  and what kept a listed value redacted under `not_allowed`. See
+  [configuration](docs/configuration.md#allowing-known-non-pii-values).
+
 ### Changed
 - The published benchmark is now the 3 privaite-bench corpora PrivAiTe's model
   never trained on (627 documents labeled by their authors) instead of 120
