@@ -163,6 +163,29 @@ class PresidioDetectorConfig(StrictModel):
     # spaCy NER, so names then come from an ML detector only. The ultrafast
     # preset selects "blank" unless this is set explicitly.
     nlp_engine: Literal["spacy", "blank"] = "spacy"
+    # Bounds on what one analyze() call holds in memory. spaCy's memory grows
+    # with the length of the text it parses (its docs: about 1GB per 100,000
+    # characters for the parser and NER), and an agent request can carry a
+    # whole document in one leaf, so an unbounded leaf can exhaust the process.
+    # With max_chunk_chars set, longer text is analysed in overlapping chunks
+    # of at most that many characters, one after another; None (the default)
+    # analyses it whole, as before. Every span no longer than
+    # chunk_overlap_chars is seen whole, context included, in at least one
+    # chunk, so a value is never missed for falling on a cut.
+    max_chunk_chars: int | None = Field(default=None, ge=1_000)
+    chunk_overlap_chars: int = Field(default=1_000, ge=0)
+
+    @model_validator(mode="after")
+    def _chunk_overlap_below_half(self) -> PresidioDetectorConfig:
+        # A cut moves back at most `overlap` characters to land on whitespace,
+        # so every chunk is longer than the overlap, and the next one starts
+        # exactly `overlap` before its end: no span that fits in the overlap
+        # can fall between two chunks.
+        if self.max_chunk_chars is not None and (
+            self.chunk_overlap_chars * 2 >= self.max_chunk_chars
+        ):
+            raise ValueError("chunk_overlap_chars must be less than half of max_chunk_chars")
+        return self
 
 
 # The openai/privacy-filter model's label set, shared by its ONNX and torch backends.
@@ -475,6 +498,15 @@ class PIIConfig(StrictModel):
     passthrough: PassthroughConfig = Field(default_factory=PassthroughConfig)
     inspect: InspectConfig = Field(default_factory=InspectConfig)
     detection_cache: DetectionCacheConfig = Field(default_factory=DetectionCacheConfig)
+    # How many texts may be run through the detectors at once, across
+    # concurrent requests. Each detection holds its detectors' working memory
+    # (an ONNX run over a long text, a spaCy parse), so peak memory is the
+    # models plus about this many detections. An agent CLI sends several
+    # requests together that carry the same new message (count_tokens
+    # alongside messages): a request that waited here looks in the detection
+    # cache again, so the burst costs one detection. A text already in the
+    # cache never waits. None (the default) does not limit.
+    max_concurrent_detections: int | None = Field(default=None, ge=1)
 
     def model_post_init(self, __context: object) -> None:
         if self.preset is None:
