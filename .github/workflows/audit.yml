@@ -33,7 +33,7 @@ jobs:
           pip install -e ".[ml,gliner,dev]"
 
       - name: Audit resolved environment
-        # Ignored advisories (keep minimal, one justification per entry): none.
+        # Ignored advisories (keep minimal, one justification per entry).
         # The GHSA-537c-gmf6-5ccf entry is gone: it existed only while
         # presidio-anonymizer capped cryptography<47, and 2.2.364 requires
         # cryptography>=48.0.1, so the freshest resolution our floors allow now
@@ -43,9 +43,27 @@ jobs:
         # requires cryptography<49.0.0, so no floor of ours can reach a fixed
         # release: ignoring them keeps the run meaningful instead of permanently
         # red. Drop these three the moment presidio-anonymizer allows >=49.
+        # The thirteen CVE-2026-1129xx entries are filelock advisories fixed in
+        # 4.2.1 (lock files tampered with by another local user on the same
+        # machine). litellm 1.108.1 requires filelock<4.0, so no floor of ours
+        # can reach 4.2.1; litellm main already allows <5 (1.109.0rc1). Drop
+        # these thirteen the moment litellm 1.109.0 is on PyPI.
         run: |
           pip install pip-audit
           pip-audit --skip-editable \
             --ignore-vuln PYSEC-2026-3552 \
             --ignore-vuln PYSEC-2026-3553 \
-            --ignore-vuln PYSEC-2026-3554
+            --ignore-vuln PYSEC-2026-3554 \
+            --ignore-vuln CVE-2026-112907 \
+            --ignore-vuln CVE-2026-112908 \
+            --ignore-vuln CVE-2026-112909 \
+            --ignore-vuln CVE-2026-112910 \
+            --ignore-vuln CVE-2026-112911 \
+            --ignore-vuln CVE-2026-112912 \
+            --ignore-vuln CVE-2026-112913 \
+            --ignore-vuln CVE-2026-112915 \
+            --ignore-vuln CVE-2026-112935 \
+            --ignore-vuln CVE-2026-112936 \
+            --ignore-vuln CVE-2026-112938 \
+            --ignore-vuln CVE-2026-112939 \
+            --ignore-vuln CVE-2026-112940
