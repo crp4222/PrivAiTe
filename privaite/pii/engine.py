@@ -103,6 +103,13 @@ class PIIEngine:
         # a blocked type.
         self._allow_rules = compile_rules(config.allow_list)
         self._allow_protected = ALWAYS_PROTECTED | frozenset(self._blocked)
+        # pii.max_concurrent_detections: how many texts run through the
+        # detectors at once; None leaves them unbounded, as before.
+        self._detections: asyncio.Semaphore | None = (
+            asyncio.Semaphore(config.max_concurrent_detections)
+            if config.max_concurrent_detections
+            else None
+        )
         # Opt-in detection cache (spans only, never values); None when disabled
         # so the disabled path is byte-for-byte the pre-cache code path.
         self._cache: DetectionCache | None = (
@@ -782,6 +789,21 @@ class PIIEngine:
         return (await self._detect_all_detailed(text, language)).entities
 
     async def _detect_all_detailed(self, text: str, language: str = "en") -> DetectionReport:
+        """`_detect_text`, at most `pii.max_concurrent_detections` at a time.
+
+        A text already in the cache does not wait. One that waited is looked up
+        again once it gets its turn, so requests that arrived together with the
+        same new text are served by the detection the first of them ran.
+        """
+        if self._detections is None or (
+            self._cache is not None
+            and self._cache.peek(self._cache.key(text, language, self._detector_fingerprint()))
+        ):
+            return await self._detect_text(text, language)
+        async with self._detections:
+            return await self._detect_text(text, language)
+
+    async def _detect_text(self, text: str, language: str = "en") -> DetectionReport:
         """The merged detections to redact, with what pii.allow_list let
         through. Every scanned surface and the inspect endpoint come through
         here, so the list applies once, the same way, before the cache, the

@@ -8,7 +8,7 @@ from typing import Any
 
 from privaite.config.schema import PresidioDetectorConfig
 from privaite.pii.boundaries import refine_boundary
-from privaite.pii.detector_base import PIIDetector
+from privaite.pii.detector_base import PIIDetector, chunk_text
 from privaite.pii.entity import PIIEntity
 
 logger = logging.getLogger("privaite.pii.detector_presidio")
@@ -240,32 +240,45 @@ class PresidioDetector(PIIDetector):
         all_results = []
         seen_spans: set[tuple[int, int, str]] = set()
 
+        # Long text is analysed in overlapping chunks (max_chunk_chars), one at
+        # a time, so spaCy never holds more than one chunk's parse. Results are
+        # shifted back to offsets in the whole text; a span found in two
+        # chunks is the same (start, end, type) and is kept once below.
+        if self.config.max_chunk_chars:
+            chunks = chunk_text(text, self.config.max_chunk_chars, self.config.chunk_overlap_chars)
+        else:
+            chunks = [(0, text)]
+
         for lang in self.config.languages:
-            results = await asyncio.to_thread(
-                self._analyzer.analyze,
-                text=text,
-                language=lang,
-                entities=list(requested) if requested else None,
-                score_threshold=self.config.score_threshold,
-            )
-            for result in results:
-                if requested and result.entity_type not in requested:
-                    continue
+            for chunk_start, chunk in chunks:
+                results = await asyncio.to_thread(
+                    self._analyzer.analyze,
+                    text=chunk,
+                    language=lang,
+                    entities=list(requested) if requested else None,
+                    score_threshold=self.config.score_threshold,
+                )
+                for result in results:
+                    if chunk_start:
+                        result.start += chunk_start
+                        result.end += chunk_start
+                    if requested and result.entity_type not in requested:
+                        continue
 
-                recognizer = result.recognition_metadata.get("recognizer_name", "")
-                if (
-                    configured is not None
-                    and result.entity_type not in configured
-                    and recognizer not in self._own_recognizers
-                ):
-                    continue
-                if recognizer == "SpacyRecognizer" and lang != primary_lang:
-                    continue
+                    recognizer = result.recognition_metadata.get("recognizer_name", "")
+                    if (
+                        configured is not None
+                        and result.entity_type not in configured
+                        and recognizer not in self._own_recognizers
+                    ):
+                        continue
+                    if recognizer == "SpacyRecognizer" and lang != primary_lang:
+                        continue
 
-                span_key = (result.start, result.end, result.entity_type)
-                if span_key not in seen_spans:
-                    seen_spans.add(span_key)
-                    all_results.append(result)
+                    span_key = (result.start, result.end, result.entity_type)
+                    if span_key not in seen_spans:
+                        seen_spans.add(span_key)
+                        all_results.append(result)
 
         pii_entities = []
         for result in all_results:

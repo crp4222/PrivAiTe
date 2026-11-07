@@ -101,6 +101,14 @@ class DetectionCache:
         digest.update(text.encode("utf-8"))
         return digest.digest()
 
+    def peek(self, key: bytes) -> bool:
+        """Whether ``key`` has a live entry, without counting a hit or a miss
+        and without refreshing its place in the LRU order."""
+        now = self._time()
+        with self._lock:
+            entry = self._entries.get(key)
+            return entry is not None and now - entry[0] <= self._ttl
+
     def get(self, key: bytes) -> CachedDetection | None:
         now = self._time()
         with self._lock:
