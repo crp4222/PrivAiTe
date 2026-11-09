@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Memory bounds for detection, both off by default. See
+  [configuration](docs/configuration.md#bounding-detection-memory).
+  - `pii.detectors.presidio.max_chunk_chars`: spaCy needs about 1GB per
+    100,000 characters per language, and an agent request can carry a whole
+    document in one message, so a long enough one got the process killed.
+    spaCy now parses longer text in pieces joined back into one document, and
+    the recognizers still run once over the whole text: pattern detections are
+    unchanged whatever the length of the value, only spaCy's named entities
+    can differ next to a cut. Texts over spaCy's `max_length` are analysed too.
+  - `pii.max_concurrent_detections`: how many texts run through the detectors
+    at once. Six requests carrying the same new 100,000-character message
+    (an agent's `count_tokens` burst) took a gateway from 2 to 8GB; with a
+    limit of 1 a request that waited is served from the detection cache, and
+    a cached text never waits.
+
 ## [0.8.1] - 2026-11-02
 
 ### Added

@@ -163,6 +163,18 @@ class PresidioDetectorConfig(StrictModel):
     # spaCy NER, so names then come from an ML detector only. The ultrafast
     # preset selects "blank" unless this is set explicitly.
     nlp_engine: Literal["spacy", "blank"] = "spacy"
+    # Upper bound on what spaCy parses at once. Its memory grows with the
+    # length of the text (its docs: about 1GB per 100,000 characters for the
+    # parser and NER), and an agent request can carry a whole document in one
+    # leaf. Longer text is parsed in consecutive pieces of at most this many
+    # characters and joined back into one Doc, and the recognizers then run
+    # once over the whole text with it: no pattern ever sees a cut, which a
+    # chunked analysis could not promise for a value of unknown length (a key
+    # block, a token) or a string the chunk starts inside of. Only what spaCy
+    # contributes (its entities, and the lemmas context words read) can differ,
+    # in practice next to a cut. None (the default) parses the text whole, as
+    # before.
+    max_chunk_chars: int | None = Field(default=None, ge=1_000)
 
 
 # The openai/privacy-filter model's label set, shared by its ONNX and torch backends.
@@ -475,6 +487,15 @@ class PIIConfig(StrictModel):
     passthrough: PassthroughConfig = Field(default_factory=PassthroughConfig)
     inspect: InspectConfig = Field(default_factory=InspectConfig)
     detection_cache: DetectionCacheConfig = Field(default_factory=DetectionCacheConfig)
+    # How many texts may be run through the detectors at once, across
+    # concurrent requests. Each detection holds its detectors' working memory
+    # (an ONNX run over a long text, a spaCy parse), so peak memory is the
+    # models plus about this many detections. An agent CLI sends several
+    # requests together that carry the same new message (count_tokens
+    # alongside messages): a request that waited here looks in the detection
+    # cache again, so the burst costs one detection. A text already in the
+    # cache never waits. None (the default) does not limit.
+    max_concurrent_detections: int | None = Field(default=None, ge=1)
 
     def model_post_init(self, __context: object) -> None:
         if self.preset is None:

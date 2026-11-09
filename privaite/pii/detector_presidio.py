@@ -104,6 +104,31 @@ def blank_nlp_engine(languages: Sequence[str]) -> Any:
     return engine
 
 
+def nlp_pieces(text: str, max_chars: int) -> list[tuple[int, int]]:
+    """Consecutive ``[start, end)`` ranges that cover ``text``, none longer
+    than ``max_chars``, for spaCy to parse one at a time.
+
+    A cut moves back to the last line break, else the last space or tab, in
+    the final quarter of the range, so spaCy rarely sees a word split; a run
+    with no such break is cut where it is. Only spaCy sees these pieces: the
+    recognizers run over the whole text.
+    """
+    pieces: list[tuple[int, int]] = []
+    start, n = 0, len(text)
+    while n - start > max_chars:
+        end = start + max_chars
+        floor = end - max_chars // 4
+        cut = text.rfind("\n", floor, end)
+        if cut < 0:
+            cut = max(text.rfind(" ", floor, end), text.rfind("\t", floor, end))
+        if cut >= 0:
+            end = cut + 1
+        pieces.append((start, end))
+        start = end
+    pieces.append((start, n))
+    return pieces
+
+
 def _use_bundled_suffix_list() -> None:
     """Keep tldextract from downloading the public suffix list.
 
@@ -240,13 +265,21 @@ class PresidioDetector(PIIDetector):
         all_results = []
         seen_spans: set[tuple[int, int, str]] = set()
 
+        max_chars = self.config.max_chunk_chars
+
         for lang in self.config.languages:
+            # Long text is parsed by spaCy in pieces and analysed whole: see
+            # _nlp_artifacts. None lets the analyzer parse it whole itself.
+            nlp_artifacts = None
+            if max_chars is not None and len(text) > max_chars:
+                nlp_artifacts = await asyncio.to_thread(self._nlp_artifacts, text, lang, max_chars)
             results = await asyncio.to_thread(
                 self._analyzer.analyze,
                 text=text,
                 language=lang,
                 entities=list(requested) if requested else None,
                 score_threshold=self.config.score_threshold,
+                nlp_artifacts=nlp_artifacts,
             )
             for result in results:
                 if requested and result.entity_type not in requested:
@@ -299,6 +332,26 @@ class PresidioDetector(PIIDetector):
                 )
 
         return pii_entities
+
+    def _nlp_artifacts(self, text: str, language: str, max_chars: int) -> Any:
+        """spaCy's analysis of ``text``, parsed in consecutive pieces of at most
+        ``max_chars`` and joined back into one Doc.
+
+        The parser's working memory is bounded by the piece, while every token,
+        lemma and entity keeps its offset in the whole text, so the analyzer can
+        run all its recognizers once over the whole text with these artifacts.
+        """
+        from spacy.tokens import Doc
+
+        engine = self._analyzer.nlp_engine
+        nlp = engine.nlp[language]
+        docs = [nlp(text[start:end]) for start, end in nlp_pieces(text, max_chars)]
+        doc = Doc.from_docs(docs, ensure_whitespace=False)
+        # Offsets are only right if the joined Doc is the text, character for
+        # character. A mismatch fails the detector, which blocks the request.
+        if doc.text != text:
+            raise RuntimeError("spaCy pieces did not rejoin to the original text")
+        return engine._doc_to_nlp_artifact(doc, language)
 
 
 # Code inside a spaCy date span: a call, a snake_case identifier, brackets, an

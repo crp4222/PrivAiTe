@@ -1178,6 +1178,42 @@ The model's types are `PERSON`, `CONTACT` (emails, phones, URLs, user names),
 so blocking `EMAIL_ADDRESS` keeps working; list the model's types (`GOV_ID`,
 `CONTACT`...) to block what only the model finds.
 
+## Bounding detection memory
+
+Two things decide how much memory detection takes beyond the loaded models:
+how long a text spaCy parses at once, and how many texts run through the
+detectors at the same time.
+
+```yaml
+pii:
+  max_concurrent_detections: 1      # default: none, no limit
+  detectors:
+    presidio:
+      max_chunk_chars: 20000        # default: none, spaCy parses the text whole
+```
+
+spaCy's memory grows with the length of the text it parses: its own docs put
+the parser and NER at about 1GB per 100,000 characters, and each configured
+language is a full pass. With `max_chunk_chars`, spaCy parses a longer text in
+consecutive pieces of at most that many characters, cut at a line break or a
+space, and joins them back into one document in which every token, lemma and
+entity keeps its offset in the whole text. Presidio then runs all its
+recognizers once over the whole text with that analysis, so no pattern ever
+sees a cut: a private key block, a long token or a quoted value is found
+exactly as without the setting, whatever its length. Only what spaCy
+contributes can differ, in practice next to a cut: a name it recognizes, or
+the lemmas a context word is matched against. A text longer than spaCy's
+`max_length` (1,000,000 characters) is analysed too.
+
+`max_concurrent_detections` limits how many texts run through the detectors
+at once across requests; each holds its own working memory (an ONNX run over
+a long text took about 0.7GB in our measurements). An agent CLI sends several
+requests together that carry the same new message (`count_tokens` alongside
+`messages`): with a limit, a request that waited looks in the detection cache
+again when its turn comes, so the burst costs one detection instead of one per
+request. A text already in the cache never waits. Peak memory is then the
+models plus about `max_concurrent_detections` detections.
+
 ## Detector device
 
 `device` selects the accelerator per detector. An unknown value is refused at
