@@ -15,6 +15,7 @@ import json
 import pytest
 
 from privaite.config.schema import PresidioDetectorConfig
+from privaite.pii import detector_presidio
 from privaite.pii.detector_presidio import PresidioDetector, nlp_pieces
 
 PARAGRAPH = (
@@ -196,3 +197,15 @@ async def test_text_longer_than_spacy_max_length_is_analysed():
     found = _found(await detector.detect(text, "fr"))
 
     assert any(t == "j.devries@example.nl" and s > 100_000 for _, s, _, t in found)
+
+
+@pytest.mark.asyncio
+async def test_pieces_that_do_not_rejoin_to_the_text_fail_the_detector(monkeypatch):
+    """Offsets are only right if the pieces rejoin to the text exactly. When
+    they do not, detection fails, so the request is blocked rather than masked
+    at shifted offsets."""
+    detector = await _detector(max_chunk_chars=5_000)
+    monkeypatch.setattr(detector_presidio, "nlp_pieces", lambda text, _: [(0, len(text) - 1)])
+
+    with pytest.raises(RuntimeError, match="did not rejoin"):
+        await detector.detect(_long_text(10_000), "fr")
