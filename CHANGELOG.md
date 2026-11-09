@@ -9,12 +9,13 @@ All notable changes to this project are documented here. The format follows
 ### Added
 - Memory bounds for detection, both off by default. See
   [configuration](docs/configuration.md#bounding-detection-memory).
-  - `pii.detectors.presidio.max_chunk_chars` and `chunk_overlap_chars`:
-    spaCy needs about 1GB per 100,000 characters per language, and an agent
-    request can carry a whole document in one message, so a long enough one
-    got the process killed. Longer text is now analysed in overlapping chunks;
-    pattern detections are unchanged, spaCy's named entities can differ only
-    within the overlap of a cut.
+  - `pii.detectors.presidio.max_chunk_chars`: spaCy needs about 1GB per
+    100,000 characters per language, and an agent request can carry a whole
+    document in one message, so a long enough one got the process killed.
+    spaCy now parses longer text in pieces joined back into one document, and
+    the recognizers still run once over the whole text: pattern detections are
+    unchanged whatever the length of the value, only spaCy's named entities
+    can differ next to a cut. Texts over spaCy's `max_length` are analysed too.
   - `pii.max_concurrent_detections`: how many texts run through the detectors
     at once. Six requests carrying the same new 100,000-character message
     (an agent's `count_tokens` burst) took a gateway from 2 to 8GB; with a

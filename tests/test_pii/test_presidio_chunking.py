@@ -1,18 +1,21 @@
-"""Bounded Presidio input (`max_chunk_chars`).
+"""Bounded spaCy input (`max_chunk_chars`).
 
 spaCy's memory grows with the length of the text it parses, and an agent
-request can carry a whole document in one leaf. With a chunk size set, no
-analyze() call sees more than that many characters, and a long text yields
-the same detections as when it is analysed whole.
+request can carry a whole document in one leaf. With a piece size set, spaCy
+parses consecutive pieces and the recognizers still run once over the whole
+text, so no pattern ever sees a cut: only spaCy's own analysis next to one can
+differ from parsing the text whole.
 """
 
 from __future__ import annotations
 
+import base64
+import json
+
 import pytest
-from pydantic import ValidationError
 
 from privaite.config.schema import PresidioDetectorConfig
-from privaite.pii.detector_presidio import PresidioDetector
+from privaite.pii.detector_presidio import PresidioDetector, nlp_pieces
 
 PARAGRAPH = (
     "Het gesprek met de klant verliep rustig en er zijn geen vervolgafspraken "
@@ -27,10 +30,13 @@ VALUES = [
     ("EMAIL_ADDRESS", "j.devries@example.nl"),
 ]
 
+# Types only spaCy (or a recognizer reading spaCy's tokens and lemmas for
+# context) emits. Everything else comes from patterns over the whole text.
+SPACY_TYPES = {"PERSON", "LOCATION", "DATE_TIME", "NRP", "ORGANIZATION"}
+
 
 def _long_text(target: int) -> str:
-    """Filler with a known value every ~2,900 characters, so several of them
-    land on or near a chunk cut for the chunk sizes used below."""
+    """Filler with a known value every ~2,900 characters."""
     parts: list[str] = []
     length = 0
     i = 0
@@ -54,105 +60,139 @@ def _found(entities) -> set[tuple[str, int, int, str]]:
     return {(e.entity_type, e.start, e.end, e.text) for e in entities}
 
 
-def test_chunking_is_off_by_default():
-    config = PresidioDetectorConfig()
-    assert config.max_chunk_chars is None
+def _patterns(found):
+    return {f for f in found if f[0] not in SPACY_TYPES}
 
 
-def test_an_overlap_of_half_a_chunk_or_more_is_refused():
-    with pytest.raises(ValidationError, match="less than half"):
-        PresidioDetectorConfig(max_chunk_chars=2_000, chunk_overlap_chars=1_000)
-    PresidioDetectorConfig(max_chunk_chars=2_000, chunk_overlap_chars=999)
+def test_pieces_are_off_by_default():
+    assert PresidioDetectorConfig().max_chunk_chars is None
+
+
+def test_pieces_cover_the_text_back_to_back_and_cut_at_whitespace():
+    text = _long_text(50_000)
+    pieces = nlp_pieces(text, 5_000)
+
+    assert pieces[0][0] == 0 and pieces[-1][1] == len(text)
+    assert all(a_end == b_start for (_, a_end), (b_start, _) in zip(pieces, pieces[1:]))
+    assert all(end - start <= 5_000 for start, end in pieces)
+    assert all(text[end - 1].isspace() for _, end in pieces[:-1])
+
+
+def test_a_run_without_whitespace_is_cut_where_it_is():
+    text = "x" * 12_000
+    assert nlp_pieces(text, 5_000) == [(0, 5_000), (5_000, 10_000), (10_000, 12_000)]
 
 
 @pytest.mark.asyncio
-async def test_no_analyze_call_sees_more_than_a_chunk():
-    detector = await _detector(max_chunk_chars=5_000, chunk_overlap_chars=500)
+async def test_no_spacy_call_sees_more_than_a_piece():
+    detector = await _detector(max_chunk_chars=5_000)
+    engine = detector._analyzer.nlp_engine
     seen: list[int] = []
-    analyze = detector._analyzer.analyze
 
-    def spy(*args, **kwargs):
-        seen.append(len(kwargs["text"]))
-        return analyze(*args, **kwargs)
+    class Spy:
+        def __init__(self, nlp):
+            self._nlp = nlp
 
-    detector._analyzer.analyze = spy
+        def __call__(self, text, *args, **kwargs):
+            seen.append(len(text))
+            return self._nlp(text, *args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._nlp, name)
+
+    for lang, nlp in list(engine.nlp.items()):
+        engine.nlp[lang] = Spy(nlp)
+
     await detector.detect(_long_text(40_000), "fr")
 
     assert seen
     assert max(seen) <= 5_000
 
 
-PATTERN_TYPES = {"EMAIL_ADDRESS", "PHONE_NUMBER", "IBAN_CODE", "IP_ADDRESS", "CREDIT_CARD"}
-
-
 @pytest.mark.asyncio
-async def test_chunked_detection_matches_whole_text_detection():
-    """Pattern recognizers give exactly the same result. spaCy's named
-    entities depend on the words around them, so a cut can change one, but
-    only within the overlap of a cut: everywhere else a chunk gives spaCy the
-    same context the whole text does."""
+async def test_pattern_detections_match_whole_text_detection():
+    """spaCy's named entities depend on the words around them, so a cut can
+    change one, on ordinary text next to the cut. Everything the patterns find
+    is the same, because they run over the whole text either way."""
     text = _long_text(40_000)
-    max_chars, overlap = 5_000, 500
+    max_chars = 5_000
     whole = _found(await (await _detector()).detect(text, "fr"))
-    chunked = _found(
-        await (await _detector(max_chunk_chars=max_chars, chunk_overlap_chars=overlap)).detect(
-            text, "fr"
-        )
-    )
+    pieced = _found(await (await _detector(max_chunk_chars=max_chars)).detect(text, "fr"))
 
-    def patterns(found):
-        return {f for f in found if f[0] in PATTERN_TYPES}
-
-    assert patterns(chunked) == patterns(whole)
-    # Every planted value is among them, at its real offset in the whole text.
+    assert _patterns(pieced) == _patterns(whole)
     for _, value in VALUES:
-        assert any(t == value and text[s:e] == value for _, s, e, t in chunked)
+        assert any(t == value and text[s:e] == value for _, s, e, t in pieced)
 
-    from privaite.pii.detector_base import chunk_text
-
-    edges = {o for o, _ in chunk_text(text, max_chars, overlap)[1:]} | {
-        o + len(c) for o, c in chunk_text(text, max_chars, overlap)[:-1]
-    }
-    for _, start, end, _ in chunked ^ whole:
-        assert any(edge - overlap <= start and end <= edge + overlap for edge in edges)
-
-
-@pytest.mark.asyncio
-async def test_a_value_on_the_cut_is_found_whole():
-    max_chars, overlap = 2_000, 400
-    filler = "woord " * 330  # 1,980 characters: the first cut lands in the e-mail
-    email = "marie.dupont@example.org"
-    text = filler + email + " " + "einde " * 400
-    assert len(filler) < max_chars < len(filler) + len(email)
-
-    detector = await _detector(max_chunk_chars=max_chars, chunk_overlap_chars=overlap)
-    found = _found(await detector.detect(text, "fr"))
-
-    start = len(filler)
-    assert ("EMAIL_ADDRESS", start, start + len(email), email) in found
+    cuts = [end for _, end in nlp_pieces(text, max_chars)[:-1]]
+    for _, start, end, _ in pieced ^ whole:
+        assert any(cut - 500 <= start and end <= cut + 500 for cut in cuts)
 
 
 def _pem_block(lines: int) -> str:
-    """A PEM-armored block shaped like an RSA-4096 key (synthetic body, no
-    real key): 64-character base64 lines with no space anywhere inside."""
+    """PEM armor around a synthetic body (no real key): 64-character base64
+    lines with no space anywhere inside."""
     alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
     body = ["".join(alphabet[(i * 7 + j * 13) % 64] for j in range(64)) for i in range(lines)]
     return "-----BEGIN PRIVATE KEY-----\n" + "\n".join(body) + "\n-----END PRIVATE KEY-----"
 
 
+def _jwt(payload_chars: int) -> str:
+    header = base64.urlsafe_b64encode(b'{"alg":"HS256","typ":"JWT"}').decode().rstrip("=")
+    payload = ("eyJzdWIiOiIxMjM0NTY3ODkwIn0" * (payload_chars // 27 + 1))[:payload_chars]
+    return f"{header}.{payload}.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+
+
+def _escaped_password_line(spaces: int) -> tuple[str, str]:
+    """A long JSON line whose string value holds a CLI call with a quoted
+    --password: a piece starting inside the string would read the escaped
+    quotes the other way round."""
+    value = "S3cr3t-Pa55w0rd-0123456789"
+    command = "echo " + "x " * spaces + f'&& mysql --password="{value}" -h db --user app'
+    return json.dumps({"command": command}), value
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("overlap, whole", [(1_000, False), (4_000, True)])
-async def test_a_key_block_across_a_cut_needs_an_overlap_as_long_as_the_block(overlap, whole):
-    """The cut falls inside the block (it has no space to move back to), so
-    only an overlap at least as long as the block keeps it whole in one chunk,
-    where the structured-secret recognizer sees its armor."""
-    key = _pem_block(50)  # ~3,300 characters, like an RSA-4096 key
-    text = "woord " * 3_130 + key + " einde" * 1_000
-    start = text.index(key)
-    assert start < 20_000 < start + len(key)  # the block straddles the first chunk's end
+@pytest.mark.parametrize(
+    "case",
+    ["rsa8192_key_block", "long_jwt", "escaped_password_in_json"],
+)
+async def test_a_long_or_quoted_value_across_a_cut_is_found_as_on_the_whole_text(case):
+    """Values a chunked analysis could miss across a cut: longer than any fixed
+    overlap, or inside a string a chunk would start in the middle of. The
+    recognizers see the whole text, so the result is the whole-text result."""
+    max_chars = 20_000
+    if case == "rsa8192_key_block":
+        value = _pem_block(100)  # ~6,500 characters, like an RSA-8192 key
+        text = "woord " * 2_800 + value + " einde" * 1_000
+        straddled = value
+    elif case == "long_jwt":
+        value = _jwt(6_000)  # covers the whole window a cut may move back into
+        text = "woord " * 2_410 + "Authorization: Bearer " + value + " einde" * 1_000
+        straddled = value
+    else:
+        straddled, value = _escaped_password_line(10_200)
+        text = "woord " * 500 + "\n" + straddled + "\n" + " einde" * 1_000
+    start = text.index(value)
+    # A cut falls inside the value, or inside the JSON string before it.
+    region = text.index(straddled)
+    cuts = [end for _, end in nlp_pieces(text, max_chars)[:-1]]
+    assert any(region < cut < start + len(value) for cut in cuts)
 
-    detector = await _detector(max_chunk_chars=20_000, chunk_overlap_chars=overlap)
-    secrets = [e for e in await detector.detect(text, "en") if e.entity_type == "SECRET"]
+    whole = _found(await (await _detector()).detect(text, "en"))
+    pieced = _found(await (await _detector(max_chunk_chars=max_chars)).detect(text, "en"))
 
-    found_whole = any(e.start <= start and start + len(key) <= e.end for e in secrets)
-    assert found_whole is whole
+    assert _patterns(pieced) == _patterns(whole)
+    secrets = [(s, e) for t, s, e, _ in pieced if t == "SECRET"]
+    assert any(s <= start and start + len(value) <= e for s, e in secrets)
+
+
+@pytest.mark.asyncio
+async def test_text_longer_than_spacy_max_length_is_analysed():
+    detector = await _detector(max_chunk_chars=20_000)
+    for nlp in detector._analyzer.nlp_engine.nlp.values():
+        nlp.max_length = 50_000  # stands in for spaCy's 1,000,000 default
+    text = _long_text(120_000)
+
+    found = _found(await detector.detect(text, "fr"))
+
+    assert any(t == "j.devries@example.nl" and s > 100_000 for _, s, _, t in found)

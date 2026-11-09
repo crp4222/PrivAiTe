@@ -1181,35 +1181,29 @@ so blocking `EMAIL_ADDRESS` keeps working; list the model's types (`GOV_ID`,
 ## Bounding detection memory
 
 Two things decide how much memory detection takes beyond the loaded models:
-how long a text Presidio's spaCy pipeline parses at once, and how many texts
-run through the detectors at the same time.
+how long a text spaCy parses at once, and how many texts run through the
+detectors at the same time.
 
 ```yaml
 pii:
   max_concurrent_detections: 1      # default: none, no limit
   detectors:
     presidio:
-      max_chunk_chars: 20000        # default: none, the text is analysed whole
-      chunk_overlap_chars: 4000     # default 1000; under half of max_chunk_chars
+      max_chunk_chars: 20000        # default: none, spaCy parses the text whole
 ```
 
 spaCy's memory grows with the length of the text it parses: its own docs put
 the parser and NER at about 1GB per 100,000 characters, and each configured
-language is a full pass. `max_chunk_chars` analyses longer text in overlapping
-chunks, one after another, so no spaCy call holds more than that many
-characters. A value no longer than `chunk_overlap_chars`, with the words
-around it, falls whole inside at least one chunk, and the pattern recognizers
-(e-mail, phone, IBAN, card, IP) give exactly the result they give on the whole
-text. spaCy's named entities depend on the words around them, so within the
-overlap of a cut a name can be found or missed where the whole text would
-differ.
-
-Set the overlap to at least the longest value that has to be found whole. A
-cut prefers a space, and a private key block has none: an RSA-4096 key in PEM
-armor is about 3,300 characters, so with the default overlap the chunk after
-the cut starts inside the block without its `-----BEGIN` line, and the lines
-after the cut are left to the ML detector. An overlap of 4,000 keeps such a
-block whole in one chunk.
+language is a full pass. With `max_chunk_chars`, spaCy parses a longer text in
+consecutive pieces of at most that many characters, cut at a line break or a
+space, and joins them back into one document in which every token, lemma and
+entity keeps its offset in the whole text. Presidio then runs all its
+recognizers once over the whole text with that analysis, so no pattern ever
+sees a cut: a private key block, a long token or a quoted value is found
+exactly as without the setting, whatever its length. Only what spaCy
+contributes can differ, in practice next to a cut: a name it recognizes, or
+the lemmas a context word is matched against. A text longer than spaCy's
+`max_length` (1,000,000 characters) is analysed too.
 
 `max_concurrent_detections` limits how many texts run through the detectors
 at once across requests; each holds its own working memory (an ONNX run over
