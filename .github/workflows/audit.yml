@@ -43,11 +43,14 @@ jobs:
         # requires cryptography<49.0.0, so no floor of ours can reach a fixed
         # release: ignoring them keeps the run meaningful instead of permanently
         # red. Drop these three the moment presidio-anonymizer allows >=49.
-        # The thirteen CVE-2026-1129xx entries are filelock advisories fixed in
-        # 4.2.1 (lock files tampered with by another local user on the same
-        # machine). litellm 1.108.1 requires filelock<4.0, so no floor of ours
-        # can reach 4.2.1; litellm main already allows <5 (1.109.0rc1). Drop
-        # these thirteen the moment litellm 1.109.0 is on PyPI.
+        # CVE-2026-112907, CVE-2026-112908, CVE-2026-112909, CVE-2026-112910,
+        # CVE-2026-112911, CVE-2026-112912, CVE-2026-112913, CVE-2026-112915,
+        # CVE-2026-112935, CVE-2026-112936, CVE-2026-112938, CVE-2026-112939 and
+        # CVE-2026-112940 are filelock advisories fixed in 4.2.1 (lock files
+        # tampered with by another local user on the same machine). litellm
+        # 1.108.1 requires filelock<4.0, so no floor of ours can reach 4.2.1;
+        # litellm main already allows <5 (1.109.0rc1). Drop these thirteen the
+        # moment litellm 1.109.0 is on PyPI.
         run: |
           pip install pip-audit
           pip-audit --skip-editable \
