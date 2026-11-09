@@ -32,7 +32,7 @@ Since 0.8.0, PrivAiTe also ships its own detection model, [`crp4222/privaite-pii
 
 ```bash
 docker run --rm \
-  ghcr.io/crp4222/privaite:0.8.1 \
+  ghcr.io/crp4222/privaite:0.8.2 \
   python -m privaite verify
 ```
 
@@ -54,18 +54,18 @@ It starts a throwaway provider on 127.0.0.1, sends the same agent-shaped request
 docker run -d -p 8400:8400 \
   -e PRIVAITE_API_KEYS=change-me \
   -e OPENAI_API_KEY=sk-... \
-  ghcr.io/crp4222/privaite:0.8.1
+  ghcr.io/crp4222/privaite:0.8.2
 ```
 
 **pip:** the same proxy with the same shipped config, which exposes `gpt-4o-mini` and `gpt-4o`.
 ```bash
-python -m pip install --upgrade "privaite>=0.8.1"
+python -m pip install --upgrade "privaite>=0.8.2"
 python -m spacy download en_core_web_lg && python -m spacy download fr_core_news_md
-curl -fsSLO https://raw.githubusercontent.com/crp4222/PrivAiTe/v0.8.1/config/privaite.openai.yaml
+curl -fsSLO https://raw.githubusercontent.com/crp4222/PrivAiTe/v0.8.2/config/privaite.openai.yaml
 OPENAI_API_KEY=sk-... PRIVAITE_API_KEYS=change-me python -m privaite --config privaite.openai.yaml
 ```
 
-**Connect:** point any OpenAI-compatible client at `http://localhost:8400/v1` with the key `change-me` (from Open WebUI running in Docker: `http://host.docker.internal:8400/v1`). For Ollama, Azure or any other provider, [write your own config](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md) and [mount it in Docker](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#docker-with-a-custom-config). The image is also on Docker Hub as `crp4222/privaite:0.8.1`, and client snippets are in [`examples/`](https://github.com/crp4222/PrivAiTe/tree/main/examples/).
+**Connect:** point any OpenAI-compatible client at `http://localhost:8400/v1` with the key `change-me` (from Open WebUI running in Docker: `http://host.docker.internal:8400/v1`). For Ollama, Azure or any other provider, [write your own config](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md) and [mount it in Docker](https://github.com/crp4222/PrivAiTe/blob/main/docs/configuration.md#docker-with-a-custom-config). The image is also on Docker Hub as `crp4222/privaite:0.8.2`, and client snippets are in [`examples/`](https://github.com/crp4222/PrivAiTe/tree/main/examples/).
 
 ## Claude Code and Codex
 
@@ -103,7 +103,7 @@ Then run `ANTHROPIC_BASE_URL=http://localhost:8400 claude`. Also set `pii.detect
 
 Macro average over the 3 corpora of [privaite-bench](https://github.com/crp4222/privaite-bench) that PrivAiTe's model never trained on, 627 English documents labeled by their authors: TAB (127 court judgments labeled by law students), PIILO (200 student essays labeled by humans) and Privy (300 synthetic API payloads). The benchmark's 5 other corpora are left out of this table because the model trained on their train splits; none of the other systems lists these 3 in its training data. **Direct identifiers** are names, emails, phone numbers, ID, card and account numbers, secrets and addresses; one counts only when every character of it is masked. **Precision** is the share of masked characters that belong to a labeled entity, on TAB and Privy (PIILO labels only part of its personal data). **Latency** is per document on an Apple M1 Pro, on CPU except `ultrafast`. **Left in tool-call arguments** is the share of the 37 direct identifiers in Privy's 40 JSON records that still reach the provider when the record is sent inside a tool-call argument, a small sample: LiteLLM's guardrail does not parse tool-call JSON, and LLM Guard is a library with no notion of a request. \*Its detection is Presidio's: the first three columns are Presidio 2.2.364 alone, in-process, without the guardrail's HTTP hop.
 
-`onnx` and `light` were measured on 0.7.2; 0.8.0 and 0.8.1 leave their detection on these corpora unchanged. All 8 corpora, 25 systems, per-type tables and how to rerun them: [RESULTS.md](https://github.com/crp4222/privaite-bench/blob/main/RESULTS.md). Details on the model, false positives on code included: [detection](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md#privaite-minilm-opt-in).
+`onnx` and `light` were measured on 0.7.2; 0.8.0 to 0.8.2 leave their detection on these corpora unchanged. All 8 corpora, 25 systems, per-type tables and how to rerun them: [RESULTS.md](https://github.com/crp4222/privaite-bench/blob/main/RESULTS.md). Details on the model, false positives on code included: [detection](https://github.com/crp4222/PrivAiTe/blob/main/docs/detection.md#privaite-minilm-opt-in).
 
 ## Integrations
 
@@ -359,7 +359,7 @@ Neither is perfect alone:
 | `minilm` (opt-in) | Presidio + PrivAiTe MiniLM on CPU | **82.9%** | 83.5% | 88 ms | yes, weaker in code (below) |
 | `ultrafast` (opt-in) | Presidio without spaCy + PrivAiTe MiniLM on the Neural Engine (macOS) | 82.7% | **85.4%** | **17 ms** | yes, weaker in code (below) |
 
-\*Share of direct identifiers fully masked, macro average over the 3 public corpora of privaite-bench that PrivAiTe's model never trained on (627 English documents, [benchmark](https://github.com/crp4222/PrivAiTe#benchmark)); precision is the share of masked characters that belong to a labeled entity. Latencies are medians per document on an Apple M1 Pro, on CPU except `ultrafast`, not large agent-request latency guarantees. `onnx`, `light` and `max` were measured on 0.7.2; 0.8.0 and 0.8.1 leave their detection on these corpora unchanged. `max` adds GLiNER: more identifiers masked than `onnx`, at lower precision, more than twice the latency and a torch dependency (`pip install 'privaite[gliner]'`); with it selected but not installed, the proxy fails at startup with an install hint rather than silently degrading.
+\*Share of direct identifiers fully masked, macro average over the 3 public corpora of privaite-bench that PrivAiTe's model never trained on (627 English documents, [benchmark](https://github.com/crp4222/PrivAiTe#benchmark)); precision is the share of masked characters that belong to a labeled entity. Latencies are medians per document on an Apple M1 Pro, on CPU except `ultrafast`, not large agent-request latency guarantees. `onnx`, `light` and `max` were measured on 0.7.2; 0.8.0 to 0.8.2 leave their detection on these corpora unchanged. `max` adds GLiNER: more identifiers masked than `onnx`, at lower precision, more than twice the latency and a torch dependency (`pip install 'privaite[gliner]'`); with it selected but not installed, the proxy fails at startup with an install hint rather than silently degrading.
 
 **`onnx`** combines contextual recognition with structured rules. **`light`** uses Presidio and the same structured-secret rules; it has no contextual Privacy Filter model, and needs no model download beyond the spaCy language models. It misses names that no cue introduces when the text is not in the first configured language: `privaite verify --preset light` reports the English name of its own demo as leaked.
 
