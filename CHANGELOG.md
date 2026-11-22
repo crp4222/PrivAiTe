@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.8.3] - 2026-11-22
 
 ### Fixed
 - Chat requests carrying `tools` failed with a 502 in the 0.7.3 to 0.8.2
