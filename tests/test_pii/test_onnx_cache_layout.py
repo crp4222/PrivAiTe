@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from packaging.version import Version
 
 from privaite.pii import detector_onnx
 from privaite.pii.detector_onnx import colocate_external_data
@@ -59,12 +60,16 @@ def _run(model: Path) -> list:
     return session.run(None, {"x": np.ones((1, 2), dtype=np.float32)})[0].tolist()
 
 
-def test_shared_blob_store_layout_is_refused_by_onnxruntime_as_is(tmp_path):
+def test_shared_blob_store_layout_is_refused_by_onnxruntime_before_1_32(tmp_path):
     # The failure this file exists for, reproduced: without colocation the
-    # default model does not load from a hub >= 1.33 cache.
+    # default model does not load from a hub >= 1.33 cache. onnxruntime 1.32
+    # accepts the layout; the floor is lower, so colocation stays.
     _, model, _ = _hub_cache(tmp_path, shared_store=True)
-    with pytest.raises(Exception, match="External data"):
-        ort.InferenceSession(str(model))
+    if Version(ort.__version__).release >= (1, 32):
+        assert _run(model) == [[2.0, 4.0]]
+    else:
+        with pytest.raises(Exception, match="External data"):
+            ort.InferenceSession(str(model))
 
 
 def test_shared_blob_store_layout_loads_after_colocation(tmp_path):
