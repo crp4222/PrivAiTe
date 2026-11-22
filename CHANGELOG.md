@@ -11,7 +11,8 @@ All notable changes to this project are documented here. The format follows
   images, and in any install that resolved litellm 1.106.0 to 1.106.12 or
   1.108.0 to 1.108.3: those releases import the `mcp` package of their proxy
   extra on that path. `mcp` is now a dependency (#45, reported by
-  @choco-senpai).
+  @choco-senpai). The release workflow now sends a plain and a tools request
+  through the built image before pushing it.
 
 ## [0.8.2] - 2026-11-09
 

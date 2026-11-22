@@ -50,6 +50,22 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
 
+      # The unit tests replace litellm or the router, so a dependency the image
+      # resolves can break the request path with every test green: the 0.7.3 to
+      # 0.8.2 images failed every request with tools (#45). Nothing is pushed
+      # unless the amd64 image serves a plain and a tools request.
+      - name: Build amd64 image for the smoke test
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: privaite:smoke
+          cache-from: type=gha
+
+      - name: Smoke test the image
+        run: docker run --rm -i --entrypoint python privaite:smoke - < scripts/smoke_image.py
+
       - name: Build and push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:

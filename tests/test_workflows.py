@@ -39,3 +39,15 @@ def test_every_ignored_advisory_carries_a_justification() -> None:
     comments = "\n".join(line for line in AUDIT.splitlines() if line.lstrip().startswith("#"))
     for advisory in _ignored_advisories():
         assert advisory in comments, f"{advisory} is ignored with no justification comment"
+
+
+DOCKER_PUBLISH = (REPO_ROOT / ".github" / "workflows" / "docker-publish.yml").read_text()
+
+
+def test_the_image_is_smoke_tested_before_it_is_pushed() -> None:
+    """The 0.7.3 to 0.8.2 images failed every request with tools while every
+    test was green (#45): only a request through the built image sees that."""
+    smoke = DOCKER_PUBLISH.index("privaite:smoke - < scripts/smoke_image.py")
+    push = DOCKER_PUBLISH.index("push: true")
+    assert smoke < push
+    assert "load: true" in DOCKER_PUBLISH[:smoke]
