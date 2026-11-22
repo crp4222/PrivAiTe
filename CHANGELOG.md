@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Chat requests carrying `tools` failed with a 502 in the 0.7.3 to 0.8.2
+  images, and in any install that resolved litellm 1.106.0 to 1.106.12 or
+  1.108.0 to 1.108.3: those releases import the `mcp` package of their proxy
+  extra on that path. `mcp` is now a dependency (#45, reported by
+  @choco-senpai).
+
 ## [0.8.2] - 2026-11-09
 
 ### Added

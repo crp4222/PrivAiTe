@@ -36,6 +36,11 @@ dependencies = [
     # litellm 1.84 (CVE-2026-49468), pydantic 2.4 (CVE-2024-3772),
     # transformers 5.3 (CVE-2026-4372), torch 2.6 (CVE-2025-32434).
     "litellm>=1.84.0",
+    # litellm 1.106.0 to 1.106.12 and 1.108.0 to 1.108.3 import `mcp` (their
+    # proxy extra) on every chat request carrying `tools` (#45). Required
+    # rather than those releases excluded: 1.106 and 1.108 are maintained
+    # lines a LiteLLM proxy running the guardrail may be pinned to.
+    "mcp>=2.3.0,<3",
     "pydantic>=2.4",
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
